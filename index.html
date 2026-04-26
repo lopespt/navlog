@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260426.2348";
+const APP_VERSION = "20260426.2350";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -219,6 +219,22 @@ function tocTodLabel(portions, dist) {
   return labels.length > 0 ? labels.join(" · ") : null;
 }
 
+
+// Per-phase ETE breakdown label, e.g. "↗5 →12 ↘3 min"
+// Returns null for single-phase legs
+function phaseETELabel(portions, totalETE) {
+  if (!portions || portions.length <= 1 || !totalETE) return null;
+  const totalDist = portions.reduce((s, p) => s + p.dist, 0);
+  if (totalDist <= 0) return null;
+  const icon = { SUBIDA: "↗", DESCIDA: "↘", CRUZEIRO: "→" };
+  return portions
+    .map((p) => {
+      const ete = Math.round((p.dist / totalDist) * totalETE);
+      return ete > 0 ? `${icon[p.phase] || "→"}${ete}` : null;
+    })
+    .filter(Boolean)
+    .join(" ") + " min";
+}
 
 // hh:mm parser/formatter
 function parseHHMM(s) {
@@ -2571,9 +2587,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             <span className={`text-[10px] uppercase tracking-widest ${isAlert ? theme.danger : theme.accent}`}>
               {isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
             </span>
-            <span className={`text-[10px] uppercase ${theme.fgFaint} num`}>
+            <span className={`text-[10px] ${theme.fgFaint} num`}>
               {next.alt != null ? `${next.alt} ft` : ""}
-              {next.portions?.length > 1 ? ` · ${next.portions.map(p => p.phase === "SUBIDA" ? "↗" : p.phase === "DESCIDA" ? "↘" : "→").join("")}` : ""}
+              {phaseETELabel(next.portions, next.etePlanned)
+                ? ` · ${phaseETELabel(next.portions, next.etePlanned)}`
+                : ""}
             </span>
           </div>
 
@@ -2614,9 +2632,12 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               <div className={`text-3xl font-black num cockpit-glow ${eteChanged ? theme.accent : theme.fg}`}>
                 {Math.round(liveETE||0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
               </div>
-              {eteChanged && (
-                <div className={`text-[9px] num ${theme.fgFaint}`}>plan {Math.round(next.etePlanned||0)} min</div>
-              )}
+              {eteChanged
+                ? <div className={`text-[9px] num ${theme.fgFaint}`}>plan {Math.round(next.etePlanned||0)} min</div>
+                : phaseETELabel(next.portions, next.etePlanned)
+                  ? <div className={`text-[9px] num ${theme.fgFaint} mt-0.5`}>{phaseETELabel(next.portions, next.etePlanned)}</div>
+                  : null
+              }
             </div>
             <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
@@ -2843,12 +2864,14 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
 
   // Subtítulo: depende do modo de visualização
   const altLabel = cp.alt != null ? `${cp.alt} ft` : null;
+  const phaseLbl = phaseETELabel(cp.portions, cp.etePlanned);
+  const eteLabel = phaseLbl ?? (cp.etePlanned != null ? `${cp.etePlanned.toFixed(0)} min` : null);
   const subtitle = isOrigin ? "Origem"
     : isVirtual ? `${cp.dist} NM da dep. · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
-      : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
+      : `${cp.dist} NM · ${eteLabel ?? "—"}${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
 
   return (
     <Wrapper
