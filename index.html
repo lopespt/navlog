@@ -37,8 +37,8 @@
     const { useState, useEffect, useMemo, useRef } = React;
     const {
       Plane, Settings, Fuel, ChevronRight, ChevronLeft,
-      MapPin, Wind, Clock, Gauge, AlertTriangle, CheckCircle2,
-      Play, RotateCcw, Plus, Trash2, X, Save, FolderOpen, FileText,
+      MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
+      Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Calculator, Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
@@ -1146,7 +1146,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                   className={`${theme.panel} border ${theme.panelBorder} rounded px-2.5 ${theme.fgFaint} hover:text-red-400 active:scale-95 shrink-0`}
                   aria-label="Remover"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash className="w-4 h-4" />
                 </button>
               )}
             </div>
@@ -1518,7 +1518,7 @@ function StepFase({ cp, setCp, theme, onNext }) {
               <div className={`text-lg font-bold ${cp.phase === key ? theme.accent : theme.fg}`}>{label}</div>
               <div className={`text-xs ${theme.fgFaint}`}>{hint}</div>
             </div>
-            {cp.phase === key && <CheckCircle2 className={`w-5 h-5 ${theme.accent} ml-auto`} />}
+            {cp.phase === key && <CircleCheckBig className={`w-5 h-5 ${theme.accent} ml-auto`} />}
           </button>
         ))}
       </div>
@@ -1698,7 +1698,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
               <div className={`text-sm font-bold ${windMode === key ? theme.accent : theme.fg}`}>{label}</div>
               <div className={`text-[10px] ${theme.fgFaint}`}>{sub}</div>
             </div>
-            {windMode === key && <CheckCircle2 className={`w-5 h-5 ${theme.accent} shrink-0`} />}
+            {windMode === key && <CircleCheckBig className={`w-5 h-5 ${theme.accent} shrink-0`} />}
           </button>
         ))}
       </div>
@@ -1796,7 +1796,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
         {onRemove && (
           <button onClick={onRemove}
             className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
-            <Trash2 className="w-4 h-4" /> Remover waypoint
+            <Trash className="w-4 h-4" /> Remover waypoint
           </button>
         )}
       </div>
@@ -1890,12 +1890,12 @@ function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
           )}
           <button onClick={() => markCrossed(nextIdx)}
             className={`w-full ${isAlert ? "bg-red-600" : theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
-            <CheckCircle2 className="w-5 h-5" /> Cruzei {next.name} agora
+            <CircleCheckBig className="w-5 h-5" /> Cruzei {next.name} agora
           </button>
         </div>
       ) : (
         <div className="bg-green-500/15 border-2 border-green-500/50 rounded-lg p-6 text-center">
-          <CheckCircle2 className={`w-10 h-10 mx-auto ${theme.success} mb-2`} />
+          <CircleCheckBig className={`w-10 h-10 mx-auto ${theme.success} mb-2`} />
           <div className={`text-lg font-bold ${theme.success}`}>Voo concluído</div>
           {computed.length > 0 && computed[computed.length-1].ata && (
             <div className={`text-sm ${theme.fgMuted} mt-1 num`}>
@@ -2031,7 +2031,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
         {/* Indicador */}
         <div className="w-6 text-center shrink-0">
           {crossed ? (
-            <CheckCircle2 className={`w-5 h-5 ${theme.success} mx-auto`} />
+            <CircleCheckBig className={`w-5 h-5 ${theme.success} mx-auto`} />
           ) : isNext ? (
             <ChevronRight className={`w-5 h-5 ${theme.accent} mx-auto animate-pulse`} />
           ) : (
@@ -2179,7 +2179,7 @@ function FuelTab({ flight, computed, liveFuel, ac, theme }) {
       }`}>
         <div className="flex items-center gap-3">
           {ok ? (
-            <CheckCircle2 className={`w-8 h-8 ${theme.success}`} />
+            <CircleCheckBig className={`w-8 h-8 ${theme.success}`} />
           ) : (
             <AlertTriangle className={`w-8 h-8 ${theme.danger}`} />
           )}
@@ -2528,7 +2528,7 @@ function RoutesManager({ routes, currentFlight, onLoad, onDelete, onSaveCurrent,
                   className="text-zinc-600 hover:text-red-400 p-1 active:scale-90 transition"
                   aria-label="Excluir rota"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash className="w-4 h-4" />
                 </button>
               </div>
               <button
