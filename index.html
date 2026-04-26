@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2038";
+const APP_VERSION = "20260426.2114";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -513,41 +513,32 @@ function NavlogApp() {
     return idx === -1 ? computed.length : idx;
   }, [computed]);
 
-  // ETA atualizada: usa GS real do último checkpoint cruzado para projetar pernas futuras
-  // Se nenhum waypoint cruzado mas ATD definido, projeta a partir do ATD com GS planejado
+  // ETA em voo: último ATA real (ou ATD) + ETEs planejados das pernas seguintes
+  // Não usa GS real para projeção — só o tempo planejado de cada perna
   const liveETAs = useMemo(() => {
+    const etas = computed.map(() => null);
     let lastCrossed = null;
     for (let i = computed.length - 1; i >= 0; i--) {
       if (computed[i].ata != null) { lastCrossed = i; break; }
     }
-    const etas = computed.map(() => null);
+    let baseMin, baseIdx;
     if (lastCrossed != null) {
-      const lastCp = computed[lastCrossed];
-      etas[lastCrossed] = parseHHMM(lastCp.ata);
-      let refGs = lastCp.gsActual || lastCp.gsPlanned || ac.tasCruise;
-      let cumMin = parseHHMM(lastCp.ata);
-      for (let i = lastCrossed + 1; i < computed.length; i++) {
-        const cp = computed[i];
-        const gsForLeg = cp.gsActual || refGs;
-        const ete = gsForLeg > 0 ? (cp.dist / gsForLeg) * 60 : 0;
-        cumMin += ete;
-        etas[i] = cumMin;
-      }
+      baseMin = parseHHMM(computed[lastCrossed].ata);
+      baseIdx = lastCrossed;
+      etas[lastCrossed] = baseMin;
     } else if (flight.atd) {
-      // Nenhum waypoint cruzado mas já partimos — projeta a partir do ATD
-      const atdMin = parseHHMM(flight.atd);
-      if (atdMin != null) {
-        let cumMin = atdMin;
-        for (let i = 1; i < computed.length; i++) {
-          const cp = computed[i];
-          const ete = (cp.gsPlanned ?? ac.tasCruise) > 0 ? (cp.dist / (cp.gsPlanned ?? ac.tasCruise)) * 60 : 0;
-          cumMin += ete;
-          etas[i] = cumMin;
-        }
-      }
+      baseMin = parseHHMM(flight.atd);
+      baseIdx = 0;
+    } else {
+      return etas;
+    }
+    let cumMin = baseMin;
+    for (let i = baseIdx + 1; i < computed.length; i++) {
+      cumMin += computed[i].etePlanned;
+      etas[i] = cumMin;
     }
     return etas;
-  }, [computed, ac, flight.atd]);
+  }, [computed, flight.atd]);
 
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
