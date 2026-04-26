@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2212";
+const APP_VERSION = "20260426.2244";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -670,7 +670,7 @@ function NavlogApp() {
         prevTime = prev.ata != null ? parseHHMM(prev.ata) : null;
       }
       let gsActual = null;
-      if (prevTime != null) {
+      if (prevTime != null && cps[i].dist > 0) {
         let elapsed = ataMin - prevTime;
         if (elapsed < 0) elapsed += 1440;
         if (elapsed > 0) gsActual = (cps[i].dist / elapsed) * 60;
@@ -1157,7 +1157,11 @@ function NavlogApp() {
         <AtaEditor
           checkpoint={flight.checkpoints[ataEditIdx]}
           eobt={flight.eobt}
-          prevAta={ataEditIdx > 0 ? flight.checkpoints[ataEditIdx - 1].ata : null}
+          prevAta={ataEditIdx > 0
+            ? (flight.checkpoints[ataEditIdx - 1].isOrigin
+                ? (flight.atd ?? flight.eobt)
+                : flight.checkpoints[ataEditIdx - 1].ata)
+            : null}
           etaPlanned={computed[ataEditIdx]?.etaPlanned}
           etaLive={liveETAs[ataEditIdx]}
           theme={theme}
@@ -1671,6 +1675,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
               theme={theme}
               cp={cp} isNew={isNew} isOrigin={isOrigin}
               windMode={windMode}
+              cruiseAlt={flight.cruiseAlt ?? 7000}
               onEdit={(s) => setStep(s)}
               onSave={save}
               onRemove={!isNew && !isOrigin ? remove : null}
@@ -2254,7 +2259,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
 }
 
 // -------- PASSO FINAL: RESUMO --------
-function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRemove }) {
+function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, onSave, onRemove }) {
   const windLabel =
     windMode === "none"   ? "Sem vento (GS = TAS)" :
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
@@ -2269,7 +2274,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
 
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
-    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.useCruiseAlt ? `CRZ (${cp.alt ?? "?"} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—"), step: "alt" },
+    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.useCruiseAlt ? `CRZ (${cruiseAlt} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—"), step: "alt" },
     ...(!isOrigin ? [
       { label: "True Course",   value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
       { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
@@ -2423,7 +2428,15 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <BigStat theme={theme} label="Dist" value={`${next.dist} NM`} />
-              <BigStat theme={theme} label="ETA" value={formatHHMM(planNext)} />
+              {(() => {
+                // ETA virtual = liveETA do waypoint desta perna * fração até o ponto virtual
+                const userCp = computed[next.userIdx];
+                const prevLiveETA = next.userIdx > 1 ? liveETAs[next.userIdx - 1] : (flight.atd ? parseHHMM(flight.atd) : null);
+                const liveVirtETA = prevLiveETA != null && userCp?.etePlanned > 0
+                  ? prevLiveETA + (next.etePlanned / userCp.etePlanned) * (liveETAs[next.userIdx] - prevLiveETA)
+                  : null;
+                return <BigStat theme={theme} label="ETA" value={formatHHMM(liveVirtETA ?? planNext)} />;
+              })()}
             </div>
             <button onClick={() => markVirtual(next.autoKey)}
               className={`w-full bg-cyan-700 text-white font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
@@ -2506,9 +2519,19 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             );
           })()}
 
-          {/* Dist como info secundária */}
-          <div className={`text-[10px] num ${theme.fgFaint} text-center mb-3`}>
-            {next.dist} NM
+          {/* Dist + vento como info secundária */}
+          <div className={`flex items-center justify-between text-[10px] num ${theme.fgFaint} mb-3 px-1`}>
+            <span>{next.dist} NM</span>
+            <span>
+              {next.windMode === "none" ? "W=0" : (
+                <>
+                  <Wind className="w-3 h-3 inline mr-0.5 opacity-70" />
+                  {String(Math.round(next.windDirUsed ?? flight.windDir ?? 0)).padStart(3,"0")}°
+                  {" / "}
+                  {Math.round(next.windVelUsed ?? flight.windVel ?? 0)} kt
+                </>
+              )}
+            </span>
           </div>
 
           {next.warnings?.length > 0 && (
