@@ -32,11 +32,11 @@
       Plane, Settings, Fuel, ChevronRight, ChevronLeft,
       MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
-      Pencil, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
+      Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2248";
+const APP_VERSION = "20260426.2305";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -346,6 +346,8 @@ function NavlogApp() {
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [ataEditOpen, setAtaEditOpen] = useState(false);
   const [ataEditIdx, setAtaEditIdx] = useState(null);
+  const [virtualAtaEditKey, setVirtualAtaEditKey] = useState(null);
+  const [atdEditOpen, setAtdEditOpen] = useState(false);
   const [prefs, setPrefs] = useState(DEFAULT_PREFS);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -567,6 +569,9 @@ function NavlogApp() {
   }
   function unmarkVirtual(key) {
     setFlight((f) => { const m = { ...(f.autoWpATAs || {}) }; delete m[key]; return { ...f, autoWpATAs: m }; });
+  }
+  function setVirtualAta(key, ataStr) {
+    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: ataStr } }));
   }
 
   // Combustível restante real (baseado em ATAs reais consumindo no GPH planejado)
@@ -1058,6 +1063,8 @@ function NavlogApp() {
             resetFlight={resetFlight} ac={ac} theme={theme}
             viewMode={viewMode} setViewMode={setViewMode}
             onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
+            onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
+            onEditAtd={() => setAtdEditOpen(true)}
             onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
             legTimerStart={legTimerStart}
             prefs={prefs}
@@ -1125,6 +1132,46 @@ function NavlogApp() {
           onClear={() => { setAta(ataEditIdx, null); setAtaEditOpen(false); }}
           onClose={() => setAtaEditOpen(false)}
           onUseNow={() => { markCrossed(ataEditIdx); setAtaEditOpen(false); }}
+        />
+      )}
+
+      {/* EDITOR DE ATA DE PONTO VIRTUAL (TOC/TOD/BOD) */}
+      {virtualAtaEditKey != null && (() => {
+        const item = liveRoute.find((x) => x.autoKey === virtualAtaEditKey);
+        if (!item) return null;
+        const currentAta = flight.autoWpATAs?.[virtualAtaEditKey] ?? null;
+        return (
+          <AtaEditor
+            checkpoint={{ name: item.name, ata: currentAta }}
+            eobt={flight.eobt}
+            prevAta={null}
+            etaPlanned={null}
+            etaLive={null}
+            theme={theme}
+            onSave={(ataStr) => { setVirtualAta(virtualAtaEditKey, ataStr); setVirtualAtaEditKey(null); }}
+            onClear={() => { unmarkVirtual(virtualAtaEditKey); setVirtualAtaEditKey(null); }}
+            onClose={() => setVirtualAtaEditKey(null)}
+            onUseNow={() => { markVirtual(virtualAtaEditKey); setVirtualAtaEditKey(null); }}
+          />
+        );
+      })()}
+
+      {/* EDITOR DE ATD */}
+      {atdEditOpen && (
+        <AtaEditor
+          checkpoint={{ name: flight.origin || computed[0]?.name || "Origem", ata: flight.atd }}
+          eobt={flight.eobt}
+          prevAta={null}
+          etaPlanned={flight.eobt ? parseHHMM(flight.eobt) : null}
+          etaLive={null}
+          theme={theme}
+          fieldLabel="ATD"
+          confirmLabel="Confirmar ATD"
+          clearLabel="Cancelar ATD"
+          onSave={(ataStr) => { setFlight((f) => ({ ...f, atd: ataStr })); setAtdEditOpen(false); }}
+          onClear={() => { setFlight((f) => ({ ...f, atd: null })); setAtdEditOpen(false); }}
+          onClose={() => setAtdEditOpen(false)}
+          onUseNow={() => { setFlight((f) => ({ ...f, atd: formatHHMM(nowHHMM()) })); setAtdEditOpen(false); }}
         />
       )}
 
@@ -2278,7 +2325,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, o
 // --------- TAB EM VOO ---------
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
-    resetFlight, onEditAta, onEditNotes, theme, viewMode, setViewMode,
+    resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
     legTimerStart, liveFuel, ac, prefs }) {
 
   const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
@@ -2345,16 +2392,20 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           </button>
         </div>
       ) : flight.atd ? (
-        <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between`}>
+        <button onClick={onEditAtd}
+          className={`w-full ${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between active:scale-[0.98] transition-all`}>
           <div className="flex items-center gap-2">
             <Plane className={`w-4 h-4 ${theme.success}`} />
-            <div>
+            <div className="text-left">
               <div className={`text-[9px] uppercase ${theme.fgFaint}`}>ATD</div>
               <div className={`font-bold num ${theme.success}`}>{flight.atd}</div>
             </div>
           </div>
-          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>{flight.origin || computed[0]?.name}</div>
-        </div>
+          <div className="flex items-center gap-2">
+            <div className={`text-[9px] uppercase ${theme.fgFaint}`}>{flight.origin || computed[0]?.name}</div>
+            <Edit2 className={`w-3.5 h-3.5 ${theme.fgFaint}`} />
+          </div>
+        </button>
       ) : null}
 
       {allWarnings.length > 0 && (
@@ -2574,7 +2625,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             hasLiveBase={hasLiveBase}
             departDelay={departDelay}
             viewMode={viewMode}
-            onEditAta={() => !item.isVirtual && onEditAta(item.userIdx)}
+            onEditAta={() => item.isVirtual ? onEditVirtualAta(item.autoKey) : onEditAta(item.userIdx)}
             onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
             onUnmarkVirtual={item.isVirtual ? () => unmarkVirtual(item.autoKey) : null}
           />
@@ -2646,7 +2697,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
     deltaMin < -1 ? theme.success : theme.fgFaint;
 
   const isAuto = cp.isAuto;
-  const isClickable = !isOrigin && !isAuto && !isVirtual;
+  const isClickable = !isOrigin && !isAuto;
   const Wrapper = isClickable ? "button" : "div";
   const wrapperProps = isClickable ? { onClick: onEditAta } : {};
 
@@ -3401,7 +3452,7 @@ function RoutesManager({ routes, currentFlight, onLoad, onDelete, onSaveCurrent,
 }
 
 // --------- EDITOR DE ATA ---------
-function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onClear, onClose, onUseNow, theme }) {
+function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onClear, onClose, onUseNow, theme, fieldLabel, confirmLabel, clearLabel }) {
   // Representação interna: string de dígitos puros, máx 4 (HHMM)
   const initialDigits = checkpoint.ata
     ? checkpoint.ata.replace(":", "")
@@ -3473,7 +3524,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
         {/* Header */}
         <div className="flex items-center justify-between">
           <h3 className={`text-sm uppercase tracking-widest ${theme.accent} font-bold`}>
-            {checkpoint.ata ? "Editar passagem" : "Marcar passagem"}
+            {checkpoint.ata ? (fieldLabel ? `Editar ${fieldLabel}` : "Editar passagem") : (fieldLabel ? `Registrar ${fieldLabel}` : "Marcar passagem")}
           </h3>
           <button onClick={onClose}><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
         </div>
@@ -3516,7 +3567,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
         {/* Display do horário digitado */}
         <div className="text-center">
-          <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ATA (UTC)</div>
+          <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{fieldLabel ?? "ATA"} (UTC)</div>
           <div className={`text-5xl font-black num tracking-widest cockpit-glow transition-colors ${
             digits.length === 0 ? theme.fgFaint :
             valid ? theme.accent : theme.fgMuted
@@ -3561,19 +3612,25 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
               ))}
             </div>
           ))}
-          {/* Última linha: ⌫, 0, Agora */}
-          <div className="grid grid-cols-3 gap-2">
+          {/* Última linha: CLR, 0, ⌫, Agora */}
+          <div className="grid grid-cols-4 gap-2">
             <button
-              onClick={backspace}
-              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 flex items-center justify-center ${theme.fgMuted} active:scale-95 transition-transform`}
+              onClick={() => setDigits("")}
+              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-sm font-bold ${theme.fgMuted} active:scale-95 transition-transform`}
             >
-              <ChevronLeft className="w-6 h-6" />
+              CLR
             </button>
             <button
               onClick={() => pressDigit(0)}
               className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-2xl font-bold num ${theme.fg} active:scale-95 transition-transform`}
             >
               0
+            </button>
+            <button
+              onClick={backspace}
+              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 flex items-center justify-center ${theme.fgMuted} active:scale-95 transition-transform`}
+            >
+              <ChevronLeft className="w-6 h-6" />
             </button>
             <button
               onClick={useNow}
@@ -3592,7 +3649,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
             onClick={() => onSave(digitsToHHMM(digits))}
             className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-lg active:scale-95 transition-transform`}
           >
-            Confirmar passagem
+            {confirmLabel ?? "Confirmar passagem"}
           </button>
 
           {/* Limpar — só aparece quando o ponto já foi marcado */}
@@ -3601,7 +3658,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
               onClick={onClear}
               className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
             >
-              <X className="w-4 h-4" /> Limpar passagem registrada
+              <X className="w-4 h-4" /> {clearLabel ?? "Limpar passagem registrada"}
             </button>
           )}
 
