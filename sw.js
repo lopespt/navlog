@@ -1,14 +1,15 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v4";
+const CACHE_NAME = "navlog-v5";
 const STATIC = [
-  "/",
-  "/index.html",
-  "/navlog.js",          // bundle compilado
-  "/manifest.json",
-  // CDN assets (React, Tailwind, Lucide)
-  "https://esm.sh/react@18/",
-  "https://esm.sh/react-dom@18/",
+  "/navlog/",
+  "/navlog/index.html",
+  "/navlog/manifest.json",
+  // CDN assets
   "https://cdn.tailwindcss.com",
+  "https://unpkg.com/react@18/umd/react.production.min.js",
+  "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
+  "https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js",
+  "https://unpkg.com/@babel/standalone@7.23.9/babel.min.js",
 ];
 
 // Instala: pré-cacheia assets estáticos
