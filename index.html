@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2244";
+const APP_VERSION = "20260426.2248";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -215,50 +215,6 @@ function tocTodLabel(portions, dist) {
   return labels.length > 0 ? labels.join(" · ") : null;
 }
 
-// Auto-insert TOC/TOD waypoints based on altitude-per-fix.
-// Strips old isAuto entries, then reinserts for each leg that has a phase transition.
-function rebuildRoute(cps, ac, isaDevC) {
-  const userCps = cps.filter((cp) => !cp.isAuto);
-  if (userCps.length < 2) return userCps;
-
-  const result = [userCps[0]];
-
-  for (let i = 1; i < userCps.length; i++) {
-    const prev = userCps[i - 1];
-    const curr = userCps[i];
-    const prevAlt = prev.alt ?? 0;
-    const thisAlt = curr.alt ?? 7000;
-    const dist = curr.dist ?? 0;
-
-    const { portions } = computeLegPhases(prevAlt, thisAlt, dist, curr, ac, isaDevC || 0);
-
-    if (portions.length <= 1 || dist < 2) {
-      result.push(curr);
-      continue;
-    }
-
-    let inserted = false;
-    let accDist = 0;
-    for (let p = 0; p < portions.length - 1; p++) {
-      accDist += portions[p].dist;
-      const fromPhase = portions[p].phase;
-      const splitDist = Math.round(accDist * 10) / 10;
-      const afterDist  = Math.round((dist - accDist) * 10) / 10;
-      const MIN = 1.0; // NM — don't insert if too close to an endpoint
-
-      if (splitDist >= MIN && afterDist >= MIN) {
-        const label    = fromPhase === "SUBIDA" ? "TOC" : "TOD";
-        const transAlt = fromPhase === "SUBIDA" ? thisAlt : prevAlt;
-        result.push({ name: label, isAuto: true, alt: transAlt, tc: curr.tc, dist: splitDist, ata: null, gsActual: null, notes: "" });
-        result.push({ ...curr, dist: afterDist });
-        inserted = true;
-        break;
-      }
-    }
-    if (!inserted) result.push(curr);
-  }
-  return result;
-}
 
 // hh:mm parser/formatter
 function parseHHMM(s) {
