@@ -36,9 +36,12 @@
       Calculator, Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
+const APP_VERSION = "20260426.1628";
+
 // ================= AERONAVES =================
-const FLEET = {
+const FLEET_DEFAULTS = {
   baron58: {
+    id: "baron58", isBuiltIn: true,
     name: "Beechcraft Baron 58",
     short: "BE58",
     tasCruise: 190, vy: 105, vDescent: 150,
@@ -48,6 +51,7 @@ const FLEET = {
     engine: "Pistão IO-550",
   },
   dakota: {
+    id: "dakota", isBuiltIn: true,
     name: "Piper PA-28-236 Dakota",
     short: "PA28",
     tasCruise: 142, vy: 76, vDescent: 120,
@@ -57,6 +61,7 @@ const FLEET = {
     engine: "Pistão O-540",
   },
   dukePiston: {
+    id: "dukePiston", isBuiltIn: true,
     name: "Beechcraft Duke B60 (pistão)",
     short: "DUKE-P",
     tasCruise: 220, vy: 110, vDescent: 160,
@@ -66,6 +71,7 @@ const FLEET = {
     engine: "Pistão TIO-541",
   },
   dukeTurbine: {
+    id: "dukeTurbine", isBuiltIn: true,
     name: "Beechcraft Duke Turbine",
     short: "DUKE-T",
     tasCruise: 260, vy: 120, vDescent: 180,
@@ -75,6 +81,7 @@ const FLEET = {
     engine: "Turboélice",
   },
   comanche: {
+    id: "comanche", isBuiltIn: true,
     name: "Piper PA-24-250 Comanche",
     short: "PA24",
     tasCruise: 160, vy: 85, vDescent: 130,
@@ -272,8 +279,22 @@ function NavlogApp() {
   const [notesIdx, setNotesIdx] = useState(null);
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const wakeLockRef = useRef(null);
+  const [fleet, setFleet] = useState(() => {
+    try {
+      const saved = localStorage.getItem('navlog_fleet');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Object.keys(parsed).length > 0) return parsed;
+      }
+    } catch {}
+    return Object.fromEntries(
+      Object.entries(FLEET_DEFAULTS).map(([k, v]) => [k, { ...v, id: k, isBuiltIn: true }])
+    );
+  });
+  const [fleetOpen, setFleetOpen] = useState(false);
+  const [fleetEditAircraft, setFleetEditAircraft] = useState(null); // null = closed, {} = new, {id,...} = edit
 
-  const ac = FLEET[flight.aircraftKey];
+  const ac = fleet[flight.aircraftKey] || Object.values(fleet)[0];
 
   // Theme tokens
   const theme = useMemo(() => themes[prefs.theme] || themes.night, [prefs.theme]);
@@ -302,12 +323,12 @@ function NavlogApp() {
           windVelUsed: flight.windVel,
         };
       }
-      const baseTas = tasForPhase(cp.phase, ac);
+      const baseTas = cp.tasOverride != null ? cp.tasOverride : tasForPhase(cp.phase, ac);
       // Altitude da perna: usa altitude de cruzeiro para cruzeiro, estimativa para subida/descida
       const legAlt = cp.phase === "CRUZEIRO" ? (flight.cruiseAlt || 7000)
         : cp.phase === "SUBIDA" ? (flight.cruiseAlt || 7000) / 2
         : (flight.cruiseAlt || 7000) / 4;
-      const tas = correctTAS(baseTas, legAlt, flight.isaDevC || 0);
+      const tas = cp.tasOverride != null ? cp.tasOverride : correctTAS(baseTas, legAlt, flight.isaDevC || 0);
       // Vento: windMode = null/undefined → padrão da rota
       //                   "none"          → sem vento (vel=0)
       //                   "custom"        → windDir/windVel do checkpoint
@@ -326,7 +347,7 @@ function NavlogApp() {
       etaPlanned += r.ete;
       cumDist += cp.dist;
       cumTime += r.ete;
-      const gph = gphForPhase(cp.phase, ac);
+      const gph = cp.gphOverride != null ? cp.gphOverride : gphForPhase(cp.phase, ac);
       const fuelLeg = (r.ete / 60) * gph;
       fuelRem -= fuelLeg;
       return {
@@ -576,7 +597,7 @@ function NavlogApp() {
       const origElev = Number(f.freqs?.origin?.elev) || 0;
       const destElev = Number(f.freqs?.destination?.elev) || 0;
       const cruiseAlt = Number(f.cruiseAlt) || 7000;
-      const ac = FLEET[f.aircraftKey];
+      const ac = FLEET_DEFAULTS[f.aircraftKey];
 
       const climbDist = Math.round(
         ((ac.vy + 10) / 60) * ((cruiseAlt - origElev) / ac.rocClimb) * 10
@@ -758,6 +779,10 @@ function NavlogApp() {
     store.set("routes", JSON.stringify(savedRoutes));
   }, [savedRoutes]);
 
+  useEffect(() => {
+    try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch {}
+  }, [fleet]);
+
   const glowStyle = theme.glow ? "text-shadow: 0 0 8px currentColor;" : "";
 
   // Estilos compartilhados — paleta cockpit dark
@@ -837,6 +862,8 @@ function NavlogApp() {
             onMoveDown={moveDown}
             onCalcTOCTOD={calcTOCTOD}
             onImportFPL={() => setImportOpen(true)}
+            fleet={fleet}
+            onManageFleet={() => setFleetOpen(true)}
           />
         )}
         {tab === "flight" && (
@@ -937,6 +964,38 @@ function NavlogApp() {
           onClose={() => setImportOpen(false)}
         />
       )}
+
+      {/* GERENCIAR FROTA */}
+      {fleetOpen && (
+        <FleetManager
+          fleet={fleet}
+          onEdit={(ac) => setFleetEditAircraft(ac)}
+          onDelete={(id) => {
+            if (!confirm('Remover aeronave?')) return;
+            setFleet((f) => { const n = { ...f }; delete n[id]; return n; });
+            if (flight.aircraftKey === id) setFlight((f) => ({ ...f, aircraftKey: Object.keys(fleet).find(k => k !== id) || 'baron58' }));
+          }}
+          onReset={(id) => {
+            if (!confirm('Restaurar valores padrão?')) return;
+            setFleet((f) => ({ ...f, [id]: { ...FLEET_DEFAULTS[id], id, isBuiltIn: true } }));
+          }}
+          onAdd={() => setFleetEditAircraft({ isBuiltIn: false, name: '', short: '', engine: '', tasCruise: 0, vy: 0, vDescent: 0, rocClimb: 0, rodDescent: 0, gphClimb: 0, gphCruise: 0, gphDescent: 0, fuelUsable: 0, mtow: 0, bew: 0 })}
+          onClose={() => setFleetOpen(false)}
+          theme={theme}
+        />
+      )}
+      {fleetEditAircraft !== null && (
+        <AircraftEditor
+          aircraft={fleetEditAircraft}
+          theme={theme}
+          onSave={(updated) => {
+            const id = updated.id || ('custom_' + Date.now().toString(36));
+            setFleet((f) => ({ ...f, [id]: { ...updated, id } }));
+            setFleetEditAircraft(null);
+          }}
+          onClose={() => setFleetEditAircraft(null)}
+        />
+      )}
     </div>
   );
 }
@@ -966,7 +1025,7 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onCalcTOCTOD, onImportFPL }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onCalcTOCTOD, onImportFPL, fleet, onManageFleet }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -983,10 +1042,16 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           onChange={(e) => set("aircraftKey", e.target.value)}
           className={fieldClass}
         >
-          {Object.entries(FLEET).map(([k, v]) => (
+          {Object.entries(fleet).map(([k, v]) => (
             <option key={k} value={k}>{v.name}</option>
           ))}
         </select>
+        <button
+          onClick={onManageFleet}
+          className={`mt-2 w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-2 text-xs uppercase tracking-widest flex items-center justify-center gap-2`}
+        >
+          <Settings className="w-3.5 h-3.5" /> Gerenciar frota
+        </button>
         <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
           <Stat theme={theme} label="TAS" value={`${ac.tasCruise} kt`} />
           <Stat theme={theme} label="GPH" value={`${ac.gphCruise}`} />
@@ -1313,27 +1378,27 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
         className={`mt-auto w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl flex flex-col`}
         style={{ maxHeight: "92vh" }}
       >
-        {/* Barra de progresso */}
-        <div className={`flex items-center gap-2 px-4 pt-3 pb-2 border-b ${theme.panelBorder}`}>
-          <button onClick={isFirst ? onClose : prev}
-            className={`p-1 ${theme.fgMuted} active:scale-90`}>
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div className="flex-1 flex gap-1">
-            {steps.filter(s => s !== "resumo").map((s) => (
-              <div key={s} className={`flex-1 h-1 rounded-full transition-all ${
-                steps.indexOf(s) <= stepIdx
-                  ? theme.accentBg
-                  : "bg-zinc-700"
-              }`} />
+        {/* Tab bar */}
+        <div className={`border-b ${theme.panelBorder} shrink-0`}>
+          <div className="flex items-center px-3 pt-2 gap-1 overflow-x-auto">
+            {steps.map((s) => (
+              <button key={s} onClick={() => setStep(s)}
+                className={`shrink-0 px-3 py-2 text-[10px] uppercase tracking-widest font-bold rounded-t-lg transition-colors ${
+                  step === s
+                    ? `${theme.accent} border-b-2 border-current`
+                    : `${theme.fgFaint} hover:${theme.fgMuted}`
+                }`}>
+                {s === "tc" ? "TC/MH" : s}
+              </button>
             ))}
+            <div className="flex-1" />
+            <button onClick={onClose} className={`p-1.5 ${theme.fgFaint} shrink-0`}>
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} w-20 text-right`}>
-            {isNew ? "Novo" : "Editar"} · {step}
+          <div className={`px-3 pb-1.5 text-[9px] ${theme.fgFaint} uppercase tracking-widest`}>
+            {isNew ? "Novo waypoint" : `Editar · ${cp.name || "—"}`}
           </div>
-          <button onClick={onClose} className={`p-1 ${theme.fgFaint}`}>
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Conteúdo do passo */}
@@ -1345,16 +1410,11 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
             <StepFase cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
           {step === "tc" && (
-            <StepNumerico
+            <StepTC
               theme={theme}
-              label="True Course (TC)"
-              unit="°"
-              hint="0 – 359"
-              maxDigits={3}
-              allowDecimal={false}
-              validate={(v) => v >= 0 && v <= 359}
-              initial={cp.tc != null ? String(Math.round(cp.tc)) : ""}
-              onConfirm={(v) => { setCp({ ...cp, tc: Number(v) }); next(); }}
+              variation={flight.variation ?? 0}
+              initial={cp.tc}
+              onConfirm={(v) => { setCp({ ...cp, tc: v }); next(); }}
             />
           )}
           {step === "dist" && (
@@ -1391,15 +1451,6 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
           )}
         </div>
 
-        {/* Rodapé: skip / próximo */}
-        {!isLast && step !== "nome" && step !== "fase" && step !== "tc" && step !== "dist" && (
-          <div className={`px-4 py-3 border-t ${theme.panelBorder} flex gap-2`}>
-            <button onClick={skipToResumo}
-              className={`flex-1 border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold`}>
-              Pular para resumo
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1482,16 +1533,135 @@ function StepNome({ cp, setCp, theme, onNext }) {
 }
 
 // -------- PASSO 2: FASE --------
+function StepTC({ theme, variation, initial, onConfirm }) {
+  const [mode, setMode] = useState("tc"); // "tc" | "mh"
+  const [digits, setDigits] = useState(initial != null ? String(Math.round(initial)) : "");
+
+  const mod360 = (x) => ((x % 360) + 360) % 360;
+
+  // Convert displayed value to TC based on mode
+  const numVal = parseFloat(digits);
+  const isValidInput = digits !== "" && !isNaN(numVal) && numVal >= 0 && numVal <= 359;
+  const tc = isValidInput
+    ? (mode === "mh" ? mod360(numVal + (variation ?? 0)) : numVal)
+    : null;
+
+  function press(ch) {
+    setDigits((prev) => prev.length < 3 ? prev + ch : prev);
+  }
+  function del() { setDigits((prev) => prev.slice(0, -1)); }
+  function clear() { setDigits(""); }
+
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const numKeys = [["1","2","3"],["4","5","6"],["7","8","9"]];
+
+  return (
+    <div className="space-y-3">
+      {/* Mode toggle */}
+      <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder}`}>
+        {[["tc","TC (True Course)"],["mh","MH (Mag. Heading)"]].map(([m, label]) => (
+          <button key={m} onClick={() => { setMode(m); setDigits(""); }}
+            className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
+              mode === m ? `${theme.accentBg} text-black` : `${theme.fgFaint}`
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div>
+        <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+          {mode === "tc" ? "True Course" : "Magnetic Heading"}
+        </div>
+        {mode === "mh" && variation != null && (
+          <div className={`text-[9px] ${theme.fgFaint} mt-0.5`}>
+            Var. {variation >= 0 ? "+" : ""}{variation}° → TC = MH {variation >= 0 ? "+" : ""}{variation}
+          </div>
+        )}
+      </div>
+
+      {/* Display */}
+      <div className={`${theme.panel} border-2 ${isValidInput ? theme.accentBorder : theme.panelBorder} rounded-xl px-4 py-4 flex flex-col items-center gap-1`}>
+        <div className="flex items-baseline gap-2 justify-center">
+          <span className={`text-5xl font-black num cockpit-glow tracking-wide ${
+            digits ? (isValidInput ? theme.accent : "text-red-400") : theme.fgFaint
+          }`}>{digits || "—"}</span>
+          <span className={`text-xl ${theme.fgFaint}`}>°</span>
+        </div>
+        {mode === "mh" && tc != null && (
+          <div className={`text-xs ${theme.fgFaint}`}>
+            → TC: <span className={`font-bold ${theme.accent}`}>{String(Math.round(tc)).padStart(3,"0")}°</span>
+          </div>
+        )}
+      </div>
+
+      {/* Keypad */}
+      <div className="space-y-2">
+        {numKeys.map((row, ri) => (
+          <div key={ri} className="grid grid-cols-3 gap-2">
+            {row.map((n) => (
+              <button key={n} onClick={() => press(n)}
+                className={`${keyBase} py-4 ${theme.fg}`}>{n}</button>
+            ))}
+          </div>
+        ))}
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={clear} className={`${keyBase} py-4 text-sm ${theme.fgMuted}`}>CLR</button>
+          <button onClick={() => press("0")} className={`${keyBase} py-4 ${theme.fg}`}>0</button>
+          <button onClick={del} className={`${keyBase} py-4 ${theme.fgMuted}`}>
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      <button
+        disabled={!isValidInput}
+        onClick={() => onConfirm(tc)}
+        className={`w-full ${theme.accentBg} disabled:opacity-40 text-black rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}
+      >
+        Confirmar →
+      </button>
+    </div>
+  );
+}
+
 function StepFase({ cp, setCp, theme, onNext }) {
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [tasOvr, setTasOvr] = useState(cp.tasOverride != null ? String(cp.tasOverride) : "");
+  const [gphOvr, setGphOvr] = useState(cp.gphOverride != null ? String(cp.gphOverride) : "");
+
   function choose(phase) {
-    setCp({ ...cp, phase });
+    const upd = { ...cp, phase };
+    if (!overrideOpen) {
+      delete upd.tasOverride;
+      delete upd.gphOverride;
+    } else {
+      if (tasOvr !== "") upd.tasOverride = Number(tasOvr);
+      else delete upd.tasOverride;
+      if (gphOvr !== "") upd.gphOverride = Number(gphOvr);
+      else delete upd.gphOverride;
+    }
+    setCp(upd);
     onNext();
   }
+
+  function applyOverride() {
+    setCp((prev) => ({
+      ...prev,
+      tasOverride: tasOvr !== "" ? Number(tasOvr) : undefined,
+      gphOverride: gphOvr !== "" ? Number(gphOvr) : undefined,
+    }));
+  }
+
   const phases = [
     { key: "SUBIDA",   label: "Subida",   icon: "↗", hint: "Saída do aeroporto até o TOC" },
     { key: "CRUZEIRO", label: "Cruzeiro", icon: "→", hint: "Voo nivelado em altitude" },
     { key: "DESCIDA",  label: "Descida",  icon: "↘", hint: "Do TOD até o destino" },
   ];
+
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none`;
+  const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
+
   return (
     <div className="space-y-3">
       <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
@@ -1514,6 +1684,59 @@ function StepFase({ cp, setCp, theme, onNext }) {
             {cp.phase === key && <CircleCheckBig className={`w-5 h-5 ${theme.accent} ml-auto`} />}
           </button>
         ))}
+      </div>
+
+      {/* Override de performance por perna */}
+      <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
+        <button
+          onClick={() => setOverrideOpen((o) => !o)}
+          className={`w-full flex items-center justify-between px-4 py-3 ${theme.fgMuted}`}
+        >
+          <span className={`text-xs uppercase tracking-widest font-bold ${(cp.tasOverride != null || cp.gphOverride != null) ? theme.accent : theme.fgMuted}`}>
+            ⚡ Override de performance
+            {(cp.tasOverride != null || cp.gphOverride != null) && " (ativo)"}
+          </span>
+          {overrideOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+        {overrideOpen && (
+          <div className={`px-4 pb-4 space-y-3 border-t ${theme.panelBorder}`}>
+            <div className={`text-[10px] ${theme.fgFaint} pt-2`}>
+              Sobrescreve TAS e GPH do avião apenas nesta perna. Deixe em branco para usar os valores da aeronave.
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>TAS (kt)</label>
+                <input
+                  className={fieldClass}
+                  type="number"
+                  placeholder={`padrão`}
+                  value={tasOvr}
+                  onChange={(e) => { setTasOvr(e.target.value); }}
+                  onBlur={applyOverride}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>GPH (gal/h)</label>
+                <input
+                  className={fieldClass}
+                  type="number"
+                  placeholder={`padrão`}
+                  value={gphOvr}
+                  onChange={(e) => { setGphOvr(e.target.value); }}
+                  onBlur={applyOverride}
+                />
+              </div>
+            </div>
+            {(tasOvr !== "" || gphOvr !== "") && (
+              <button
+                onClick={() => { setTasOvr(""); setGphOvr(""); setCp((p) => { const n = {...p}; delete n.tasOverride; delete n.gphOverride; return n; }); }}
+                className={`text-xs ${theme.fgFaint} underline`}
+              >
+                Limpar overrides
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1759,6 +1982,11 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
       { label: "True Course",  value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
       { label: "Distância",    value: cp.dist != null ? `${cp.dist} NM` : "—",                   step: "dist" },
       { label: "Vento",        value: windLabel,                                                  step: "vento"},
+      ...(cp.tasOverride != null || cp.gphOverride != null ? [{
+        label: "Override",
+        value: [cp.tasOverride != null ? `TAS ${cp.tasOverride}kt` : null, cp.gphOverride != null ? `GPH ${cp.gphOverride}` : null].filter(Boolean).join(" · "),
+        step: "fase",
+      }] : []),
     ] : []),
   ];
 
@@ -2404,6 +2632,9 @@ function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
           className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold`}>
           Fechar
         </button>
+        <div className={`text-center text-[10px] ${theme.fgFaint} pt-2 border-t ${theme.panelBorder}`}>
+          Navlog v{APP_VERSION}
+        </div>
       </div>
     </div>
   );
@@ -2483,6 +2714,194 @@ function FPLImporter({ theme, onImport, onClose }) {
   );
 }
 
+// --------- GERENCIADOR DE FROTA ---------
+function FleetManager({ fleet, onEdit, onDelete, onReset, onAdd, onClose, theme }) {
+  return (
+    <div className="fixed inset-0 z-30 bg-black/80 flex flex-col" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className={`mt-auto w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl flex flex-col`}
+        style={{ maxHeight: '90vh' }}>
+        <div className={`flex items-center justify-between px-4 pt-4 pb-2 border-b ${theme.panelBorder}`}>
+          <h3 className={`text-sm uppercase tracking-widest font-bold ${theme.accent}`}>Frota</h3>
+          <button onClick={onClose}><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+          {Object.entries(fleet).map(([id, ac]) => (
+            <div key={id} className={`${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-3`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className={`font-bold text-sm ${theme.fg}`}>{ac.name}</div>
+                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>{ac.short} · {ac.engine}</div>
+                  <div className={`text-[10px] ${theme.fgMuted} mt-0.5`}>
+                    TAS {ac.tasCruise}kt · Vy {ac.vy}kt · {ac.fuelUsable}gal
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0 ml-2">
+                  {ac.isBuiltIn && FLEET_DEFAULTS[id] && (
+                    <button onClick={() => onReset(id)}
+                      className={`text-[10px] uppercase ${theme.fgFaint} border ${theme.panelBorder} rounded-lg px-2 py-1`}>
+                      Reset
+                    </button>
+                  )}
+                  {!ac.isBuiltIn && (
+                    <button onClick={() => onDelete(id)}
+                      className="text-[10px] uppercase text-red-400 border border-red-900 rounded-lg px-2 py-1">
+                      Remover
+                    </button>
+                  )}
+                  <button onClick={() => onEdit(ac)}
+                    className={`text-[10px] uppercase ${theme.accent} border ${theme.accentBorder} rounded-lg px-2 py-1`}>
+                    Editar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className={`px-4 py-3 border-t ${theme.panelBorder}`}>
+          <button onClick={onAdd}
+            className={`w-full ${theme.accentBg} text-black font-bold rounded-xl py-3 text-sm uppercase tracking-widest flex items-center justify-center gap-2`}>
+            <Plus className="w-4 h-4" /> Nova aeronave
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --------- EDITOR DE AERONAVE ---------
+function AircraftEditor({ aircraft, theme, onSave, onClose }) {
+  const [ac, setAc] = useState({ ...aircraft });
+  const setN = (k, v) => setAc((a) => ({ ...a, [k]: v === '' ? 0 : Number(v) }));
+  const setS = (k, v) => setAc((a) => ({ ...a, [k]: v }));
+
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:outline-none`;
+  const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
+
+  const isValid = ac.name?.trim() && ac.short?.trim() && ac.tasCruise > 0 && ac.gphCruise > 0 && ac.fuelUsable > 0;
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/85 flex flex-col" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className={`mt-auto w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl flex flex-col`}
+        style={{ maxHeight: '92vh' }}>
+        <div className={`flex items-center justify-between px-4 pt-4 pb-2 border-b ${theme.panelBorder} shrink-0`}>
+          <h3 className={`text-sm uppercase tracking-widest font-bold ${theme.accent}`}>
+            {aircraft.name ? `Editar · ${aircraft.short}` : 'Nova aeronave'}
+          </h3>
+          <button onClick={onClose}><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-4 py-3 space-y-4">
+          {/* Identity */}
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-2`}>Identificação</div>
+            <div className="space-y-2">
+              <div>
+                <label className={labelClass}>Nome completo</label>
+                <input className={fieldClass} value={ac.name} onChange={(e) => setS('name', e.target.value)} placeholder="Ex: Beechcraft Baron 58" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelClass}>Código curto</label>
+                  <input className={fieldClass} value={ac.short} onChange={(e) => setS('short', e.target.value.toUpperCase())} placeholder="BE58" maxLength={8} />
+                </div>
+                <div>
+                  <label className={labelClass}>Motor</label>
+                  <input className={fieldClass} value={ac.engine} onChange={(e) => setS('engine', e.target.value)} placeholder="Pistão IO-550" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Speeds */}
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-2`}>Velocidades (kt)</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className={labelClass}>TAS Cruzeiro</label>
+                <input className={fieldClass} type="number" value={ac.tasCruise || ''} onChange={(e) => setN('tasCruise', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Vy Subida</label>
+                <input className={fieldClass} type="number" value={ac.vy || ''} onChange={(e) => setN('vy', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>V Descida</label>
+                <input className={fieldClass} type="number" value={ac.vDescent || ''} onChange={(e) => setN('vDescent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Rates */}
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-2`}>Razões (ft/min)</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelClass}>ROC Subida</label>
+                <input className={fieldClass} type="number" value={ac.rocClimb || ''} onChange={(e) => setN('rocClimb', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>ROD Descida</label>
+                <input className={fieldClass} type="number" value={ac.rodDescent || ''} onChange={(e) => setN('rodDescent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Fuel burn */}
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-2`}>Consumo (GPH)</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className={labelClass}>Subida</label>
+                <input className={fieldClass} type="number" value={ac.gphClimb || ''} onChange={(e) => setN('gphClimb', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Cruzeiro</label>
+                <input className={fieldClass} type="number" value={ac.gphCruise || ''} onChange={(e) => setN('gphCruise', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>Descida</label>
+                <input className={fieldClass} type="number" value={ac.gphDescent || ''} onChange={(e) => setN('gphDescent', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Capacity */}
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-2`}>Capacidade</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className={labelClass}>Fuel (gal)</label>
+                <input className={fieldClass} type="number" value={ac.fuelUsable || ''} onChange={(e) => setN('fuelUsable', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>MTOW (lbs)</label>
+                <input className={fieldClass} type="number" value={ac.mtow || ''} onChange={(e) => setN('mtow', e.target.value)} />
+              </div>
+              <div>
+                <label className={labelClass}>BEW (lbs)</label>
+                <input className={fieldClass} type="number" value={ac.bew || ''} onChange={(e) => setN('bew', e.target.value)} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={`px-4 py-3 border-t ${theme.panelBorder} shrink-0`}>
+          <button
+            onClick={() => isValid && onSave(ac)}
+            className={`w-full rounded-xl py-3 text-sm font-bold uppercase tracking-widest ${
+              isValid ? `${theme.accentBg} text-black` : 'bg-zinc-800 text-zinc-500'
+            }`}
+          >
+            Salvar aeronave
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --------- GERENCIADOR DE ROTAS ---------
 function RoutesManager({ routes, currentFlight, onLoad, onDelete, onSaveCurrent, onClose }) {
   const sorted = [...routes].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
@@ -2513,7 +2932,7 @@ function RoutesManager({ routes, currentFlight, onLoad, onDelete, onSaveCurrent,
                     {route.flight.alternate ? ` · ALTN ${route.flight.alternate}` : ""}
                   </div>
                   <div className="text-[10px] text-zinc-600 num mt-0.5">
-                    {route.flight.checkpoints.length} pontos · {FLEET[route.flight.aircraftKey]?.short || "—"}
+                    {route.flight.checkpoints.length} pontos · {FLEET_DEFAULTS[route.flight.aircraftKey]?.short || "—"}
                   </div>
                 </div>
                 <button
