@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260426.2341";
+const APP_VERSION = "20260426.2348";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -966,6 +966,32 @@ function NavlogApp() {
           // Strip legacy isAuto waypoints from previous deploy
           if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
           setFlight({ ...DEFAULT_FLIGHT, ...loaded });
+
+          // Reconstruct legTimerStart from the most recent ATA (or ATD if no waypoint crossed)
+          const nowMin = nowHHMM();
+          const allAtas = [];
+          for (const cp of (loaded.checkpoints || [])) {
+            if (cp.ata) { const m = parseHHMM(cp.ata); if (m != null) allAtas.push(m); }
+          }
+          for (const v of Object.values(loaded.autoWpATAs || {})) {
+            if (v) { const m = parseHHMM(v); if (m != null) allAtas.push(m); }
+          }
+          let latestAtaMin = null;
+          if (allAtas.length > 0) {
+            let bestDiff = Infinity;
+            for (const ataMin of allAtas) {
+              let diff = nowMin - ataMin;
+              if (diff < 0) diff += 1440;
+              if (diff < bestDiff) { bestDiff = diff; latestAtaMin = ataMin; }
+            }
+          } else if (loaded.atd) {
+            latestAtaMin = parseHHMM(loaded.atd);
+          }
+          if (latestAtaMin != null) {
+            let elapsedMs = (nowMin - latestAtaMin) * 60 * 1000;
+            if (elapsedMs < 0) elapsedMs += 24 * 60 * 60 * 1000;
+            setLegTimerStart(Date.now() - elapsedMs);
+          }
         }
         const rr = await store.get("routes");
         if (rr) setSavedRoutes(JSON.parse(rr));
