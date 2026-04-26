@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260426.2350";
+const APP_VERSION = "20260426.2355";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -982,32 +982,6 @@ function NavlogApp() {
           // Strip legacy isAuto waypoints from previous deploy
           if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
           setFlight({ ...DEFAULT_FLIGHT, ...loaded });
-
-          // Reconstruct legTimerStart from the most recent ATA (or ATD if no waypoint crossed)
-          const nowMin = nowHHMM();
-          const allAtas = [];
-          for (const cp of (loaded.checkpoints || [])) {
-            if (cp.ata) { const m = parseHHMM(cp.ata); if (m != null) allAtas.push(m); }
-          }
-          for (const v of Object.values(loaded.autoWpATAs || {})) {
-            if (v) { const m = parseHHMM(v); if (m != null) allAtas.push(m); }
-          }
-          let latestAtaMin = null;
-          if (allAtas.length > 0) {
-            let bestDiff = Infinity;
-            for (const ataMin of allAtas) {
-              let diff = nowMin - ataMin;
-              if (diff < 0) diff += 1440;
-              if (diff < bestDiff) { bestDiff = diff; latestAtaMin = ataMin; }
-            }
-          } else if (loaded.atd) {
-            latestAtaMin = parseHHMM(loaded.atd);
-          }
-          if (latestAtaMin != null) {
-            let elapsedMs = (nowMin - latestAtaMin) * 60 * 1000;
-            if (elapsedMs < 0) elapsedMs += 24 * 60 * 60 * 1000;
-            setLegTimerStart(Date.now() - elapsedMs);
-          }
         }
         const rr = await store.get("routes");
         if (rr) setSavedRoutes(JSON.parse(rr));
@@ -1126,7 +1100,6 @@ function NavlogApp() {
             onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
             onEditAtd={() => setAtdEditOpen(true)}
             onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
-            legTimerStart={legTimerStart}
             prefs={prefs}
           />
         )}
@@ -2426,7 +2399,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, o
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
-    legTimerStart, liveFuel, ac, prefs }) {
+    liveFuel, ac, prefs }) {
 
   const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
   const liveNext = (next && !next.isVirtual) ? liveETAs[next.userIdx] : null;
@@ -2448,13 +2421,42 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     prevIsAlert.current = isAlert;
   }, [isAlert]);
 
-  // Cronômetro desde último ponto cruzado
-  const [elapsed, setElapsed] = useState(0);
+  // Tick a cada segundo para forçar re-render
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    if (!legTimerStart) { setElapsed(0); return; }
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - legTimerStart) / 1000)), 1000);
+    const id = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(id);
-  }, [legTimerStart]);
+  }, []);
+
+  // Cronômetro baseado no ATA mais recente (ou ATD) — sobrevive a edições de ATA e recarregamentos
+  const lastAtaMs = useMemo(() => {
+    const now = new Date();
+    const startOfDayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const allAtaMins = [];
+    for (const cp of flight.checkpoints) {
+      if (cp.ata) { const m = parseHHMM(cp.ata); if (m != null) allAtaMins.push(m); }
+    }
+    for (const v of Object.values(flight.autoWpATAs || {})) {
+      if (v) { const m = parseHHMM(v); if (m != null) allAtaMins.push(m); }
+    }
+    let latestMin = null;
+    if (allAtaMins.length > 0) {
+      const nowMin = nowHHMM();
+      let bestDiff = Infinity;
+      for (const m of allAtaMins) {
+        let diff = nowMin - m; if (diff < 0) diff += 1440;
+        if (diff < bestDiff) { bestDiff = diff; latestMin = m; }
+      }
+    } else if (flight.atd) {
+      latestMin = parseHHMM(flight.atd);
+    }
+    if (latestMin == null) return null;
+    let ms = startOfDayMs + latestMin * 60 * 1000;
+    if (ms > Date.now()) ms -= 24 * 60 * 60 * 1000; // ontem se ATA ainda não chegou
+    return ms;
+  }, [flight.checkpoints, flight.autoWpATAs, flight.atd, tick]);
+
+  const elapsed = lastAtaMs != null ? Math.max(0, Math.floor((Date.now() - lastAtaMs) / 1000)) : 0;
   const elapsedMin = Math.floor(elapsed / 60);
   const elapsedSec = elapsed % 60;
 
@@ -2465,7 +2467,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     if (diff > 720) diff -= 1440;
     if (diff < -720) diff += 1440;
     return diff >= 0;
-  }, [elapsed, next, liveNext]); // elapsed muda a cada segundo → reavalia
+  }, [tick, next, liveNext]); // tick muda a cada segundo → reavalia
 
   // Alarme háptico único quando a ETA do próximo ponto é atingida
   const etaAlarmFiredFor = useRef(null);
@@ -2658,7 +2660,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
           {/* Barra de progresso da perna atual */}
-          {legTimerStart && liveETE > 0 && (
+          {lastAtaMs != null && liveETE > 0 && (
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1">
                 <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
@@ -2737,11 +2739,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 
       <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between`}>
         <div className="flex items-center gap-2">
-          <Clock className={`w-4 h-4 ${legTimerStart ? theme.accent : theme.fgFaint}`} />
+          <Clock className={`w-4 h-4 ${lastAtaMs != null ? theme.accent : theme.fgFaint}`} />
           <div>
             <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Desde último ponto</div>
-            <div className={`text-lg font-bold num cockpit-glow ${legTimerStart ? theme.accent : theme.fgFaint}`}>
-              {legTimerStart
+            <div className={`text-lg font-bold num cockpit-glow ${lastAtaMs != null ? theme.accent : theme.fgFaint}`}>
+              {lastAtaMs != null
                 ? `${String(elapsedMin).padStart(2,"0")}:${String(elapsedSec).padStart(2,"0")}`
                 : "--:--"}
             </div>
