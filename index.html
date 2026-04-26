@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2207";
+const APP_VERSION = "20260426.2212";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -514,28 +514,34 @@ function NavlogApp() {
     return idx === -1 ? computed.length : idx;
   }, [computed]);
 
-  // ETA em voo: último ATA real (ou ATD) + ETEs planejados das pernas seguintes
-  // Não usa GS real para projeção — só o tempo planejado de cada perna
+  // ETA em voo: último ATA (ou ATD) + ETE das pernas seguintes
+  // Se temos GS real do último ponto cruzado, recomputa ETE futuro com esse GS
   const liveETAs = useMemo(() => {
     const etas = computed.map(() => null);
     let lastCrossed = null;
     for (let i = computed.length - 1; i >= 0; i--) {
       if (computed[i].ata != null) { lastCrossed = i; break; }
     }
-    let baseMin, baseIdx;
+    let baseMin, baseIdx, refGs;
     if (lastCrossed != null) {
       baseMin = parseHHMM(computed[lastCrossed].ata);
       baseIdx = lastCrossed;
       etas[lastCrossed] = baseMin;
+      refGs = computed[lastCrossed].gsActual ?? null;
     } else if (flight.atd) {
       baseMin = parseHHMM(flight.atd);
       baseIdx = 0;
+      refGs = null;
     } else {
       return etas;
     }
     let cumMin = baseMin;
     for (let i = baseIdx + 1; i < computed.length; i++) {
-      cumMin += computed[i].etePlanned;
+      const cp = computed[i];
+      const ete = refGs && refGs > 0 && cp.dist > 0
+        ? (cp.dist / refGs) * 60
+        : cp.etePlanned;
+      cumMin += ete;
       etas[i] = cumMin;
     }
     return etas;
@@ -655,11 +661,11 @@ function NavlogApp() {
         cps[i] = { ...cps[i], ata: null, gsActual: null };
         return { ...f, checkpoints: cps };
       }
-      // Acha tempo do checkpoint anterior (ATA real ou EOBT se for o primeiro depois da origem)
+      // Acha tempo do checkpoint anterior (ATA real, ou ATD/EOBT se for o primeiro depois da origem)
       const prev = cps[i - 1];
       let prevTime;
       if (prev.isOrigin) {
-        prevTime = parseHHMM(f.eobt);
+        prevTime = parseHHMM(f.atd ?? f.eobt);
       } else {
         prevTime = prev.ata != null ? parseHHMM(prev.ata) : null;
       }
@@ -2445,27 +2451,39 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             <div className={`text-4xl font-black cockpit-glow tracking-tight leading-none ${isAlert ? theme.danger : theme.accent}`}>
               {next.name}
             </div>
-            {/* Curso + proa magnéticos */}
+            {/* Proa magnética (com correção de vento) */}
             <div className="text-right">
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MC</div>
+              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
               <div className={`text-4xl font-black num cockpit-glow leading-none ${isAlert ? theme.danger : theme.accent}`}>
-                {Math.round(next.mc ?? next.mh).toString().padStart(3,"0")}°
+                {Math.round(next.mh).toString().padStart(3,"0")}°
               </div>
-              {next.wca != null && Math.abs(next.wca) >= 1 && (
+              {next.mc != null && next.wca != null && Math.abs(next.wca) >= 1 && (
                 <div className={`text-[10px] num ${theme.fgFaint} mt-0.5`}>
-                  MH {Math.round(next.mh).toString().padStart(3,"0")}°
+                  MC {Math.round(next.mc).toString().padStart(3,"0")}°
                 </div>
               )}
             </div>
           </div>
 
           {/* ETE e ETA em destaque */}
+          {(() => {
+            // ETE corrigido pelo GS real do último ponto cruzado, se disponível
+            const lastCrossedCp = computed.slice(0, next.userIdx).reverse().find(c => c.ata != null);
+            const refGs = lastCrossedCp?.gsActual ?? null;
+            const liveETE = refGs && refGs > 0 && next.dist > 0
+              ? (next.dist / refGs) * 60
+              : next.etePlanned;
+            const eteChanged = refGs && Math.abs(liveETE - (next.etePlanned||0)) >= 1;
+            return (
           <div className="grid grid-cols-2 gap-2 mb-3">
-            <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-3 py-3`}>
+            <div className={`bg-black/30 border ${eteChanged ? theme.accentBorder : theme.panelBorder} rounded-lg px-3 py-3`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
-              <div className={`text-3xl font-black num cockpit-glow ${theme.fg}`}>
-                {(next.etePlanned||0).toFixed(0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
+              <div className={`text-3xl font-black num cockpit-glow ${eteChanged ? theme.accent : theme.fg}`}>
+                {Math.round(liveETE||0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
               </div>
+              {eteChanged && (
+                <div className={`text-[9px] num ${theme.fgFaint}`}>plan {Math.round(next.etePlanned||0)} min</div>
+              )}
             </div>
             <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
@@ -2485,6 +2503,8 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               )}
             </div>
           </div>
+            );
+          })()}
 
           {/* Dist como info secundária */}
           <div className={`text-[10px] num ${theme.fgFaint} text-center mb-3`}>
