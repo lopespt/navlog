@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1857";
+const APP_VERSION = "20260426.1904";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -285,6 +285,7 @@ const DEFAULT_FLIGHT = {
   windVel: 15,
   isaDevC: 0,        // desvio ISA em °C (+ = mais quente que padrão)
   fuelInitial: null, // null = usar usable da aeronave
+  atd: null,         // Actual Time of Departure (HH:MM) — marcado ao partir
   autoWpATAs: {},    // { "toc_0": "14:23", "tod_0": "16:45" } — ATAs de TOC/TOD virtuais
   freqs: { origin: { ...DEFAULT_FREQ }, destination: { ...DEFAULT_FREQ }, alternate: { ...DEFAULT_FREQ } },
   checkpoints: [
@@ -500,29 +501,40 @@ function NavlogApp() {
   }, [computed]);
 
   // ETA atualizada: usa GS real do último checkpoint cruzado para projetar pernas futuras
+  // Se nenhum waypoint cruzado mas ATD definido, projeta a partir do ATD com GS planejado
   const liveETAs = useMemo(() => {
-    // Encontrar último checkpoint cruzado
     let lastCrossed = null;
     for (let i = computed.length - 1; i >= 0; i--) {
       if (computed[i].ata != null) { lastCrossed = i; break; }
     }
     const etas = computed.map(() => null);
-    if (lastCrossed == null) return etas;
-    const lastCp = computed[lastCrossed];
-    etas[lastCrossed] = parseHHMM(lastCp.ata);
-    // GS de referência: o último observado, ou planejado se ainda sem
-    let refGs = lastCp.gsActual || lastCp.gsPlanned || ac.tasCruise;
-    let cumMin = parseHHMM(lastCp.ata);
-    for (let i = lastCrossed + 1; i < computed.length; i++) {
-      const cp = computed[i];
-      // Se o checkpoint já tem GS real (em pernas anteriores), usa
-      const gsForLeg = cp.gsActual || refGs;
-      const ete = gsForLeg > 0 ? (cp.dist / gsForLeg) * 60 : 0;
-      cumMin += ete;
-      etas[i] = cumMin;
+    if (lastCrossed != null) {
+      const lastCp = computed[lastCrossed];
+      etas[lastCrossed] = parseHHMM(lastCp.ata);
+      let refGs = lastCp.gsActual || lastCp.gsPlanned || ac.tasCruise;
+      let cumMin = parseHHMM(lastCp.ata);
+      for (let i = lastCrossed + 1; i < computed.length; i++) {
+        const cp = computed[i];
+        const gsForLeg = cp.gsActual || refGs;
+        const ete = gsForLeg > 0 ? (cp.dist / gsForLeg) * 60 : 0;
+        cumMin += ete;
+        etas[i] = cumMin;
+      }
+    } else if (flight.atd) {
+      // Nenhum waypoint cruzado mas já partimos — projeta a partir do ATD
+      const atdMin = parseHHMM(flight.atd);
+      if (atdMin != null) {
+        let cumMin = atdMin;
+        for (let i = 1; i < computed.length; i++) {
+          const cp = computed[i];
+          const ete = (cp.gsPlanned ?? ac.tasCruise) > 0 ? (cp.dist / (cp.gsPlanned ?? ac.tasCruise)) * 60 : 0;
+          cumMin += ete;
+          etas[i] = cumMin;
+        }
+      }
     }
     return etas;
-  }, [computed, ac]);
+  }, [computed, ac, flight.atd]);
 
   // Rota expandida com TOC/TOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
@@ -684,10 +696,19 @@ function NavlogApp() {
   function resetFlight() {
     setFlight((f) => ({
       ...f,
+      atd: null,
+      autoWpATAs: {},
       checkpoints: f.checkpoints.map((cp) =>
         cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null }
       ),
     }));
+    setLegTimerStart(null);
+  }
+
+  function depart() {
+    const now = nowHHMM();
+    setFlight((f) => ({ ...f, atd: formatHHMM(now) }));
+    setLegTimerStart(Date.now());
   }
 
   // ----- Rotas salvas -----
@@ -1063,6 +1084,7 @@ function NavlogApp() {
             liveRoute={liveRoute} nextLiveIdx={nextLiveIdx}
             markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
             nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
+            depart={depart}
             resetFlight={resetFlight} ac={ac} theme={theme}
             viewMode={viewMode} setViewMode={setViewMode}
             onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
@@ -2229,7 +2251,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
 
 // --------- TAB EM VOO ---------
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
-    nextIdx, markCrossed,
+    nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditNotes, theme, viewMode, setViewMode,
     legTimerStart, liveFuel, ac, prefs }) {
 
@@ -2266,8 +2288,42 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     [computed]
   );
 
+  const anyWpCrossed = computed.some(cp => !cp.isOrigin && cp.ata != null);
+
   return (
     <div className="px-3 py-3 space-y-3">
+
+      {/* ---- Card de Partida ---- */}
+      {!flight.atd && !anyWpCrossed ? (
+        <div className={`border-2 rounded-lg p-4 ${theme.accentBorder} bg-amber-500/5`}>
+          <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-1`}>Pronto para partir</div>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>EOBT</div>
+              <div className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{flight.eobt}</div>
+            </div>
+            <div className="text-right">
+              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Origem</div>
+              <div className={`text-2xl font-black ${theme.fg}`}>{flight.origin || computed[0]?.name || "—"}</div>
+            </div>
+          </div>
+          <button onClick={depart}
+            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
+            <Plane className="w-5 h-5" /> Partir agora
+          </button>
+        </div>
+      ) : flight.atd ? (
+        <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between`}>
+          <div className="flex items-center gap-2">
+            <Plane className={`w-4 h-4 ${theme.success}`} />
+            <div>
+              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>ATD</div>
+              <div className={`font-bold num ${theme.success}`}>{flight.atd}</div>
+            </div>
+          </div>
+          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>{flight.origin || computed[0]?.name}</div>
+        </div>
+      ) : null}
 
       {allWarnings.length > 0 && (
         <div className="bg-amber-900/30 border border-amber-600/50 rounded-lg px-3 py-2 space-y-0.5">
