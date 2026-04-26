@@ -33,10 +33,10 @@
       MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
-      Calculator, Download, Upload, ChevronDown, ChevronUp
+      Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1628";
+const APP_VERSION = "20260426.1717";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -128,15 +128,62 @@ function validateLeg(cp, result) {
   return w;
 }
 
-function tasForPhase(phase, ac) {
-  if (phase === "SUBIDA") return ac.vy + 10;
-  if (phase === "DESCIDA") return ac.vDescent;
-  return ac.tasCruise;
-}
-function gphForPhase(phase, ac) {
-  if (phase === "SUBIDA") return ac.gphClimb;
-  if (phase === "DESCIDA") return ac.gphDescent;
-  return ac.gphCruise;
+// Compute phase portions for a leg given altitude at prev fix → this fix
+// Returns { portions: [{phase, dist, tas, gph}], avgTas }
+function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
+  if (!dist || dist <= 0) {
+    const tasCr = cp.tasCruiseOvr ?? correctTAS(ac.tasCruise, thisAlt ?? 0, isaDevC);
+    const gphCr = cp.gphCruiseOvr ?? ac.gphCruise;
+    return { portions: [{ phase: "CRUZEIRO", dist: 0, tas: tasCr, gph: gphCr }], avgTas: tasCr };
+  }
+
+  const pAlt = prevAlt ?? 0;
+  const tAlt = thisAlt ?? pAlt;
+  const altDiff = tAlt - pAlt;
+  const cruiseAlt = Math.max(pAlt, tAlt);
+
+  const tasClimb   = cp.tasClimbOvr   ?? correctTAS(ac.vy,        (pAlt + cruiseAlt) / 2, isaDevC);
+  const tasCruise  = cp.tasCruiseOvr  ?? correctTAS(ac.tasCruise,  cruiseAlt,             isaDevC);
+  const tasDescent = cp.tasDescentOvr ?? correctTAS(ac.vDescent,  (pAlt + tAlt) / 2,     isaDevC);
+
+  const gphC = cp.gphClimbOvr   ?? ac.gphClimb;
+  const gphR = cp.gphCruiseOvr  ?? ac.gphCruise;
+  const gphD = cp.gphDescentOvr ?? ac.gphDescent;
+
+  let portions;
+  const roc = ac.rocClimb   || 500;
+  const rod = ac.rodDescent || 500;
+
+  if (altDiff > 50) { // climbing
+    const climbDist = (altDiff / roc) * (tasClimb / 60);
+    if (climbDist >= dist - 0.1) {
+      portions = [{ phase: "SUBIDA", dist, tas: tasClimb, gph: gphC }];
+    } else {
+      portions = [
+        { phase: "SUBIDA",   dist: climbDist,       tas: tasClimb,  gph: gphC },
+        { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
+      ];
+    }
+  } else if (altDiff < -50) { // descending
+    const descDist = (-altDiff / rod) * (tasDescent / 60);
+    if (descDist >= dist - 0.1) {
+      portions = [{ phase: "DESCIDA", dist, tas: tasDescent, gph: gphD }];
+    } else {
+      portions = [
+        { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
+        { phase: "DESCIDA",  dist: descDist,        tas: tasDescent, gph: gphD },
+      ];
+    }
+  } else { // level
+    portions = [{ phase: "CRUZEIRO", dist, tas: tasCruise, gph: gphR }];
+  }
+
+  const totalD = portions.reduce((s, p) => s + p.dist, 0);
+  const avgTas = totalD > 0
+    ? portions.reduce((s, p) => s + p.tas * p.dist, 0) / totalD
+    : tasCruise;
+
+  return { portions, avgTas };
 }
 
 
@@ -180,12 +227,10 @@ const DEFAULT_FLIGHT = {
   freqs: { origin: { ...DEFAULT_FREQ }, destination: { ...DEFAULT_FREQ }, alternate: { ...DEFAULT_FREQ } },
   checkpoints: [
     // origem: dist=0, ATA é o EOBT
-    { name: "SBSP", phase: null, tc: null, dist: 0, ata: null, gsActual: null, isOrigin: true },
-    { name: "TOC",   phase: "SUBIDA",   tc: 45, dist: 18, ata: null, gsActual: null },
-    { name: "EMBOI", phase: "CRUZEIRO", tc: 50, dist: 60, ata: null, gsActual: null },
-    { name: "RIPLI", phase: "CRUZEIRO", tc: 55, dist: 90, ata: null, gsActual: null },
-    { name: "TOD",   phase: "CRUZEIRO", tc: 60, dist: 30, ata: null, gsActual: null },
-    { name: "SBRJ",  phase: "DESCIDA",  tc: 65, dist: 25, ata: null, gsActual: null },
+    { name: "SBSP",  alt: 2600, tc: null, dist: 0,  ata: null, gsActual: null, isOrigin: true },
+    { name: "EMBOI", alt: 7000, tc: 45,   dist: 78, ata: null, gsActual: null },
+    { name: "RIPLI", alt: 7000, tc: 55,   dist: 90, ata: null, gsActual: null },
+    { name: "SBRJ",  alt: 10,   tc: 62,   dist: 55, ata: null, gsActual: null },
   ],
 };
 
@@ -317,18 +362,23 @@ function NavlogApp() {
           etaPlanned: eobtMin,
           fuelLeg: 0,
           fuelRemPlanned: fuelStart,
+          gphEffective: ac.gphCruise,
+          portions: [],
           cumDist: 0,
           cumTime: 0,
           windDirUsed: flight.windDir,
           windVelUsed: flight.windVel,
         };
       }
-      const baseTas = cp.tasOverride != null ? cp.tasOverride : tasForPhase(cp.phase, ac);
-      // Altitude da perna: usa altitude de cruzeiro para cruzeiro, estimativa para subida/descida
-      const legAlt = cp.phase === "CRUZEIRO" ? (flight.cruiseAlt || 7000)
-        : cp.phase === "SUBIDA" ? (flight.cruiseAlt || 7000) / 2
-        : (flight.cruiseAlt || 7000) / 4;
-      const tas = cp.tasOverride != null ? cp.tasOverride : correctTAS(baseTas, legAlt, flight.isaDevC || 0);
+
+      // Altitude-per-fix: get prev fix altitude
+      const prevCp = flight.checkpoints[i - 1];
+      const prevAlt = prevCp?.alt ?? 0;
+      const thisAlt = cp.alt ?? flight.cruiseAlt ?? 7000;
+
+      // Compute phase split and weighted-average TAS
+      const { portions, avgTas } = computeLegPhases(prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0);
+
       // Vento: windMode = null/undefined → padrão da rota
       //                   "none"          → sem vento (vel=0)
       //                   "custom"        → windDir/windVel do checkpoint
@@ -339,26 +389,37 @@ function NavlogApp() {
         wDir = Number(cp.windDir);
         wVel = Number(cp.windVel ?? 0);
       } else {
-        // padrão da rota (windMode === null/undefined/"route" ou legado sem windMode)
         wDir = flight.windDir;
         wVel = flight.windVel;
       }
-      const r = calcLeg(cp.tc, cp.dist, tas, wDir, wVel, flight.variation, 0);
+
+      const r = calcLeg(cp.tc, cp.dist, avgTas, wDir, wVel, flight.variation, 0);
       etaPlanned += r.ete;
-      cumDist += cp.dist;
+      cumDist += cp.dist || 0;
       cumTime += r.ete;
-      const gph = cp.gphOverride != null ? cp.gphOverride : gphForPhase(cp.phase, ac);
-      const fuelLeg = (r.ete / 60) * gph;
+
+      // Fuel: distribute ETE proportionally to portions by distance
+      const totalDist = cp.dist || 0;
+      let fuelLeg = 0;
+      if (r.ete > 0 && totalDist > 0 && portions.length > 0) {
+        portions.forEach((p) => {
+          const portionETE = (p.dist / totalDist) * r.ete; // minutes
+          fuelLeg += (portionETE / 60) * p.gph;
+        });
+      }
+      const gphEffective = r.ete > 0 ? fuelLeg / (r.ete / 60) : ac.gphCruise;
       fuelRem -= fuelLeg;
+
       return {
         ...cp,
-        tas, ...r,
+        tas: avgTas, ...r,
         gsPlanned: r.gs,
         etePlanned: r.ete,
         etaPlanned,
         fuelLeg,
         fuelRemPlanned: fuelRem,
-        gph,
+        gphEffective,
+        portions,
         cumDist,
         cumTime,
         windDirUsed: wDir,
@@ -416,7 +477,7 @@ function NavlogApp() {
           const ataMin = parseHHMM(cp.ata);
           let elapsed = ataMin - prevAta;
           if (elapsed < 0) elapsed += 1440;
-          fuel -= (elapsed / 60) * (cp.gph || gphForPhase(cp.phase, ac));
+          fuel -= (elapsed / 60) * (cp.gphEffective || ac.gphCruise);
           return fuel;
         }
       }
@@ -512,7 +573,7 @@ function NavlogApp() {
       callsign: flight.callsign,
       aircraftKey: flight.aircraftKey,
       checkpoints: [
-        { name: "ORIG", phase: null, tc: null, dist: 0, ata: null, gsActual: null, isOrigin: true },
+        { name: "ORIG", alt: 0, tc: null, dist: 0, ata: null, gsActual: null, isOrigin: true },
       ],
       origin: "",
       destination: "",
@@ -730,7 +791,7 @@ function NavlogApp() {
           newCps.push(existing);
         } else {
           newCps.push({
-            name, phase: "CRUZEIRO", tc: 0, dist: 0,
+            name, alt: f.cruiseAlt ?? 7000, tc: 0, dist: 0,
             ata: null, gsActual: null,
           });
         }
@@ -860,7 +921,6 @@ function NavlogApp() {
             }}
             onMoveUp={moveUp}
             onMoveDown={moveDown}
-            onCalcTOCTOD={calcTOCTOD}
             onImportFPL={() => setImportOpen(true)}
             fleet={fleet}
             onManageFleet={() => setFleetOpen(true)}
@@ -1025,7 +1085,7 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onCalcTOCTOD, onImportFPL, fleet, onManageFleet }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onImportFPL, fleet, onManageFleet }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -1190,7 +1250,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                     <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate`}>
                       {cp.isOrigin
                         ? "Origem"
-                        : `${cp.phase} · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
+                        : `${cp.alt ?? "?"} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
                     </div>
                   </div>
                 </div>
@@ -1214,11 +1274,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
             <Plus className="w-4 h-4" /> Adicionar waypoint
           </button>
         </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button onClick={onCalcTOCTOD}
-            className={`${theme.panel} border ${theme.inputBorder} ${theme.fgMuted} rounded px-2 py-2 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 transition-colors`}>
-            <Calculator className="w-3 h-3" /> TOC/TOD
-          </button>
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <button onClick={onImportFPL}
             className={`${theme.panel} border ${theme.inputBorder} ${theme.fgMuted} rounded px-2 py-2 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 transition-colors`}>
             <Upload className="w-3 h-3" /> FPL
@@ -1303,14 +1359,14 @@ function Stat({ label, value, theme }) {
 // =========================================================================
 // WAYPOINT EDITOR — wizard em passos com teclados especializados
 // =========================================================================
-// Passos: NOME → FASE → TC → DIST → VENTO (opcional) → RESUMO
-const WP_STEPS = ["nome", "fase", "tc", "dist", "vento", "resumo"];
+// Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
+const WP_STEPS = ["nome", "alt", "tc", "dist", "vento", "override", "resumo"];
 
 function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
   const isNew = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   const initial = isNew
-    ? { name: "", phase: "CRUZEIRO", tc: null, dist: null, windDir: null, windVel: null }
+    ? { name: "", alt: flight.cruiseAlt ?? 7000, tc: null, dist: null, windDir: null, windVel: null }
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
@@ -1388,7 +1444,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
                     ? `${theme.accent} border-b-2 border-current`
                     : `${theme.fgFaint} hover:${theme.fgMuted}`
                 }`}>
-                {s === "tc" ? "TC/MH" : s}
+                {s === "tc" ? "TC/MH" : s === "override" ? "PERF" : s}
               </button>
             ))}
             <div className="flex-1" />
@@ -1406,8 +1462,18 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
           {step === "nome" && (
             <StepNome cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
-          {step === "fase" && (
-            <StepFase cp={cp} setCp={setCp} theme={theme} onNext={next} />
+          {step === "alt" && (
+            <StepNumerico
+              theme={theme}
+              label="Altitude Alvo"
+              unit="ft"
+              hint="Altitude de chegada neste fix — ex: 7000"
+              maxDigits={5}
+              allowDecimal={false}
+              validate={(v) => v >= 0 && v <= 60000}
+              initial={cp.alt != null ? String(cp.alt) : ""}
+              onConfirm={(v) => { setCp({ ...cp, alt: Number(v) }); next(); }}
+            />
           )}
           {step === "tc" && (
             <StepTC
@@ -1438,6 +1504,9 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
               defaultDir={flight.windDir} defaultVel={flight.windVel}
               onNext={next}
             />
+          )}
+          {step === "override" && (
+            <StepOverride cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
           {step === "resumo" && (
             <StepResumo
@@ -1532,7 +1601,7 @@ function StepNome({ cp, setCp, theme, onNext }) {
   );
 }
 
-// -------- PASSO 2: FASE --------
+// -------- PASSO 2: TC/MH --------
 function StepTC({ theme, variation, initial, onConfirm }) {
   const [mode, setMode] = useState("tc"); // "tc" | "mh"
   const [digits, setDigits] = useState(initial != null ? String(Math.round(initial)) : "");
@@ -1625,119 +1694,108 @@ function StepTC({ theme, variation, initial, onConfirm }) {
   );
 }
 
-function StepFase({ cp, setCp, theme, onNext }) {
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [tasOvr, setTasOvr] = useState(cp.tasOverride != null ? String(cp.tasOverride) : "");
-  const [gphOvr, setGphOvr] = useState(cp.gphOverride != null ? String(cp.gphOverride) : "");
-
-  function choose(phase) {
-    const upd = { ...cp, phase };
-    if (!overrideOpen) {
-      delete upd.tasOverride;
-      delete upd.gphOverride;
-    } else {
-      if (tasOvr !== "") upd.tasOverride = Number(tasOvr);
-      else delete upd.tasOverride;
-      if (gphOvr !== "") upd.gphOverride = Number(gphOvr);
-      else delete upd.gphOverride;
-    }
-    setCp(upd);
-    onNext();
-  }
-
-  function applyOverride() {
-    setCp((prev) => ({
-      ...prev,
-      tasOverride: tasOvr !== "" ? Number(tasOvr) : undefined,
-      gphOverride: gphOvr !== "" ? Number(gphOvr) : undefined,
-    }));
-  }
-
-  const phases = [
-    { key: "SUBIDA",   label: "Subida",   icon: "↗", hint: "Saída do aeroporto até o TOC" },
-    { key: "CRUZEIRO", label: "Cruzeiro", icon: "→", hint: "Voo nivelado em altitude" },
-    { key: "DESCIDA",  label: "Descida",  icon: "↘", hint: "Do TOD até o destino" },
+// -------- PASSO: OVERRIDE DE PERFORMANCE POR FASE --------
+function StepOverride({ cp, setCp, theme, onNext }) {
+  const fields = [
+    { key: "tasClimbOvr",   label: "TAS Subida",   unit: "kt",    phase: "↗" },
+    { key: "tasCruiseOvr",  label: "TAS Cruzeiro", unit: "kt",    phase: "→" },
+    { key: "tasDescentOvr", label: "TAS Descida",  unit: "kt",    phase: "↘" },
+    { key: "gphClimbOvr",   label: "GPH Subida",   unit: "gal/h", phase: "↗" },
+    { key: "gphCruiseOvr",  label: "GPH Cruzeiro", unit: "gal/h", phase: "→" },
+    { key: "gphDescentOvr", label: "GPH Descida",  unit: "gal/h", phase: "↘" },
   ];
 
+  const [vals, setVals] = useState(() => {
+    const init = {};
+    fields.forEach(({ key }) => {
+      init[key] = cp[key] != null ? String(cp[key]) : "";
+    });
+    return init;
+  });
+
+  const hasAny = fields.some(({ key }) => vals[key] !== "");
+
+  function apply() {
+    setCp((prev) => {
+      const upd = { ...prev };
+      fields.forEach(({ key }) => {
+        if (vals[key] !== "") upd[key] = Number(vals[key]);
+        else delete upd[key];
+      });
+      return upd;
+    });
+  }
+
+  function clearAll() {
+    const empty = {};
+    fields.forEach(({ key }) => { empty[key] = ""; });
+    setVals(empty);
+    setCp((prev) => {
+      const upd = { ...prev };
+      fields.forEach(({ key }) => { delete upd[key]; });
+      return upd;
+    });
+  }
+
   const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none`;
-  const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
+  const labelClass = `text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-        Fase da perna até <span className={theme.accent}>{cp.name}</span>
+        Override de performance — <span className={theme.accent}>{cp.name}</span>
       </div>
-      <div className="space-y-2">
-        {phases.map(({ key, label, icon, hint }) => (
-          <button
-            key={key}
-            onClick={() => choose(key)}
-            className={`w-full ${theme.panel} border-2 rounded-xl px-5 py-4 flex items-center gap-4 active:scale-[0.98] transition-transform ${
-              cp.phase === key ? theme.accentBorder : theme.panelBorder
-            }`}
-          >
-            <span className={`text-3xl ${cp.phase === key ? theme.accent : theme.fgMuted}`}>{icon}</span>
-            <div className="text-left">
-              <div className={`text-lg font-bold ${cp.phase === key ? theme.accent : theme.fg}`}>{label}</div>
-              <div className={`text-xs ${theme.fgFaint}`}>{hint}</div>
-            </div>
-            {cp.phase === key && <CircleCheckBig className={`w-5 h-5 ${theme.accent} ml-auto`} />}
-          </button>
-        ))}
+      <div className={`text-[10px] ${theme.fgFaint}`}>
+        Sobrescreve TAS e GPH da aeronave por fase nesta perna. Deixe em branco para usar os valores padrão.
       </div>
 
-      {/* Override de performance por perna */}
-      <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
-        <button
-          onClick={() => setOverrideOpen((o) => !o)}
-          className={`w-full flex items-center justify-between px-4 py-3 ${theme.fgMuted}`}
-        >
-          <span className={`text-xs uppercase tracking-widest font-bold ${(cp.tasOverride != null || cp.gphOverride != null) ? theme.accent : theme.fgMuted}`}>
-            ⚡ Override de performance
-            {(cp.tasOverride != null || cp.gphOverride != null) && " (ativo)"}
-          </span>
-          {overrideOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        {overrideOpen && (
-          <div className={`px-4 pb-4 space-y-3 border-t ${theme.panelBorder}`}>
-            <div className={`text-[10px] ${theme.fgFaint} pt-2`}>
-              Sobrescreve TAS e GPH do avião apenas nesta perna. Deixe em branco para usar os valores da aeronave.
+      <div className="space-y-3">
+        <div className={`text-[10px] uppercase font-bold ${theme.fgMuted}`}>TAS (kt)</div>
+        <div className="grid grid-cols-3 gap-2">
+          {fields.slice(0, 3).map(({ key, label, unit, phase }) => (
+            <div key={key}>
+              <label className={labelClass}>{phase} {label.split(" ")[1]}</label>
+              <input
+                className={fieldClass}
+                type="number"
+                placeholder="padrão"
+                value={vals[key]}
+                onChange={(e) => setVals((v) => ({ ...v, [key]: e.target.value }))}
+                onBlur={apply}
+              />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>TAS (kt)</label>
-                <input
-                  className={fieldClass}
-                  type="number"
-                  placeholder={`padrão`}
-                  value={tasOvr}
-                  onChange={(e) => { setTasOvr(e.target.value); }}
-                  onBlur={applyOverride}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>GPH (gal/h)</label>
-                <input
-                  className={fieldClass}
-                  type="number"
-                  placeholder={`padrão`}
-                  value={gphOvr}
-                  onChange={(e) => { setGphOvr(e.target.value); }}
-                  onBlur={applyOverride}
-                />
-              </div>
+          ))}
+        </div>
+        <div className={`text-[10px] uppercase font-bold ${theme.fgMuted}`}>GPH (gal/h)</div>
+        <div className="grid grid-cols-3 gap-2">
+          {fields.slice(3).map(({ key, label, unit, phase }) => (
+            <div key={key}>
+              <label className={labelClass}>{phase} {label.split(" ")[1]}</label>
+              <input
+                className={fieldClass}
+                type="number"
+                placeholder="padrão"
+                value={vals[key]}
+                onChange={(e) => setVals((v) => ({ ...v, [key]: e.target.value }))}
+                onBlur={apply}
+              />
             </div>
-            {(tasOvr !== "" || gphOvr !== "") && (
-              <button
-                onClick={() => { setTasOvr(""); setGphOvr(""); setCp((p) => { const n = {...p}; delete n.tasOverride; delete n.gphOverride; return n; }); }}
-                className={`text-xs ${theme.fgFaint} underline`}
-              >
-                Limpar overrides
-              </button>
-            )}
-          </div>
-        )}
+          ))}
+        </div>
       </div>
+
+      {hasAny && (
+        <button onClick={clearAll} className={`text-xs ${theme.fgFaint} underline`}>
+          Limpar todos os overrides
+        </button>
+      )}
+
+      <button
+        onClick={() => { apply(); onNext(); }}
+        className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}
+      >
+        {hasAny ? "Confirmar overrides →" : "Sem overrides →"}
+      </button>
     </div>
   );
 }
@@ -1975,18 +2033,21 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
                             "Padrão da rota";
 
+  const overrideKeys = ["tasClimbOvr","tasCruiseOvr","tasDescentOvr","gphClimbOvr","gphCruiseOvr","gphDescentOvr"];
+  const overrideLabels = { tasClimbOvr: "TAS↗", tasCruiseOvr: "TAS→", tasDescentOvr: "TAS↘", gphClimbOvr: "GPH↗", gphCruiseOvr: "GPH→", gphDescentOvr: "GPH↘" };
+  const overrideActive = overrideKeys.filter((k) => cp[k] != null);
+  const overrideValue = overrideActive.length > 0
+    ? overrideActive.map((k) => `${overrideLabels[k]} ${cp[k]}`).join(" · ")
+    : "Padrão da aeronave";
+
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
     ...(!isOrigin ? [
-      { label: "Fase",         value: cp.phase || "—",                                           step: "fase" },
-      { label: "True Course",  value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
-      { label: "Distância",    value: cp.dist != null ? `${cp.dist} NM` : "—",                   step: "dist" },
-      { label: "Vento",        value: windLabel,                                                  step: "vento"},
-      ...(cp.tasOverride != null || cp.gphOverride != null ? [{
-        label: "Override",
-        value: [cp.tasOverride != null ? `TAS ${cp.tasOverride}kt` : null, cp.gphOverride != null ? `GPH ${cp.gphOverride}` : null].filter(Boolean).join(" · "),
-        step: "fase",
-      }] : []),
+      { label: "Altitude Alvo", value: cp.alt != null ? `${cp.alt} ft` : "—",                   step: "alt"  },
+      { label: "True Course",   value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
+      { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
+      { label: "Vento",         value: windLabel,                                                 step: "vento"},
+      { label: "Performance",   value: overrideValue,                                             step: "override" },
     ] : []),
   ];
 
@@ -2085,7 +2146,10 @@ function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
             <span className={`text-[10px] uppercase tracking-widest ${isAlert ? theme.danger : theme.accent}`}>
               {isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
             </span>
-            <span className={`text-[10px] uppercase ${theme.fgFaint}`}>{next.phase}</span>
+            <span className={`text-[10px] uppercase ${theme.fgFaint} num`}>
+              {next.alt != null ? `${next.alt} ft` : ""}
+              {next.portions?.length > 1 ? ` · ${next.portions.map(p => p.phase === "SUBIDA" ? "↗" : p.phase === "DESCIDA" ? "↘" : "→").join("")}` : ""}
+            </span>
           </div>
           <div className={`text-4xl font-black cockpit-glow tracking-tight mb-3 ${isAlert ? theme.danger : theme.accent}`}>
             {next.name}
@@ -2329,9 +2393,17 @@ function FuelTab({ flight, computed, liveFuel, ac, theme }) {
   const tripByPhase = useMemo(() => {
     const acc = { SUBIDA: { time: 0, fuel: 0 }, CRUZEIRO: { time: 0, fuel: 0 }, DESCIDA: { time: 0, fuel: 0 } };
     computed.forEach((cp) => {
-      if (cp.isOrigin || !cp.phase) return;
-      acc[cp.phase].time += cp.etePlanned;
-      acc[cp.phase].fuel += cp.fuelLeg;
+      if (cp.isOrigin || !cp.portions || !cp.portions.length) return;
+      const totalDist = cp.dist || 0;
+      if (totalDist <= 0) return;
+      cp.portions.forEach((p) => {
+        const portionETE = (p.dist / totalDist) * (cp.etePlanned || 0);
+        const portionFuel = (portionETE / 60) * p.gph;
+        if (acc[p.phase]) {
+          acc[p.phase].time += portionETE;
+          acc[p.phase].fuel += portionFuel;
+        }
+      });
     });
     return acc;
   }, [computed]);
