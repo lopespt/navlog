@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1717";
+const APP_VERSION = "20260426.1813";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1377,9 +1377,9 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
     : "route" // padrão
   );
 
-  // Passo corrente para origens: só nome
+  // Passo corrente para origens: nome + altitude de saída
   const steps = isOrigin
-    ? ["nome", "resumo"]
+    ? ["nome", "alt", "resumo"]
     : WP_STEPS;
 
   const stepIdx = steps.indexOf(step);
@@ -2042,8 +2042,8 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
 
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
+    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.alt != null ? `${cp.alt} ft` : "—", step: "alt" },
     ...(!isOrigin ? [
-      { label: "Altitude Alvo", value: cp.alt != null ? `${cp.alt} ft` : "—",                   step: "alt"  },
       { label: "True Course",   value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
       { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
       { label: "Vento",         value: windLabel,                                                 step: "vento"},
