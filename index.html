@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2114";
+const APP_VERSION = "20260426.2159";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1811,10 +1811,13 @@ function StepAlt({ cp, setCp, cruiseAlt, theme, onNext }) {
 
 // -------- PASSO 2: TC/MH --------
 function StepTC({ theme, variation, initial, onConfirm }) {
-  const [mode, setMode] = useState("tc"); // "tc" | "mh"
-  const [digits, setDigits] = useState(initial != null ? String(Math.round(initial)) : "");
-
   const mod360 = (x) => ((x % 360) + 360) % 360;
+  const [mode, setMode] = useState("mh"); // "tc" | "mh"
+  // Pre-fill: convert stored TC to MH for display (MH = TC - variation)
+  const initialDisplay = initial != null
+    ? String(Math.round(mod360(initial - (variation ?? 0))))
+    : "";
+  const [digits, setDigits] = useState(initialDisplay);
 
   // Convert displayed value to TC based on mode
   const numVal = parseFloat(digits);
@@ -1837,7 +1840,17 @@ function StepTC({ theme, variation, initial, onConfirm }) {
       {/* Mode toggle */}
       <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder}`}>
         {[["tc","TC (True Course)"],["mh","MH (Mag. Heading)"]].map(([m, label]) => (
-          <button key={m} onClick={() => { setMode(m); setDigits(""); }}
+          <button key={m} onClick={() => {
+              setMode(m);
+              setDigits((prev) => {
+                const v = parseFloat(prev);
+                if (isNaN(v)) return "";
+                // Convert current displayed value to the new mode
+                if (m === "mh" && mode === "tc") return String(Math.round(mod360(v - (variation ?? 0))));
+                if (m === "tc" && mode === "mh") return String(Math.round(mod360(v + (variation ?? 0))));
+                return prev;
+              });
+            }}
             className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
               mode === m ? `${theme.accentBg} text-black` : `${theme.fgFaint}`
             }`}>
