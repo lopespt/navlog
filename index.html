@@ -18,14 +18,22 @@
   </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><div style="color:#fff;padding:24px;font-family:sans-serif;font-size:14px">A carregar...</div></div>
+
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById('root').innerHTML =
+        '<div style="color:#f87171;padding:24px;font-family:monospace;font-size:13px;white-space:pre-wrap">' +
+        'ERRO: ' + msg + '\nLinha: ' + line + '\n' + (err && err.stack ? err.stack : '') + '</div>';
+    };
+  </script>
 
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 
-  <script type="text/babel">
+  <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo, useRef } = React;
     const {
       Plane, Settings, Fuel, ChevronRight, ChevronLeft,
