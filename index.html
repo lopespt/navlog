@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1915";
+const APP_VERSION = "20260426.1935";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2382,15 +2382,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className={`text-4xl font-black cockpit-glow tracking-tight mb-3 ${isAlert ? theme.danger : theme.accent}`}>
             {next.name}
           </div>
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className={`grid gap-2 mb-3 ${liveNext != null ? "grid-cols-4" : "grid-cols-3"}`}>
             <BigStat theme={theme} label="MH" value={`${Math.round(next.mh).toString().padStart(3,"0")}°`} />
             <BigStat theme={theme} label="Dist" value={`${next.dist} NM`} />
             <BigStat theme={theme} label="ETE" value={`${(next.etePlanned||0).toFixed(0)} min`} />
-          </div>
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <ETACell theme={theme} label="ETA Planejada" value={formatHHMM(planNext)} muted />
-            <ETACell theme={theme} label="ETA Atualizada"
-              value={liveNext != null ? formatHHMM(liveNext) : "—"} delta={deltaMin} />
+            {liveNext != null && (
+              <ETACell theme={theme} label={isAlert ? "ETA ⚠" : "ETA"} value={formatHHMM(liveNext)} delta={deltaMin} />
+            )}
           </div>
           {next.warnings?.length > 0 && (
             <div className="mb-3 space-y-0.5">
@@ -2460,22 +2458,28 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </button>
           </div>
         </div>
-        {liveRoute.map((item, i) => (
+        {liveRoute.map((item, i) => {
+          const hasLiveBase = !!flight.atd || anyWpCrossed;
+          const originEta = item.isOrigin ? (flight.atd ? parseHHMM(flight.atd) : null) : null;
+          return (
           <CheckpointRow key={item.isVirtual ? item.autoKey : `u${item.userIdx}`}
             cp={item} index={i} theme={theme}
             isNext={i === nextLiveIdx}
-            etaPlanned={item.etaPlanned}
-            etaLive={(!item.isVirtual && item.userIdx != null) ? liveETAs[item.userIdx] : null}
+            etaPlanned={item.isOrigin ? originEta : item.etaPlanned}
+            etaOriginLabel={item.isOrigin ? (flight.atd ? "ATD" : null) : undefined}
+            etaLive={(!item.isVirtual && !item.isOrigin && item.userIdx != null) ? liveETAs[item.userIdx] : null}
             crossed={item.ata != null}
             isOrigin={item.isOrigin}
             isVirtual={item.isVirtual}
+            hasLiveBase={hasLiveBase}
             departDelay={departDelay}
             viewMode={viewMode}
             onEditAta={() => !item.isVirtual && onEditAta(item.userIdx)}
             onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
             onUnmarkVirtual={item.isVirtual ? () => unmarkVirtual(item.autoKey) : null}
           />
-        ))}
+          );
+        })}
       </div>
 
       <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg p-3 grid grid-cols-3 gap-3 text-center`}>
@@ -2525,7 +2529,7 @@ function ETACell({ label, value, delta, muted, theme }) {
   );
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrigin, isVirtual, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
   const ringClass =
     isVirtual && crossed ? "border-cyan-500/30 bg-cyan-500/5" :
     isVirtual && isNext  ? "border-cyan-500/60 bg-cyan-500/5" :
@@ -2591,10 +2595,12 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
         <div className="flex items-start gap-1 shrink-0">
           <div className="text-right">
             {cp.isOrigin ? (
-              <div>
-                <div className={`text-[9px] uppercase ${theme.fgFaint}`}>EOBT</div>
-                <div className={`num font-bold ${theme.fgMuted}`}>{formatHHMM(etaPlanned)}</div>
-              </div>
+              etaPlanned != null ? (
+                <div>
+                  <div className={`text-[9px] uppercase ${theme.success}`}>{etaOriginLabel ?? "ATD"}</div>
+                  <div className={`num font-bold ${theme.success}`}>{formatHHMM(etaPlanned)}</div>
+                </div>
+              ) : null
             ) : crossed ? (
               <div>
                 <div className={`text-[9px] uppercase ${isVirtual ? theme.cyan : theme.success} flex items-center gap-1 justify-end`}>
@@ -2605,19 +2611,19 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
                   <div className={`text-[9px] num ${theme.fgFaint}`}>GS {Math.round(cp.gsActual)} kt</div>
                 )}
               </div>
-            ) : (
+            ) : hasLiveBase && etaLive != null ? (
               <div>
                 <div className={`text-[9px] uppercase ${theme.fgFaint} flex items-center gap-1 justify-end`}>
-                  ETA {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-40" />}
+                  EST {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-40" />}
                 </div>
-                <div className={`num font-bold ${isVirtual ? theme.cyan : theme.fgMuted}`}>{formatHHMM(etaPlanned)}</div>
+                <div className={`num font-bold ${isVirtual ? theme.cyan : absDelta != null && absDelta > 0 ? deltaColor : theme.fgMuted}`}>
+                  {formatHHMM(etaLive)}
+                </div>
                 {!isVirtual && absDelta != null && absDelta > 0 && (
-                  <div className={`text-[9px] num ${deltaColor}`}>
-                    {etaLive ? formatHHMM(etaLive) : ""} ({sign}{absDelta})
-                  </div>
+                  <div className={`text-[9px] num ${deltaColor}`}>{sign}{absDelta} min</div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
           {/* Botão nota (só waypoints manuais) ou botão desfazer virtual */}
           {isVirtual && crossed && onUnmarkVirtual ? (
