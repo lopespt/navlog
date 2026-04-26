@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1935";
+const APP_VERSION = "20260426.2038";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -166,8 +166,17 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
     }
   } else if (altDiff < -50) { // descending
     const descDist = (-altDiff / rod) * (tasDescent / 60);
+    const LEVEL_BOD_NM = 5; // level-off at dest altitude before fix → generates BOD
+    const tasCruiseLow = correctTAS(ac.tasCruise, tAlt, isaDevC);
     if (descDist >= dist - 0.1) {
       portions = [{ phase: "DESCIDA", dist, tas: tasDescent, gph: gphD }];
+    } else if (dist - descDist > LEVEL_BOD_NM + 0.5) {
+      // cruise → descend → level-off at dest alt (BOD zone)
+      portions = [
+        { phase: "CRUZEIRO", dist: dist - descDist - LEVEL_BOD_NM, tas: tasCruise,    gph: gphR },
+        { phase: "DESCIDA",  dist: descDist,                        tas: tasDescent,   gph: gphD },
+        { phase: "CRUZEIRO", dist: LEVEL_BOD_NM,                    tas: tasCruiseLow, gph: gphR },
+      ];
     } else {
       portions = [
         { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
@@ -200,6 +209,7 @@ function tocTodLabel(portions, dist) {
     const nxt = portions[i + 1].phase;
     if (cur === "SUBIDA" && nxt !== "SUBIDA") labels.push(`TOC +${acc.toFixed(0)}nm`);
     if (cur !== "DESCIDA" && nxt === "DESCIDA") labels.push(`TOD +${acc.toFixed(0)}nm`);
+    if (cur === "DESCIDA" && nxt !== "DESCIDA") labels.push(`BOD +${acc.toFixed(0)}nm`);
   }
   return labels.length > 0 ? labels.join(" · ") : null;
 }
@@ -291,8 +301,8 @@ const DEFAULT_FLIGHT = {
   checkpoints: [
     // origem: dist=0, ATA é o EOBT
     { name: "SBSP",  alt: 2600, tc: null, dist: 0,  ata: null, gsActual: null, isOrigin: true },
-    { name: "EMBOI", alt: 7000, tc: 45,   dist: 78, ata: null, gsActual: null },
-    { name: "RIPLI", alt: 7000, tc: 55,   dist: 90, ata: null, gsActual: null },
+    { name: "EMBOI", alt: 7000, tc: 45,   dist: 78, ata: null, gsActual: null, useCruiseAlt: true },
+    { name: "RIPLI", alt: 7000, tc: 55,   dist: 90, ata: null, gsActual: null, useCruiseAlt: true },
     { name: "SBRJ",  alt: 10,   tc: 62,   dist: 55, ata: null, gsActual: null },
   ],
 };
@@ -418,8 +428,10 @@ function NavlogApp() {
     let cumTime = 0;
     return flight.checkpoints.map((cp, i) => {
       if (cp.isOrigin) {
+        const originAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? 0);
         return {
           ...cp,
+          alt: originAlt,
           tas: null, wca: null, th: null, mh: null, ch: null,
           gsPlanned: null, etePlanned: 0,
           etaPlanned: eobtMin,
@@ -434,10 +446,10 @@ function NavlogApp() {
         };
       }
 
-      // Altitude-per-fix: get prev fix altitude
+      // Altitude-per-fix: get prev fix altitude (resolve useCruiseAlt)
       const prevCp = flight.checkpoints[i - 1];
-      const prevAlt = prevCp?.alt ?? 0;
-      const thisAlt = cp.alt ?? flight.cruiseAlt ?? 7000;
+      const prevAlt = prevCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (prevCp?.alt ?? 0);
+      const thisAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? flight.cruiseAlt ?? 7000);
 
       // Compute phase split and weighted-average TAS
       const { portions, avgTas } = computeLegPhases(prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0);
@@ -475,6 +487,7 @@ function NavlogApp() {
 
       return {
         ...cp,
+        alt: thisAlt,   // effective altitude (resolved useCruiseAlt)
         tas: avgTas, ...r,
         gsPlanned: r.gs,
         etePlanned: r.ete,
@@ -536,10 +549,10 @@ function NavlogApp() {
     return etas;
   }, [computed, ac, flight.atd]);
 
-  // Rota expandida com TOC/TOD virtuais interpolados entre as pernas
+  // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
     const result = [];
-    let tocN = 0, todN = 0;
+    let tocN = 0, todN = 0, bodN = 0;
     computed.forEach((cp, i) => {
       if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
       const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
@@ -553,12 +566,15 @@ function NavlogApp() {
           accETE += frac * cp.etePlanned;
           const from = por.phase, to = cp.portions[p + 1].phase;
           let label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
-            : from !== "DESCIDA" && to === "DESCIDA" ? "TOD" : null;
+            : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
+            : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
+            : null;
           if (label) {
-            const autoKey = label === "TOC" ? `toc_${tocN++}` : `tod_${todN++}`;
+            const autoKey = label === "TOC" ? `toc_${tocN++}` : label === "TOD" ? `tod_${todN++}` : `bod_${bodN++}`;
             result.push({
               name: label, isVirtual: true, autoKey, userIdx: i,
-              alt: label === "TOC" ? cp.alt : (prevAlt ?? cp.alt),
+              // TOC = leveled at dest alt; TOD = still at src alt; BOD = leveled at dest alt
+              alt: (label === "TOC" || label === "BOD") ? cp.alt : (prevAlt ?? cp.alt),
               tc: cp.tc,
               dist: Math.round(accDist * 10) / 10,
               distToNext: Math.round((cp.dist - accDist) * 10) / 10,
@@ -1398,10 +1414,11 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                         {cp.windMode === "none" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
                         {cp.windMode === "custom" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
                       </div>
-                      <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate`}>
+                      <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate flex items-center gap-1`}>
                         {cp.isOrigin
-                          ? `Origem · ${cp.alt ?? 0} ft`
-                          : `${cp.alt ?? "?"} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
+                          ? `Origem · ${cp.useCruiseAlt ? (computed.find(c=>c.isOrigin)?.alt ?? cp.alt) : (cp.alt ?? 0)} ft`
+                          : `${cp.useCruiseAlt ? (computed[i]?.alt ?? cp.alt) : (cp.alt ?? "?")} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
+                        {cp.useCruiseAlt && <span className={`text-[8px] ${theme.accent} border border-current rounded px-1 normal-case`}>CRZ</span>}
                       </div>
                     </div>
                   </div>
@@ -1517,8 +1534,9 @@ const WP_STEPS = ["nome", "alt", "tc", "dist", "vento", "override", "resumo"];
 function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
   const isNew = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
-  // Default altitude = last user waypoint's altitude (not auto, not origin)
-  const lastUserAlt = [...flight.checkpoints].filter((cp) => !cp.isOrigin && !cp.isAuto).pop()?.alt ?? flight.cruiseAlt ?? 7000;
+  // Default altitude = last user waypoint's altitude (resolve useCruiseAlt)
+  const lastUserCp = [...flight.checkpoints].filter((cp) => !cp.isOrigin && !cp.isAuto).pop();
+  const lastUserAlt = lastUserCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (lastUserCp?.alt ?? flight.cruiseAlt ?? 7000);
   const initial = isNew
     ? { name: "", alt: lastUserAlt, tc: null, dist: null, windDir: null, windVel: null }
     : { ...flight.checkpoints[editingIdx] };
@@ -1615,17 +1633,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
             <StepNome cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
           {step === "alt" && (
-            <StepNumerico
-              theme={theme}
-              label="Altitude Alvo"
-              unit="ft"
-              hint="Altitude de chegada neste fix — ex: 7000"
-              maxDigits={5}
-              allowDecimal={false}
-              validate={(v) => v >= 0 && v <= 60000}
-              initial={cp.alt != null ? String(cp.alt) : ""}
-              onConfirm={(v) => { setCp({ ...cp, alt: Number(v) }); next(); }}
-            />
+            <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} theme={theme} onNext={next} />
           )}
           {step === "tc" && (
             <StepTC
@@ -1759,6 +1767,53 @@ function StepNome({ cp, setCp, theme, onNext }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// -------- PASSO: ALTITUDE --------
+function StepAlt({ cp, setCp, cruiseAlt, theme, onNext }) {
+  const useCruise = cp.useCruiseAlt ?? false;
+
+  function toggleCruise() {
+    const next = !useCruise;
+    setCp((p) => ({ ...p, useCruiseAlt: next, alt: next ? cruiseAlt : p.alt }));
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Toggle: usar altitude de cruzeiro */}
+      <button onClick={toggleCruise}
+        className={`w-full flex items-center justify-between px-4 py-3 border-2 rounded-xl transition-colors ${
+          useCruise ? `${theme.accentBorder} bg-amber-500/10` : `${theme.panelBorder} ${theme.panel}`
+        }`}>
+        <div className="text-left">
+          <div className={`text-sm font-bold ${useCruise ? theme.accent : theme.fgMuted}`}>Altitude de cruzeiro</div>
+          <div className={`text-[10px] ${theme.fgFaint}`}>Segue a alt. de cruzeiro do plano</div>
+        </div>
+        <div className={`text-2xl font-black num cockpit-glow ${useCruise ? theme.accent : theme.fgFaint}`}>
+          {cruiseAlt} ft
+        </div>
+      </button>
+
+      {useCruise ? (
+        <button onClick={onNext}
+          className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+          Confirmar → ({cruiseAlt} ft)
+        </button>
+      ) : (
+        <StepNumerico
+          theme={theme}
+          label="Altitude Alvo"
+          unit="ft"
+          hint="Altitude de chegada neste fix — ex: 7000"
+          maxDigits={5}
+          allowDecimal={false}
+          validate={(v) => v >= 0 && v <= 60000}
+          initial={cp.alt != null && !useCruise ? String(cp.alt) : ""}
+          onConfirm={(v) => { setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false })); onNext(); }}
+        />
+      )}
     </div>
   );
 }
@@ -2204,7 +2259,7 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
 
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
-    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.alt != null ? `${cp.alt} ft` : "—", step: "alt" },
+    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.useCruiseAlt ? `CRZ (${cp.alt ?? "?"} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—"), step: "alt" },
     ...(!isOrigin ? [
       { label: "True Course",   value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
       { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
@@ -2347,7 +2402,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className={`border-2 rounded-lg p-4 transition-all border-cyan-500/60 bg-cyan-500/5`}>
             <div className="flex items-center justify-between mb-1">
               <span className={`text-[10px] uppercase tracking-widest ${theme.cyan}`}>
-                {next.name === "TOC" ? "Topo de Subida" : "Início de Descida"}
+                {next.name === "TOC" ? "Topo de Subida" : next.name === "TOD" ? "Início de Descida" : "Fim de Descida"}
               </span>
               <span className={`text-[10px] uppercase ${theme.fgFaint} num`}>
                 {next.alt != null ? `${next.alt} ft` : ""}
@@ -2571,7 +2626,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
           ) : isNext ? (
             <ChevronRight className={`w-5 h-5 ${isVirtual ? theme.cyan : theme.accent} mx-auto animate-pulse`} />
           ) : isVirtual ? (
-            <span className={`text-sm ${theme.cyan} opacity-60`}>{cp.name === "TOC" ? "↗" : "↘"}</span>
+            <span className={`text-sm ${theme.cyan} opacity-60`}>{cp.name === "TOC" ? "↗" : cp.name === "TOD" ? "↘" : "⤵"}</span>
           ) : (
             <span className={`text-[10px] num ${theme.fgFaint}`}>{index + 1}</span>
           )}
