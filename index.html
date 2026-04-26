@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1818";
+const APP_VERSION = "20260426.1833";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -202,6 +202,51 @@ function tocTodLabel(portions, dist) {
     if (cur !== "DESCIDA" && nxt === "DESCIDA") labels.push(`TOD +${acc.toFixed(0)}nm`);
   }
   return labels.length > 0 ? labels.join(" · ") : null;
+}
+
+// Auto-insert TOC/TOD waypoints based on altitude-per-fix.
+// Strips old isAuto entries, then reinserts for each leg that has a phase transition.
+function rebuildRoute(cps, ac, isaDevC) {
+  const userCps = cps.filter((cp) => !cp.isAuto);
+  if (userCps.length < 2) return userCps;
+
+  const result = [userCps[0]];
+
+  for (let i = 1; i < userCps.length; i++) {
+    const prev = userCps[i - 1];
+    const curr = userCps[i];
+    const prevAlt = prev.alt ?? 0;
+    const thisAlt = curr.alt ?? 7000;
+    const dist = curr.dist ?? 0;
+
+    const { portions } = computeLegPhases(prevAlt, thisAlt, dist, curr, ac, isaDevC || 0);
+
+    if (portions.length <= 1 || dist < 2) {
+      result.push(curr);
+      continue;
+    }
+
+    let inserted = false;
+    let accDist = 0;
+    for (let p = 0; p < portions.length - 1; p++) {
+      accDist += portions[p].dist;
+      const fromPhase = portions[p].phase;
+      const splitDist = Math.round(accDist * 10) / 10;
+      const afterDist  = Math.round((dist - accDist) * 10) / 10;
+      const MIN = 1.0; // NM — don't insert if too close to an endpoint
+
+      if (splitDist >= MIN && afterDist >= MIN) {
+        const label    = fromPhase === "SUBIDA" ? "TOC" : "TOD";
+        const transAlt = fromPhase === "SUBIDA" ? thisAlt : prevAlt;
+        result.push({ name: label, isAuto: true, alt: transAlt, tc: curr.tc, dist: splitDist, ata: null, gsActual: null, notes: "" });
+        result.push({ ...curr, dist: afterDist });
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) result.push(curr);
+  }
+  return result;
 }
 
 // hh:mm parser/formatter
@@ -554,21 +599,21 @@ function NavlogApp() {
   }
 
   function moveUp(i) {
-    if (i <= 1) return; // índice 0 é origem, índice 1 não pode subir
+    if (i <= 1) return;
     setFlight((f) => {
       const cps = [...f.checkpoints];
       [cps[i - 1], cps[i]] = [cps[i], cps[i - 1]];
-      return { ...f, checkpoints: cps };
+      return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
     });
   }
 
   function moveDown(i) {
     setFlight((f) => {
       if (i >= f.checkpoints.length - 1) return f;
-      if (i === 0) return f; // origem não move
+      if (i === 0) return f;
       const cps = [...f.checkpoints];
       [cps[i], cps[i + 1]] = [cps[i + 1], cps[i]];
-      return { ...f, checkpoints: cps };
+      return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
     });
   }
 
@@ -812,7 +857,7 @@ function NavlogApp() {
           });
         }
       });
-      return { ...f, checkpoints: newCps };
+      return { ...f, checkpoints: rebuildRoute(newCps, ac, f.isaDevC || 0) };
     });
     setImportOpen(false);
   }
@@ -932,7 +977,7 @@ function NavlogApp() {
               setFlight((f) => {
                 const cps = [...f.checkpoints];
                 cps.splice(i, 1);
-                return { ...f, checkpoints: cps };
+                return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
               });
             }}
             onMoveUp={moveUp}
@@ -982,6 +1027,7 @@ function NavlogApp() {
         <WaypointEditor
           flight={flight} setFlight={setFlight}
           editingIdx={editingIdx}
+          ac={ac}
           theme={theme}
           onClose={() => setEditorOpen(false)}
         />
@@ -1217,72 +1263,61 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       <FreqsSection flight={flight} setFlight={setFlight} theme={theme} />
 
       {/* WAYPOINTS */}
-      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.length} pontos`}>
+      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
         <div className="space-y-1.5">
           {flight.checkpoints.map((cp, i) => (
             <div key={i} className="flex items-stretch gap-1">
-              {/* Botões de reordenação */}
-              {!cp.isOrigin && (
+              {/* Botões de reordenação — apenas para waypoints manuais não-origem */}
+              {!cp.isOrigin && !cp.isAuto && (
                 <div className="flex flex-col gap-1">
-                  <button
-                    onClick={() => onMoveUp(i)}
-                    disabled={i <= 1}
-                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${
-                      i <= 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`
-                    }`}
-                    aria-label="Mover para cima"
-                  >
+                  <button onClick={() => onMoveUp(i)} disabled={i <= 1}
+                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${i <= 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`}`}>
                     <ChevronUp className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    onClick={() => onMoveDown(i)}
-                    disabled={i >= flight.checkpoints.length - 1}
-                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${
-                      i >= flight.checkpoints.length - 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`
-                    }`}
-                    aria-label="Mover para baixo"
-                  >
+                  <button onClick={() => onMoveDown(i)} disabled={i >= flight.checkpoints.length - 1}
+                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${i >= flight.checkpoints.length - 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`}`}>
                     <ChevronDown className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
 
-              {/* Botão de edição */}
-              <button
-                onClick={() => onEditCp(i)}
-                className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded px-3 py-2 flex items-center justify-between transition-colors min-w-0`}
-              >
-                <div className="flex items-center gap-2 min-w-0">
+              {/* Waypoint auto (TOC/TOD) — display only, no edit */}
+              {cp.isAuto ? (
+                <div className={`flex-1 ${theme.panel} border border-dashed ${theme.panelBorder} rounded px-3 py-2 flex items-center gap-2 opacity-70 min-w-0`}>
                   <div className={`text-[10px] ${theme.fgFaint} num w-4 shrink-0`}>{i + 1}</div>
-                  <div className="text-left min-w-0">
-                    <div className="font-bold truncate flex items-center gap-1">
-                      {cp.name || "—"}
-                      {cp.windMode === "none" && (
-                        <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>
-                      )}
-                      {cp.windMode === "custom" && (
-                        <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>
-                      )}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-xs font-bold ${theme.cyan}`}>
+                      {cp.name === "TOC" ? "↗ TOC" : "↘ TOD"}
+                      <span className={`ml-2 text-[9px] ${theme.fgFaint} font-normal`}>AUTO</span>
                     </div>
-                    <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate`}>
-                      {cp.isOrigin
-                        ? `Origem · ${cp.alt ?? 0} ft`
-                        : `${cp.alt ?? "?"} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
-                    </div>
-                    {!cp.isOrigin && (() => {
-                      const comp = computed?.[i];
-                      const lbl = comp ? tocTodLabel(comp.portions, cp.dist) : null;
-                      return lbl ? (
-                        <div className={`text-[9px] ${theme.cyan} truncate`}>⊕ {lbl}</div>
-                      ) : null;
-                    })()}
+                    <div className={`text-[10px] ${theme.fgFaint} num`}>{cp.alt} ft · +{cp.dist} NM · TC {String(cp.tc ?? 0).padStart(3,"0")}°</div>
                   </div>
                 </div>
-                <Pencil className={`w-3.5 h-3.5 ${theme.fgFaint} shrink-0 ml-1`} />
-              </button>
+              ) : (
+                /* Botão de edição — waypoints manuais */
+                <button onClick={() => onEditCp(i)}
+                  className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded px-3 py-2 flex items-center justify-between transition-colors min-w-0`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`text-[10px] ${theme.fgFaint} num w-4 shrink-0`}>{i + 1}</div>
+                    <div className="text-left min-w-0">
+                      <div className="font-bold truncate flex items-center gap-1">
+                        {cp.name || "—"}
+                        {cp.windMode === "none" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
+                        {cp.windMode === "custom" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
+                      </div>
+                      <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate`}>
+                        {cp.isOrigin
+                          ? `Origem · ${cp.alt ?? 0} ft`
+                          : `${cp.alt ?? "?"} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
+                      </div>
+                    </div>
+                  </div>
+                  <Pencil className={`w-3.5 h-3.5 ${theme.fgFaint} shrink-0 ml-1`} />
+                </button>
+              )}
 
-              {/* Lixeira */}
-              {!cp.isOrigin && (
+              {/* Lixeira — apenas para waypoints manuais */}
+              {!cp.isOrigin && !cp.isAuto && (
                 <button
                   onClick={() => onDeleteCp(i)}
                   className={`${theme.panel} border ${theme.panelBorder} rounded px-2.5 ${theme.fgFaint} hover:text-red-400 active:scale-95 shrink-0`}
@@ -1386,11 +1421,13 @@ function Stat({ label, value, theme }) {
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
 const WP_STEPS = ["nome", "alt", "tc", "dist", "vento", "override", "resumo"];
 
-function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
+function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
   const isNew = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
+  // Default altitude = last user waypoint's altitude (not auto, not origin)
+  const lastUserAlt = [...flight.checkpoints].filter((cp) => !cp.isOrigin && !cp.isAuto).pop()?.alt ?? flight.cruiseAlt ?? 7000;
   const initial = isNew
-    ? { name: "", alt: flight.cruiseAlt ?? 7000, tc: null, dist: null, windDir: null, windVel: null }
+    ? { name: "", alt: lastUserAlt, tc: null, dist: null, windDir: null, windVel: null }
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
@@ -1420,23 +1457,17 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
 
   function save() {
     setFlight((f) => {
-      const cps = [...f.checkpoints];
+      let cps = [...f.checkpoints];
       const saved = { ...cp, windMode };
-      // Limpar campos legados de vento se não for custom
-      if (windMode !== "custom") {
-        delete saved.windDir;
-        delete saved.windVel;
-      }
+      if (windMode !== "custom") { delete saved.windDir; delete saved.windVel; }
       if (isNew) {
         cps.push({ ...saved, ata: null, gsActual: null });
       } else {
         cps[editingIdx] = { ...cps[editingIdx], ...saved };
-        if (windMode !== "custom") {
-          delete cps[editingIdx].windDir;
-          delete cps[editingIdx].windVel;
-        }
+        if (windMode !== "custom") { delete cps[editingIdx].windDir; delete cps[editingIdx].windVel; }
       }
-      return { ...f, checkpoints: cps };
+      const curAc = ac || Object.values(f)[0];
+      return { ...f, checkpoints: rebuildRoute(cps, curAc, f.isaDevC || 0) };
     });
     onClose();
   }
@@ -1444,9 +1475,10 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
   function remove() {
     if (!confirm(`Remover ${cp.name}?`)) return;
     setFlight((f) => {
-      const cps = [...f.checkpoints];
+      let cps = [...f.checkpoints];
       cps.splice(editingIdx, 1);
-      return { ...f, checkpoints: cps };
+      const curAc = ac || Object.values(f)[0];
+      return { ...f, checkpoints: rebuildRoute(cps, curAc, f.isaDevC || 0) };
     });
     onClose();
   }
@@ -1567,13 +1599,23 @@ function StepNome({ cp, setCp, theme, onNext }) {
   const MAX = 6;
 
   function press(ch) {
-    setName((n) => n.length < MAX ? n + ch : n);
+    setName((prev) => {
+      if (prev.length >= MAX) return prev;
+      const next = prev + ch;
+      setCp((p) => ({ ...p, name: next })); // sync immediately
+      return next;
+    });
   }
-  function del() { setName((n) => n.slice(0, -1)); }
+  function del() {
+    setName((prev) => {
+      const next = prev.slice(0, -1);
+      setCp((p) => ({ ...p, name: next }));
+      return next;
+    });
+  }
   function confirm() {
     if (!name) return;
-    setCp({ ...cp, name });
-    onNext();
+    onNext(); // cp.name already synced on every keypress
   }
 
   const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-lg flex items-center justify-center font-bold active:scale-95 transition-transform select-none`;
@@ -2327,11 +2369,13 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
     deltaMin > 1 ? theme.danger :
     deltaMin < -1 ? theme.success : theme.fgFaint;
 
-  const Wrapper = isOrigin ? "div" : "button";
-  const wrapperProps = isOrigin ? {} : { onClick: onEditAta };
+  const isAuto = cp.isAuto;
+  const Wrapper = (isOrigin || isAuto) ? "div" : "button";
+  const wrapperProps = (isOrigin || isAuto) ? {} : { onClick: onEditAta };
 
   // Subtítulo: depende do modo de visualização
   const subtitle = isOrigin ? "Origem"
+    : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min · MH ${Math.round(cp.mh).toString().padStart(3, "0")}°`
       : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min · MH ${Math.round(cp.mh).toString().padStart(3, "0")}°`;
@@ -2363,10 +2407,6 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
           {!cp.isOrigin && (
             <div className={`text-[10px] ${theme.fgFaint} num`}>{subtitle}</div>
           )}
-          {!cp.isOrigin && (() => {
-            const lbl = tocTodLabel(cp.portions, cp.dist);
-            return lbl ? <div className={`text-[9px] ${theme.cyan} num`}>⊕ {lbl}</div> : null;
-          })()}
           {cp.notes && (
             <div className={`text-[10px] ${theme.cyan} truncate mt-0.5`}>📝 {cp.notes}</div>
           )}
@@ -2403,8 +2443,8 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
               </div>
             )}
           </div>
-          {/* Botão de nota — só para não-origem */}
-          {!isOrigin && (
+          {/* Botão de nota — só para waypoints manuais */}
+          {!isOrigin && !isAuto && (
             <button
               onClick={(e) => { e.stopPropagation(); onEditNotes(); }}
               className={`mt-0.5 p-1 rounded ${cp.notes ? theme.cyan : theme.fgFaint} opacity-70 hover:opacity-100 active:scale-90`}
