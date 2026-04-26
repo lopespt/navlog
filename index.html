@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1904";
+const APP_VERSION = "20260426.1915";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2258,7 +2258,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
   const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
   const liveNext = (next && !next.isVirtual) ? liveETAs[next.userIdx] : null;
   const planNext = next ? next.etaPlanned : null;
-  const deltaMin = liveNext != null && planNext != null ? liveNext - planNext : null;
+  // Desvio calculado em cima do plano ajustado pelo ATD real (não pela EOBT)
+  // Se saímos atrasados, isso não gera alerta — só desvios de navegação/velocidade alertam
+  const eobtMin = parseHHMM(flight.eobt) ?? 0;
+  const atdMin = flight.atd ? (parseHHMM(flight.atd) ?? eobtMin) : eobtMin;
+  const departDelay = atdMin - eobtMin;
+  const planNextAdj = planNext != null ? planNext + departDelay : null;
+  const deltaMin = liveNext != null && planNextAdj != null ? liveNext - planNextAdj : null;
   const alertDelta = prefs?.alertEtaDeltaMin ?? 5;
   const isAlert = deltaMin != null && Math.abs(deltaMin) >= alertDelta;
 
@@ -2463,6 +2469,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             crossed={item.ata != null}
             isOrigin={item.isOrigin}
             isVirtual={item.isVirtual}
+            departDelay={departDelay}
             viewMode={viewMode}
             onEditAta={() => !item.isVirtual && onEditAta(item.userIdx)}
             onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
@@ -2518,7 +2525,7 @@ function ETACell({ label, value, delta, muted, theme }) {
   );
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrigin, isVirtual, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrigin, isVirtual, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
   const ringClass =
     isVirtual && crossed ? "border-cyan-500/30 bg-cyan-500/5" :
     isVirtual && isNext  ? "border-cyan-500/60 bg-cyan-500/5" :
@@ -2526,7 +2533,8 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
     crossed ? "border-green-500/40 bg-green-500/5" :
     isNext  ? `${theme.accentBorder} bg-amber-500/5` :
               `${theme.panelBorder} ${theme.panel}/50`;
-  const deltaMin = etaLive != null && !crossed ? etaLive - etaPlanned : null;
+  const planAdj = etaPlanned != null ? etaPlanned + (departDelay ?? 0) : null;
+  const deltaMin = etaLive != null && !crossed ? etaLive - planAdj : null;
   const sign = deltaMin == null ? null : deltaMin > 0 ? "+" : deltaMin < 0 ? "−" : "";
   const absDelta = deltaMin == null ? null : Math.abs(Math.round(deltaMin));
   const deltaColor = deltaMin == null ? "" :
