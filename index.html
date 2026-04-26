@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260426.2326";
+const APP_VERSION = "20260426.2341";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2416,6 +2416,26 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
   const elapsedMin = Math.floor(elapsed / 60);
   const elapsedSec = elapsed % 60;
 
+  // ETA atingida: hora atual >= ETA do próximo waypoint (não cruzado)
+  const isEtaPassed = useMemo(() => {
+    if (!next || next.isVirtual || liveNext == null) return false;
+    let diff = nowHHMM() - liveNext;
+    if (diff > 720) diff -= 1440;
+    if (diff < -720) diff += 1440;
+    return diff >= 0;
+  }, [elapsed, next, liveNext]); // elapsed muda a cada segundo → reavalia
+
+  // Alarme háptico único quando a ETA do próximo ponto é atingida
+  const etaAlarmFiredFor = useRef(null);
+  useEffect(() => {
+    if (!next || next.isVirtual) { etaAlarmFiredFor.current = null; return; }
+    if (isEtaPassed && etaAlarmFiredFor.current !== next.userIdx) {
+      etaAlarmFiredFor.current = next.userIdx;
+      haptic([250, 80, 250, 80, 400]);
+    }
+    if (!isEtaPassed) etaAlarmFiredFor.current = null;
+  }, [isEtaPassed, next?.userIdx]);
+
   // Combustível restante atual
   const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
   const currentFuel = useMemo(() => {
@@ -2638,8 +2658,14 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               ))}
             </div>
           )}
+          {isEtaPassed && (
+            <div className="mb-2 bg-amber-500/20 border border-amber-400/60 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse">
+              <Clock className="w-4 h-4 text-amber-300 shrink-0" />
+              <span className="text-amber-200 text-sm font-bold">ETA atingida — confirme passagem</span>
+            </div>
+          )}
           <button onClick={() => markCrossed(next.userIdx)}
-            className={`w-full ${isAlert ? "bg-red-600" : theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
+            className={`w-full ${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
             <CircleCheckBig className="w-5 h-5" /> Cruzei {next.name} agora
           </button>
         </div>
