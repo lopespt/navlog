@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2202";
+const APP_VERSION = "20260426.2207";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -98,16 +98,17 @@ const toDeg = (r) => (r * 180) / Math.PI;
 const mod360 = (x) => ((x % 360) + 360) % 360;
 
 function calcLeg(tc, dist, tas, windDir, windVel, variation, dev) {
-  if (!tas || tas <= 0) return { wca: 0, th: tc || 0, mh: tc || 0, ch: tc || 0, gs: 0, ete: 0 };
+  const mc = mod360((tc || 0) - variation); // Magnetic Course (no wind)
+  if (!tas || tas <= 0) return { wca: 0, th: tc || 0, mc, mh: mc, ch: mc, gs: 0, ete: 0 };
   const sinWCA = (windVel * Math.sin(toRad(windDir - tc))) / tas;
   const wcaRad = Math.asin(Math.max(-1, Math.min(1, sinWCA)));
   const wca = toDeg(wcaRad);
   const th = mod360(tc + wca);
-  const mh = mod360(th - variation);
+  const mh = mod360(th - variation); // Magnetic Heading (with wind correction)
   const ch = mod360(mh + dev);
   const gs = Math.max(1, tas * Math.cos(wcaRad) - windVel * Math.cos(toRad(windDir - tc)));
   const ete = dist > 0 && gs > 0 ? (dist / gs) * 60 : 0;
-  return { wca, th, mh, ch, gs, ete };
+  return { wca, th, mc, mh, ch, gs, ete };
 }
 
 // TAS corrigida pela altitude e desvio ISA (aproximação GA)
@@ -432,7 +433,7 @@ function NavlogApp() {
         return {
           ...cp,
           alt: originAlt,
-          tas: null, wca: null, th: null, mh: null, ch: null,
+          tas: null, wca: null, th: null, mc: null, mh: null, ch: null,
           gsPlanned: null, etePlanned: 0,
           etaPlanned: eobtMin,
           fuelLeg: 0,
@@ -1839,13 +1840,12 @@ function StepTC({ theme, variation, initial, onConfirm }) {
     <div className="space-y-3">
       {/* Mode toggle */}
       <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder}`}>
-        {[["tc","TC (True Course)"],["mh","MH (Mag. Heading)"]].map(([m, label]) => (
+        {[["tc","TC (True Course)"],["mh","MC (Mag. Course)"]].map(([m, label]) => (
           <button key={m} onClick={() => {
               setMode(m);
               setDigits((prev) => {
                 const v = parseFloat(prev);
                 if (isNaN(v)) return "";
-                // Convert current displayed value to the new mode
                 if (m === "mh" && mode === "tc") return String(Math.round(mod360(v - (variation ?? 0))));
                 if (m === "tc" && mode === "mh") return String(Math.round(mod360(v + (variation ?? 0))));
                 return prev;
@@ -1861,11 +1861,11 @@ function StepTC({ theme, variation, initial, onConfirm }) {
 
       <div>
         <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-          {mode === "tc" ? "True Course" : "Magnetic Heading"}
+          {mode === "tc" ? "True Course" : "Magnetic Course"}
         </div>
         {mode === "mh" && variation != null && (
           <div className={`text-[9px] ${theme.fgFaint} mt-0.5`}>
-            Var. {variation >= 0 ? "+" : ""}{variation}° → TC = MH {variation >= 0 ? "+" : ""}{variation}
+            Var. {variation >= 0 ? "+" : ""}{variation}° → TC = MC {variation >= 0 ? "−" : "+"}{Math.abs(variation)}°
           </div>
         )}
       </div>
@@ -2445,12 +2445,17 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             <div className={`text-4xl font-black cockpit-glow tracking-tight leading-none ${isAlert ? theme.danger : theme.accent}`}>
               {next.name}
             </div>
-            {/* Proa magnética — destaque máximo */}
+            {/* Curso + proa magnéticos */}
             <div className="text-right">
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
+              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MC</div>
               <div className={`text-4xl font-black num cockpit-glow leading-none ${isAlert ? theme.danger : theme.accent}`}>
-                {Math.round(next.mh).toString().padStart(3,"0")}°
+                {Math.round(next.mc ?? next.mh).toString().padStart(3,"0")}°
               </div>
+              {next.wca != null && Math.abs(next.wca) >= 1 && (
+                <div className={`text-[10px] num ${theme.fgFaint} mt-0.5`}>
+                  MH {Math.round(next.mh).toString().padStart(3,"0")}°
+                </div>
+              )}
             </div>
           </div>
 
@@ -2651,8 +2656,8 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
     : isVirtual ? `${cp.dist} NM da dep. · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
-      ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min · MH ${Math.round(cp.mh).toString().padStart(3, "0")}°`
-      : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min · MH ${Math.round(cp.mh).toString().padStart(3, "0")}°`;
+      ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
+      : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
 
   return (
     <Wrapper
