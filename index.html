@@ -33,10 +33,14 @@
       MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
-      Download, Upload, ChevronDown, ChevronUp
+      Download, Upload, ChevronDown, ChevronUp, GripVertical
     } = LucideReact;
 
-const APP_VERSION = "20260426.2305";
+function haptic(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
+}
+
+const APP_VERSION = "20260426.2326";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -563,6 +567,7 @@ function NavlogApp() {
   }, [liveRoute]);
 
   function markVirtual(key) {
+    haptic([40]);
     const now = nowHHMM();
     setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMM(now) } }));
     setLegTimerStart(Date.now());
@@ -599,6 +604,7 @@ function NavlogApp() {
 
   // Marca checkpoint como cruzado (registra ATA = agora UTC, calcula GS real)
   function markCrossed(i) {
+    haptic([60]);
     const now = nowHHMM();
     setAta(i, formatHHMM(now));
     setLegTimerStart(Date.now()); // inicia cronômetro de perna
@@ -658,6 +664,16 @@ function NavlogApp() {
     });
   }
 
+  function reorder(fromIdx, toIdx) {
+    if (fromIdx === toIdx || fromIdx <= 0 || toIdx <= 0) return;
+    setFlight((f) => {
+      const cps = [...f.checkpoints];
+      const [item] = cps.splice(fromIdx, 1);
+      cps.splice(toIdx, 0, item);
+      return { ...f, checkpoints: cps };
+    });
+  }
+
   function moveDown(i) {
     setFlight((f) => {
       if (i >= f.checkpoints.length - 1) return f;
@@ -681,6 +697,7 @@ function NavlogApp() {
   }
 
   function depart() {
+    haptic([50, 30, 50, 30, 80]);
     const now = nowHHMM();
     setFlight((f) => ({ ...f, atd: formatHHMM(now) }));
     setLegTimerStart(Date.now());
@@ -1047,6 +1064,7 @@ function NavlogApp() {
             }}
             onMoveUp={moveUp}
             onMoveDown={moveDown}
+            onReorder={reorder}
             onImportFPL={() => setImportOpen(true)}
             fleet={fleet}
             onManageFleet={() => setFleetOpen(true)}
@@ -1262,9 +1280,39 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onImportFPL, fleet, onManageFleet, computed }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
+
+  // Drag-to-reorder state
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const listRef = useRef(null);
+
+  function onDragHandleTouchStart(e, i) {
+    haptic([20]);
+    setDragIdx(i);
+    setDragOverIdx(i);
+  }
+  function onDragHandleTouchMove(e) {
+    if (dragIdx == null) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const row = el?.closest('[data-wp-idx]');
+    if (row) {
+      const idx = parseInt(row.dataset.wpIdx, 10);
+      if (!isNaN(idx) && idx !== dragOverIdx) setDragOverIdx(idx);
+    }
+  }
+  function onDragHandleTouchEnd() {
+    if (dragIdx != null && dragOverIdx != null && dragIdx !== dragOverIdx) {
+      haptic([30]);
+      onReorder(dragIdx, dragOverIdx);
+    }
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }
 
   const fieldClass =
     `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:${theme.accentBorder} focus:outline-none`;
@@ -1378,21 +1426,30 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
 
       {/* WAYPOINTS */}
       <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
-        <div className="space-y-1.5">
-          {flight.checkpoints.map((cp, i) => (
-            <div key={i} className="flex items-stretch gap-1">
-              {/* Botões de reordenação — apenas para waypoints manuais não-origem */}
-              {!cp.isOrigin && !cp.isAuto && (
-                <div className="flex flex-col gap-1">
-                  <button onClick={() => onMoveUp(i)} disabled={i <= 1}
-                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${i <= 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`}`}>
-                    <ChevronUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => onMoveDown(i)} disabled={i >= flight.checkpoints.length - 1}
-                    className={`${theme.panel} border ${theme.panelBorder} rounded px-2 flex-1 flex items-center justify-center ${i >= flight.checkpoints.length - 1 ? "opacity-20" : `${theme.fgMuted} active:scale-90`}`}>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
+        <div
+          ref={listRef}
+          className="space-y-1.5"
+          onTouchMove={onDragHandleTouchMove}
+          onTouchEnd={onDragHandleTouchEnd}
+          onTouchCancel={onDragHandleTouchEnd}
+        >
+          {flight.checkpoints.map((cp, i) => {
+            const isDragging = dragIdx === i;
+            const isOver = dragOverIdx === i && dragIdx != null && dragIdx !== i;
+            return (
+            <div key={i} data-wp-idx={i}
+              className={`flex items-stretch gap-1 rounded transition-all ${isDragging ? "opacity-50 scale-[0.98]" : ""} ${isOver ? `ring-2 ${theme.accentBorder} bg-amber-500/10` : ""}`}>
+              {/* Alça de arrasto — apenas para waypoints manuais não-origem */}
+              {!cp.isOrigin && !cp.isAuto ? (
+                <div
+                  className={`${theme.panel} border ${theme.panelBorder} rounded px-1.5 flex items-center justify-center cursor-grab active:cursor-grabbing`}
+                  style={{ touchAction: "none" }}
+                  onTouchStart={(e) => onDragHandleTouchStart(e, i)}
+                >
+                  <GripVertical className={`w-4 h-4 ${theme.fgFaint}`} />
                 </div>
+              ) : (
+                <div className="w-5 shrink-0" />
               )}
 
               {/* Waypoint auto (TOC/TOD) — display only, no edit */}
@@ -1442,7 +1499,8 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
           <button onClick={onAddCp}
             className={`w-full border border-dashed ${theme.inputBorder} rounded px-3 py-2 ${theme.fgFaint} hover:${theme.accent} flex items-center justify-center gap-2 text-sm transition-colors`}>
             <Plus className="w-4 h-4" /> Adicionar waypoint
@@ -2341,6 +2399,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
   const alertDelta = prefs?.alertEtaDeltaMin ?? 5;
   const isAlert = deltaMin != null && Math.abs(deltaMin) >= alertDelta;
 
+  // Alerta háptico quando desvio de ETA passa do limiar
+  const prevIsAlert = useRef(false);
+  useEffect(() => {
+    if (isAlert && !prevIsAlert.current) haptic([100, 50, 100]);
+    prevIsAlert.current = isAlert;
+  }, [isAlert]);
+
   // Cronômetro desde último ponto cruzado
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -2485,7 +2550,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
 
-          {/* ETE e ETA em destaque */}
+          {/* ETE, ETA e barra de progresso da perna */}
           {(() => {
             // ETE corrigido pelo GS real do último ponto cruzado, se disponível
             const lastCrossedCp = computed.slice(0, next.userIdx).reverse().find(c => c.ata != null);
@@ -2494,8 +2559,10 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               ? (next.dist / refGs) * 60
               : next.etePlanned;
             const eteChanged = refGs && Math.abs(liveETE - (next.etePlanned||0)) >= 1;
+            const progressPct = liveETE > 0 ? Math.min(100, (elapsed / 60) / liveETE * 100) : 0;
             return (
-          <div className="grid grid-cols-2 gap-2 mb-3">
+          <>
+          <div className="grid grid-cols-2 gap-2 mb-2">
             <div className={`bg-black/30 border ${eteChanged ? theme.accentBorder : theme.panelBorder} rounded-lg px-3 py-3`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
               <div className={`text-3xl font-black num cockpit-glow ${eteChanged ? theme.accent : theme.fg}`}>
@@ -2523,13 +2590,34 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               )}
             </div>
           </div>
+          {/* Barra de progresso da perna atual */}
+          {legTimerStart && liveETE > 0 && (
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
+                <span className={`text-[9px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-1000 ${
+                    progressPct >= 95 ? "bg-red-500" :
+                    progressPct >= 75 ? "bg-amber-400" :
+                    isAlert ? "bg-red-500" : "bg-amber-500"
+                  }`}
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+            </div>
+          )}
+          </>
             );
           })()}
 
-          {/* Dist + vento como info secundária */}
-          <div className={`flex items-center justify-between text-[10px] num ${theme.fgFaint} mb-3 px-1`}>
+          {/* Dist + alt + vento como info secundária */}
+          <div className={`grid grid-cols-3 text-[10px] num ${theme.fgFaint} mb-3 px-1 gap-1`}>
             <span>{next.dist} NM</span>
-            <span>
+            <span className="text-center">{next.alt != null ? `${next.alt} ft` : "—"}</span>
+            <span className="text-right">
               {next.windMode === "none" ? "W=0" : (
                 <>
                   <Wind className="w-3 h-3 inline mr-0.5 opacity-70" />
@@ -2702,12 +2790,13 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
   const wrapperProps = isClickable ? { onClick: onEditAta } : {};
 
   // Subtítulo: depende do modo de visualização
+  const altLabel = cp.alt != null ? `${cp.alt} ft` : null;
   const subtitle = isOrigin ? "Origem"
     : isVirtual ? `${cp.dist} NM da dep. · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
-      ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
-      : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
+      ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
+      : `${cp.dist} NM · ${cp.etePlanned?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
 
   return (
     <Wrapper
