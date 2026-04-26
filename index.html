@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1833";
+const APP_VERSION = "20260426.1857";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -285,6 +285,7 @@ const DEFAULT_FLIGHT = {
   windVel: 15,
   isaDevC: 0,        // desvio ISA em °C (+ = mais quente que padrão)
   fuelInitial: null, // null = usar usable da aeronave
+  autoWpATAs: {},    // { "toc_0": "14:23", "tod_0": "16:45" } — ATAs de TOC/TOD virtuais
   freqs: { origin: { ...DEFAULT_FREQ }, destination: { ...DEFAULT_FREQ }, alternate: { ...DEFAULT_FREQ } },
   checkpoints: [
     // origem: dist=0, ATA é o EOBT
@@ -523,6 +524,69 @@ function NavlogApp() {
     return etas;
   }, [computed, ac]);
 
+  // Rota expandida com TOC/TOD virtuais interpolados entre as pernas
+  const liveRoute = useMemo(() => {
+    const result = [];
+    let tocN = 0, todN = 0;
+    computed.forEach((cp, i) => {
+      if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
+      const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
+      const prevAlt = i > 0 ? computed[i - 1].alt : 0;
+      if (cp.portions?.length > 1) {
+        let accDist = 0, accETE = 0;
+        for (let p = 0; p < cp.portions.length - 1; p++) {
+          const por = cp.portions[p];
+          const frac = cp.dist > 0 ? por.dist / cp.dist : 0;
+          accDist += por.dist;
+          accETE += frac * cp.etePlanned;
+          const from = por.phase, to = cp.portions[p + 1].phase;
+          let label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
+            : from !== "DESCIDA" && to === "DESCIDA" ? "TOD" : null;
+          if (label) {
+            const autoKey = label === "TOC" ? `toc_${tocN++}` : `tod_${todN++}`;
+            result.push({
+              name: label, isVirtual: true, autoKey, userIdx: i,
+              alt: label === "TOC" ? cp.alt : (prevAlt ?? cp.alt),
+              tc: cp.tc,
+              dist: Math.round(accDist * 10) / 10,
+              distToNext: Math.round((cp.dist - accDist) * 10) / 10,
+              etePlanned: accETE,
+              etaPlanned: prevEta + accETE,
+              ata: flight.autoWpATAs?.[autoKey] ?? null,
+              gsActual: null, portions: [], warnings: [], notes: "",
+            });
+          }
+        }
+      }
+      result.push({ ...cp, userIdx: i });
+    });
+    return result;
+  }, [computed, flight.autoWpATAs, flight.eobt]);
+
+  // Próximo item não cruzado na liveRoute (inclui TOC/TOD virtuais)
+  const nextLiveIdx = useMemo(() => {
+    for (let i = 0; i < liveRoute.length; i++) {
+      const item = liveRoute[i];
+      if (item.isOrigin || item.ata != null) continue;
+      if (item.isVirtual) {
+        // Pular se o próximo waypoint de usuário já foi cruzado
+        const nextUser = liveRoute.slice(i + 1).find(x => !x.isVirtual && !x.isOrigin);
+        if (nextUser?.ata != null) continue;
+      }
+      return i;
+    }
+    return liveRoute.length;
+  }, [liveRoute]);
+
+  function markVirtual(key) {
+    const now = nowHHMM();
+    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMM(now) } }));
+    setLegTimerStart(Date.now());
+  }
+  function unmarkVirtual(key) {
+    setFlight((f) => { const m = { ...(f.autoWpATAs || {}) }; delete m[key]; return { ...f, autoWpATAs: m }; });
+  }
+
   // Combustível restante real (baseado em ATAs reais consumindo no GPH planejado)
   const liveFuel = useMemo(() => {
     const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
@@ -603,7 +667,7 @@ function NavlogApp() {
     setFlight((f) => {
       const cps = [...f.checkpoints];
       [cps[i - 1], cps[i]] = [cps[i], cps[i - 1]];
-      return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
+      return { ...f, checkpoints: cps };
     });
   }
 
@@ -613,7 +677,7 @@ function NavlogApp() {
       if (i === 0) return f;
       const cps = [...f.checkpoints];
       [cps[i], cps[i + 1]] = [cps[i + 1], cps[i]];
-      return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
+      return { ...f, checkpoints: cps };
     });
   }
 
@@ -857,7 +921,7 @@ function NavlogApp() {
           });
         }
       });
-      return { ...f, checkpoints: rebuildRoute(newCps, ac, f.isaDevC || 0) };
+      return { ...f, checkpoints: newCps, autoWpATAs: {} };
     });
     setImportOpen(false);
   }
@@ -884,7 +948,12 @@ function NavlogApp() {
     (async () => {
       try {
         const r = await store.get("flight");
-        if (r) setFlight(JSON.parse(r));
+        if (r) {
+          const loaded = JSON.parse(r);
+          // Strip legacy isAuto waypoints from previous deploy
+          if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
+          setFlight({ ...DEFAULT_FLIGHT, ...loaded });
+        }
         const rr = await store.get("routes");
         if (rr) setSavedRoutes(JSON.parse(rr));
         const pp = await store.get("prefs");
@@ -977,7 +1046,7 @@ function NavlogApp() {
               setFlight((f) => {
                 const cps = [...f.checkpoints];
                 cps.splice(i, 1);
-                return { ...f, checkpoints: rebuildRoute(cps, ac, f.isaDevC || 0) };
+                return { ...f, checkpoints: cps };
               });
             }}
             onMoveUp={moveUp}
@@ -991,6 +1060,8 @@ function NavlogApp() {
         {tab === "flight" && (
           <FlightTab
             flight={flight} computed={computed} liveETAs={liveETAs} liveFuel={liveFuel}
+            liveRoute={liveRoute} nextLiveIdx={nextLiveIdx}
+            markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
             nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
             resetFlight={resetFlight} ac={ac} theme={theme}
             viewMode={viewMode} setViewMode={setViewMode}
@@ -1457,7 +1528,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
 
   function save() {
     setFlight((f) => {
-      let cps = [...f.checkpoints];
+      const cps = [...f.checkpoints];
       const saved = { ...cp, windMode };
       if (windMode !== "custom") { delete saved.windDir; delete saved.windVel; }
       if (isNew) {
@@ -1466,8 +1537,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
         cps[editingIdx] = { ...cps[editingIdx], ...saved };
         if (windMode !== "custom") { delete cps[editingIdx].windDir; delete cps[editingIdx].windVel; }
       }
-      const curAc = ac || Object.values(f)[0];
-      return { ...f, checkpoints: rebuildRoute(cps, curAc, f.isaDevC || 0) };
+      return { ...f, checkpoints: cps };
     });
     onClose();
   }
@@ -1475,10 +1545,9 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
   function remove() {
     if (!confirm(`Remover ${cp.name}?`)) return;
     setFlight((f) => {
-      let cps = [...f.checkpoints];
+      const cps = [...f.checkpoints];
       cps.splice(editingIdx, 1);
-      const curAc = ac || Object.values(f)[0];
-      return { ...f, checkpoints: rebuildRoute(cps, curAc, f.isaDevC || 0) };
+      return { ...f, checkpoints: cps };
     });
     onClose();
   }
@@ -2159,12 +2228,13 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, onEdit, onSave, onRe
 
 
 // --------- TAB EM VOO ---------
-function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
+function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
+    nextIdx, markCrossed,
     resetFlight, onEditAta, onEditNotes, theme, viewMode, setViewMode,
     legTimerStart, liveFuel, ac, prefs }) {
 
-  const next = nextIdx < computed.length ? computed[nextIdx] : null;
-  const liveNext = next ? liveETAs[nextIdx] : null;
+  const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
+  const liveNext = (next && !next.isVirtual) ? liveETAs[next.userIdx] : null;
   const planNext = next ? next.etaPlanned : null;
   const deltaMin = liveNext != null && planNext != null ? liveNext - planNext : null;
   const alertDelta = prefs?.alertEtaDeltaMin ?? 5;
@@ -2210,6 +2280,31 @@ function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
       )}
 
       {next ? (
+        next.isVirtual ? (
+          /* ---- Card de TOC / TOD virtual ---- */
+          <div className={`border-2 rounded-lg p-4 transition-all border-cyan-500/60 bg-cyan-500/5`}>
+            <div className="flex items-center justify-between mb-1">
+              <span className={`text-[10px] uppercase tracking-widest ${theme.cyan}`}>
+                {next.name === "TOC" ? "Topo de Subida" : "Início de Descida"}
+              </span>
+              <span className={`text-[10px] uppercase ${theme.fgFaint} num`}>
+                {next.alt != null ? `${next.alt} ft` : ""}
+              </span>
+            </div>
+            <div className={`text-4xl font-black cockpit-glow tracking-tight mb-3 ${theme.cyan}`}>
+              {next.name}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <BigStat theme={theme} label="Dist" value={`${next.dist} NM`} />
+              <BigStat theme={theme} label="ETA" value={formatHHMM(planNext)} />
+            </div>
+            <button onClick={() => markVirtual(next.autoKey)}
+              className={`w-full bg-cyan-700 text-white font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
+              <CircleCheckBig className="w-5 h-5" /> Atingi {next.name} agora
+            </button>
+          </div>
+        ) : (
+        /* ---- Card de waypoint normal ---- */
         <div className={`border-2 rounded-lg p-4 transition-all ${
           isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`
         }`}>
@@ -2244,11 +2339,12 @@ function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
               ))}
             </div>
           )}
-          <button onClick={() => markCrossed(nextIdx)}
+          <button onClick={() => markCrossed(next.userIdx)}
             className={`w-full ${isAlert ? "bg-red-600" : theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
             <CircleCheckBig className="w-5 h-5" /> Cruzei {next.name} agora
           </button>
         </div>
+        )
       ) : (
         <div className="bg-green-500/15 border-2 border-green-500/50 rounded-lg p-6 text-center">
           <CircleCheckBig className={`w-10 h-10 mx-auto ${theme.success} mb-2`} />
@@ -2302,11 +2398,20 @@ function FlightTab({ flight, computed, liveETAs, nextIdx, markCrossed,
             </button>
           </div>
         </div>
-        {computed.map((cp, i) => (
-          <CheckpointRow key={i} cp={cp} index={i} theme={theme}
-            isNext={i === nextIdx} etaPlanned={cp.etaPlanned} etaLive={liveETAs[i]}
-            crossed={cp.ata != null} isOrigin={cp.isOrigin} viewMode={viewMode}
-            onEditAta={() => onEditAta(i)} onEditNotes={() => onEditNotes(i)} />
+        {liveRoute.map((item, i) => (
+          <CheckpointRow key={item.isVirtual ? item.autoKey : `u${item.userIdx}`}
+            cp={item} index={i} theme={theme}
+            isNext={i === nextLiveIdx}
+            etaPlanned={item.etaPlanned}
+            etaLive={(!item.isVirtual && item.userIdx != null) ? liveETAs[item.userIdx] : null}
+            crossed={item.ata != null}
+            isOrigin={item.isOrigin}
+            isVirtual={item.isVirtual}
+            viewMode={viewMode}
+            onEditAta={() => !item.isVirtual && onEditAta(item.userIdx)}
+            onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
+            onUnmarkVirtual={item.isVirtual ? () => unmarkVirtual(item.autoKey) : null}
+          />
         ))}
       </div>
 
@@ -2357,8 +2462,11 @@ function ETACell({ label, value, delta, muted, theme }) {
   );
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrigin, onEditAta, onEditNotes, theme, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrigin, isVirtual, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
   const ringClass =
+    isVirtual && crossed ? "border-cyan-500/30 bg-cyan-500/5" :
+    isVirtual && isNext  ? "border-cyan-500/60 bg-cyan-500/5" :
+    isVirtual            ? "border-cyan-500/20 bg-transparent" :
     crossed ? "border-green-500/40 bg-green-500/5" :
     isNext  ? `${theme.accentBorder} bg-amber-500/5` :
               `${theme.panelBorder} ${theme.panel}/50`;
@@ -2370,11 +2478,13 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
     deltaMin < -1 ? theme.success : theme.fgFaint;
 
   const isAuto = cp.isAuto;
-  const Wrapper = (isOrigin || isAuto) ? "div" : "button";
-  const wrapperProps = (isOrigin || isAuto) ? {} : { onClick: onEditAta };
+  const isClickable = !isOrigin && !isAuto && !isVirtual;
+  const Wrapper = isClickable ? "button" : "div";
+  const wrapperProps = isClickable ? { onClick: onEditAta } : {};
 
   // Subtítulo: depende do modo de visualização
   const subtitle = isOrigin ? "Origem"
+    : isVirtual ? `${cp.dist} NM da dep. · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min · MH ${Math.round(cp.mh).toString().padStart(3, "0")}°`
@@ -2383,31 +2493,33 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
   return (
     <Wrapper
       {...wrapperProps}
-      className={`w-full text-left border rounded px-2 py-2 ${ringClass} ${!isOrigin ? "active:scale-[0.99] transition-transform" : ""}`}
+      className={`w-full text-left border rounded px-2 py-2 ${ringClass} ${isVirtual ? "border-dashed opacity-80" : ""} ${isClickable ? "active:scale-[0.99] transition-transform" : ""}`}
     >
       <div className="flex items-center gap-2">
         {/* Indicador */}
         <div className="w-6 text-center shrink-0">
           {crossed ? (
-            <CircleCheckBig className={`w-5 h-5 ${theme.success} mx-auto`} />
+            <CircleCheckBig className={`w-5 h-5 ${isVirtual ? theme.cyan : theme.success} mx-auto`} />
           ) : isNext ? (
-            <ChevronRight className={`w-5 h-5 ${theme.accent} mx-auto animate-pulse`} />
+            <ChevronRight className={`w-5 h-5 ${isVirtual ? theme.cyan : theme.accent} mx-auto animate-pulse`} />
+          ) : isVirtual ? (
+            <span className={`text-sm ${theme.cyan} opacity-60`}>{cp.name === "TOC" ? "↗" : "↘"}</span>
           ) : (
             <span className={`text-[10px] num ${theme.fgFaint}`}>{index + 1}</span>
           )}
         </div>
         {/* Nome + badges */}
         <div className="flex-1 min-w-0">
-          <div className={`font-bold truncate ${crossed ? theme.success : isNext ? theme.accent : theme.fg}`}>
+          <div className={`font-bold truncate ${crossed ? (isVirtual ? theme.cyan : theme.success) : isNext ? (isVirtual ? theme.cyan : theme.accent) : isVirtual ? theme.cyan : theme.fg}`}>
             {cp.name}
-            {cp.windMode === "none"   && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
-            {cp.windMode === "custom" && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
-            {cp.warnings?.length > 0  && <span className="ml-1 text-[9px] text-amber-400 border border-current rounded px-1">⚠</span>}
+            {!isVirtual && cp.windMode === "none"   && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
+            {!isVirtual && cp.windMode === "custom" && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
+            {!isVirtual && cp.warnings?.length > 0  && <span className="ml-1 text-[9px] text-amber-400 border border-current rounded px-1">⚠</span>}
           </div>
           {!cp.isOrigin && (
-            <div className={`text-[10px] ${theme.fgFaint} num`}>{subtitle}</div>
+            <div className={`text-[10px] ${isVirtual ? theme.cyan : theme.fgFaint} num opacity-70`}>{subtitle}</div>
           )}
-          {cp.notes && (
+          {!isVirtual && cp.notes && (
             <div className={`text-[10px] ${theme.cyan} truncate mt-0.5`}>📝 {cp.notes}</div>
           )}
         </div>
@@ -2421,21 +2533,21 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
               </div>
             ) : crossed ? (
               <div>
-                <div className={`text-[9px] uppercase ${theme.success} flex items-center gap-1 justify-end`}>
-                  ATA <Pencil className="w-2.5 h-2.5 opacity-60" />
+                <div className={`text-[9px] uppercase ${isVirtual ? theme.cyan : theme.success} flex items-center gap-1 justify-end`}>
+                  ATA {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-60" />}
                 </div>
-                <div className={`num font-bold ${theme.success}`}>{cp.ata}</div>
-                {cp.gsActual && (
+                <div className={`num font-bold ${isVirtual ? theme.cyan : theme.success}`}>{cp.ata}</div>
+                {!isVirtual && cp.gsActual && (
                   <div className={`text-[9px] num ${theme.fgFaint}`}>GS {Math.round(cp.gsActual)} kt</div>
                 )}
               </div>
             ) : (
               <div>
                 <div className={`text-[9px] uppercase ${theme.fgFaint} flex items-center gap-1 justify-end`}>
-                  ETA <Pencil className="w-2.5 h-2.5 opacity-40" />
+                  ETA {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-40" />}
                 </div>
-                <div className={`num font-bold ${theme.fgMuted}`}>{formatHHMM(etaPlanned)}</div>
-                {absDelta != null && absDelta > 0 && (
+                <div className={`num font-bold ${isVirtual ? theme.cyan : theme.fgMuted}`}>{formatHHMM(etaPlanned)}</div>
+                {!isVirtual && absDelta != null && absDelta > 0 && (
                   <div className={`text-[9px] num ${deltaColor}`}>
                     {etaLive ? formatHHMM(etaLive) : ""} ({sign}{absDelta})
                   </div>
@@ -2443,8 +2555,16 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
               </div>
             )}
           </div>
-          {/* Botão de nota — só para waypoints manuais */}
-          {!isOrigin && !isAuto && (
+          {/* Botão nota (só waypoints manuais) ou botão desfazer virtual */}
+          {isVirtual && crossed && onUnmarkVirtual ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onUnmarkVirtual(); }}
+              className={`mt-0.5 p-1 rounded ${theme.fgFaint} opacity-60 hover:opacity-100 active:scale-90`}
+              aria-label="Desfazer"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+          ) : !isOrigin && !isAuto && !isVirtual ? (
             <button
               onClick={(e) => { e.stopPropagation(); onEditNotes(); }}
               className={`mt-0.5 p-1 rounded ${cp.notes ? theme.cyan : theme.fgFaint} opacity-70 hover:opacity-100 active:scale-90`}
@@ -2452,7 +2572,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
             >
               <FileText className="w-3.5 h-3.5" />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </Wrapper>
