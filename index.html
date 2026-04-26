@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.2159";
+const APP_VERSION = "20260426.2202";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2429,6 +2429,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         <div className={`border-2 rounded-lg p-4 transition-all ${
           isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`
         }`}>
+          {/* Linha topo: label + alt/fases */}
           <div className="flex items-center justify-between mb-1">
             <span className={`text-[10px] uppercase tracking-widest ${isAlert ? theme.danger : theme.accent}`}>
               {isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
@@ -2438,17 +2439,53 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               {next.portions?.length > 1 ? ` · ${next.portions.map(p => p.phase === "SUBIDA" ? "↗" : p.phase === "DESCIDA" ? "↘" : "→").join("")}` : ""}
             </span>
           </div>
-          <div className={`text-4xl font-black cockpit-glow tracking-tight mb-3 ${isAlert ? theme.danger : theme.accent}`}>
-            {next.name}
+
+          {/* Nome + proa: dois focos principais */}
+          <div className="flex items-end justify-between mb-3 gap-2">
+            <div className={`text-4xl font-black cockpit-glow tracking-tight leading-none ${isAlert ? theme.danger : theme.accent}`}>
+              {next.name}
+            </div>
+            {/* Proa magnética — destaque máximo */}
+            <div className="text-right">
+              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
+              <div className={`text-4xl font-black num cockpit-glow leading-none ${isAlert ? theme.danger : theme.accent}`}>
+                {Math.round(next.mh).toString().padStart(3,"0")}°
+              </div>
+            </div>
           </div>
-          <div className={`grid gap-2 mb-3 ${liveNext != null ? "grid-cols-4" : "grid-cols-3"}`}>
-            <BigStat theme={theme} label="MH" value={`${Math.round(next.mh).toString().padStart(3,"0")}°`} />
-            <BigStat theme={theme} label="Dist" value={`${next.dist} NM`} />
-            <BigStat theme={theme} label="ETE" value={`${(next.etePlanned||0).toFixed(0)} min`} />
-            {liveNext != null && (
-              <ETACell theme={theme} label={isAlert ? "ETA ⚠" : "ETA"} value={formatHHMM(liveNext)} delta={deltaMin} />
-            )}
+
+          {/* ETE e ETA em destaque */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-3 py-3`}>
+              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
+              <div className={`text-3xl font-black num cockpit-glow ${theme.fg}`}>
+                {(next.etePlanned||0).toFixed(0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
+              </div>
+            </div>
+            <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
+              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
+              {liveNext != null ? (
+                <>
+                  <div className={`text-3xl font-black num cockpit-glow ${isAlert ? theme.danger : theme.cyan}`}>
+                    {formatHHMM(liveNext)}
+                  </div>
+                  {deltaMin != null && Math.abs(deltaMin) >= 1 && (
+                    <div className={`text-[10px] num mt-0.5 ${deltaMin > 0 ? theme.danger : theme.success}`}>
+                      {deltaMin > 0 ? "+" : "−"}{Math.abs(Math.round(deltaMin))} min
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className={`text-3xl font-black num ${theme.fgFaint}`}>—</div>
+              )}
+            </div>
           </div>
+
+          {/* Dist como info secundária */}
+          <div className={`text-[10px] num ${theme.fgFaint} text-center mb-3`}>
+            {next.dist} NM
+          </div>
+
           {next.warnings?.length > 0 && (
             <div className="mb-3 space-y-0.5">
               {next.warnings.map((w, i) => (
