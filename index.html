@@ -36,7 +36,7 @@
       Download, Upload, ChevronDown, ChevronUp
     } = LucideReact;
 
-const APP_VERSION = "20260426.1813";
+const APP_VERSION = "20260426.1818";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -187,6 +187,22 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
 }
 
 
+
+// Derive TOC/TOD annotation string from a computed checkpoint's portions
+// Returns null if single-phase, e.g. "TOC +23nm" or "TOD +40nm" or "TOC +5nm · TOD +80nm"
+function tocTodLabel(portions, dist) {
+  if (!portions || portions.length <= 1) return null;
+  const labels = [];
+  let acc = 0;
+  for (let i = 0; i < portions.length - 1; i++) {
+    acc += portions[i].dist;
+    const cur = portions[i].phase;
+    const nxt = portions[i + 1].phase;
+    if (cur === "SUBIDA" && nxt !== "SUBIDA") labels.push(`TOC +${acc.toFixed(0)}nm`);
+    if (cur !== "DESCIDA" && nxt === "DESCIDA") labels.push(`TOD +${acc.toFixed(0)}nm`);
+  }
+  return labels.length > 0 ? labels.join(" · ") : null;
+}
 
 // hh:mm parser/formatter
 function parseHHMM(s) {
@@ -924,6 +940,7 @@ function NavlogApp() {
             onImportFPL={() => setImportOpen(true)}
             fleet={fleet}
             onManageFleet={() => setFleetOpen(true)}
+            computed={computed}
           />
         )}
         {tab === "flight" && (
@@ -1085,7 +1102,7 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onImportFPL, fleet, onManageFleet }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onImportFPL, fleet, onManageFleet, computed }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -1249,9 +1266,16 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                     </div>
                     <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate`}>
                       {cp.isOrigin
-                        ? "Origem"
+                        ? `Origem · ${cp.alt ?? 0} ft`
                         : `${cp.alt ?? "?"} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
                     </div>
+                    {!cp.isOrigin && (() => {
+                      const comp = computed?.[i];
+                      const lbl = comp ? tocTodLabel(comp.portions, cp.dist) : null;
+                      return lbl ? (
+                        <div className={`text-[9px] ${theme.cyan} truncate`}>⊕ {lbl}</div>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
                 <Pencil className={`w-3.5 h-3.5 ${theme.fgFaint} shrink-0 ml-1`} />
@@ -1452,8 +1476,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme }) {
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className={`px-3 pb-1.5 text-[9px] ${theme.fgFaint} uppercase tracking-widest`}>
-            {isNew ? "Novo waypoint" : `Editar · ${cp.name || "—"}`}
+          <div className="px-3 pb-1.5 flex items-baseline gap-2">
+            <span className={`text-base font-black tracking-widest ${theme.accent} cockpit-glow`}>
+              {isNew ? "NOVO" : (cp.name || "—")}
+            </span>
+            <span className={`text-[9px] ${theme.fgFaint} uppercase tracking-widest`}>
+              {isNew ? "waypoint" : "editar waypoint"}
+            </span>
           </div>
         </div>
 
@@ -2334,6 +2363,10 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaLive, crossed, isOrig
           {!cp.isOrigin && (
             <div className={`text-[10px] ${theme.fgFaint} num`}>{subtitle}</div>
           )}
+          {!cp.isOrigin && (() => {
+            const lbl = tocTodLabel(cp.portions, cp.dist);
+            return lbl ? <div className={`text-[9px] ${theme.cyan} num`}>⊕ {lbl}</div> : null;
+          })()}
           {cp.notes && (
             <div className={`text-[10px] ${theme.cyan} truncate mt-0.5`}>📝 {cp.notes}</div>
           )}
