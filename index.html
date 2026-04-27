@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2243";
+const APP_VERSION = "20260427.2322";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1891,7 +1891,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
 
   // Passo corrente para origens: nome + altitude de saída
   const steps = isOrigin
-    ? ["nome", "alt", "resumo"]
+    ? ["nome", "coord", "alt", "resumo"]
     : WP_STEPS;
 
   const stepIdx = steps.indexOf(step);
@@ -4456,7 +4456,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+    <div className="flex flex-col overflow-hidden" style={{ position: "relative", isolation: "isolate", height: "calc(100dvh - 8rem)" }}>
       {/* Tile switcher */}
       <div className={`flex gap-1 p-2 ${theme.panel} border-b ${theme.panelBorder} shrink-0`}>
         {[['osm','OSM'],['sat','Satélite']].map(([key, label]) => (
