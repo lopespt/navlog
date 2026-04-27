@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.0124";
+const APP_VERSION = "20260427.1112";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -557,29 +557,36 @@ function NavlogApp() {
         wVel = flight.windVel;
       }
 
-      const r = calcLeg(cp.tc, cp.dist, avgTas, wDir, wVel, flight.variation, 0);
-      etaPlanned += r.ete;
-      cumDist += cp.dist || 0;
-      cumTime += r.ete;
-
-      // Fuel: distribute ETE proportionally to portions by distance
-      const totalDist = cp.dist || 0;
+      // Per-phase wind-corrected ETE: call calcLeg for each portion with its own TAS
+      let totalETE = 0;
       let fuelLeg = 0;
-      if (r.ete > 0 && totalDist > 0 && portions.length > 0) {
-        portions.forEach((p) => {
-          const portionETE = (p.dist / totalDist) * r.ete; // minutes
-          fuelLeg += (portionETE / 60) * p.gph;
-        });
-      }
-      const gphEffective = r.ete > 0 ? fuelLeg / (r.ete / 60) : ac.gphCruise;
+      let displayResult = null; // use cruise phase for MH/WCA/heading display
+      portions.forEach((p) => {
+        const pr = calcLeg(cp.tc, p.dist, p.tas, wDir, wVel, flight.variation, 0);
+        totalETE += pr.ete;
+        fuelLeg += (pr.ete / 60) * p.gph;
+        if (p.phase === "CRUZEIRO" || displayResult == null) displayResult = pr;
+      });
+      if (!displayResult) displayResult = calcLeg(cp.tc, cp.dist || 0, avgTas, wDir, wVel, flight.variation, 0);
+
+      const totalDist = cp.dist || 0;
+      // Effective GS = total distance / total time
+      const totalGS = totalETE > 0 ? (totalDist / totalETE) * 60 : displayResult.gs;
+      etaPlanned += totalETE;
+      cumDist += totalDist;
+      cumTime += totalETE;
+
+      const gphEffective = totalETE > 0 ? fuelLeg / (totalETE / 60) : ac.gphCruise;
       fuelRem -= fuelLeg;
 
       return {
         ...cp,
         alt: thisAlt,   // effective altitude (resolved useCruiseAlt)
-        tas: avgTas, ...r,
-        gsPlanned: r.gs,
-        etePlanned: r.ete,
+        tas: avgTas, ...displayResult,
+        gs: totalGS,
+        ete: totalETE,
+        gsPlanned: totalGS,
+        etePlanned: totalETE,
         etaPlanned,
         fuelLeg,
         fuelRemPlanned: fuelRem,
@@ -590,7 +597,7 @@ function NavlogApp() {
         windDirUsed: wDir,
         windVelUsed: wVel,
         windOverride: cp.windMode === "none" || cp.windMode === "custom",
-        warnings: validateLeg(cp, r),
+        warnings: validateLeg(cp, { gs: totalGS }),
         notes: cp.notes || "",
       };
     });
@@ -1995,44 +2002,11 @@ function StepNome({ cp, setCp, theme, onNext }) {
 // -------- PASSO: ALTITUDE --------
 function StepAlt({ cp, setCp, cruiseAlt, prevAlt, theme, onNext }) {
   const useCruise = cp.useCruiseAlt ?? false;
-  const [altDone, setAltDone] = useState(cp.alt != null || useCruise);
-
-  // Infer direction from prevAlt vs current alt for default label
-  const currentAlt = useCruise ? cruiseAlt : cp.alt;
-  const isClimbing = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
-  const isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
-  const contextDefault = isDescending ? "at_fix" : "asap";
-
-  const arrivalMode = cp.arrivalMode ?? null;
-  const arrivalValue = cp.arrivalValue ?? 5;
 
   function toggleCruise() {
     const next = !useCruise;
     setCp((p) => ({ ...p, useCruiseAlt: next, alt: next ? cruiseAlt : p.alt }));
-    if (next) setAltDone(true);
   }
-
-  function confirmAlt(v) {
-    setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false }));
-    setAltDone(true);
-  }
-
-  function setMode(mode) {
-    setCp((p) => ({ ...p, arrivalMode: mode }));
-  }
-
-  function adjustValue(delta) {
-    setCp((p) => ({ ...p, arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }));
-  }
-
-  const modeOpts = [
-    { key: "asap",       label: "ASAP",       sub: "Iniciar logo após o waypoint anterior" },
-    { key: "at_fix",     label: "No fix",     sub: "Chegar na altitude exatamente no fix" },
-    { key: "before_nm",  label: "Antes (NM)", sub: "Nivelado X NM antes do fix" },
-    { key: "before_min", label: "Antes (min)",sub: "Nivelado X min antes do fix" },
-  ];
-
-  const btnBase = `flex-1 px-2 py-2 rounded-lg border text-[11px] font-bold text-center transition-colors active:scale-95`;
 
   return (
     <div className="space-y-3">
@@ -2050,70 +2024,23 @@ function StepAlt({ cp, setCp, cruiseAlt, prevAlt, theme, onNext }) {
         </div>
       </button>
 
-      {!altDone ? (
-        !useCruise && (
-          <StepNumerico
-            theme={theme}
-            label="Altitude Alvo"
-            unit="ft"
-            hint="Altitude de chegada neste fix — ex: 7000"
-            maxDigits={5}
-            allowDecimal={false}
-            validate={(v) => v >= 0 && v <= 60000}
-            initial={cp.alt != null && !useCruise ? String(cp.alt) : ""}
-            onConfirm={confirmAlt}
-          />
-        )
+      {useCruise ? (
+        <button onClick={onNext}
+          className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+          Confirmar → ({cruiseAlt} ft)
+        </button>
       ) : (
-        <>
-          {/* Altitude confirmed — show value + edit link */}
-          {!useCruise && (
-            <button onClick={() => setAltDone(false)}
-              className={`w-full flex items-center justify-between px-4 py-2 border ${theme.panelBorder} rounded-xl ${theme.panel}`}>
-              <span className={`text-sm ${theme.fgMuted}`}>Altitude alvo</span>
-              <span className={`num font-black ${theme.accent}`}>{currentAlt} ft <span className={`text-[10px] ${theme.fgFaint}`}>editar</span></span>
-            </button>
-          )}
-
-          {/* Arrival mode — only shown when there's an altitude change */}
-          {(isClimbing || isDescending) && (
-            <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
-              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-                {isClimbing ? "Subida" : "Descida"} · quando nivelar
-                {arrivalMode == null && <span className={`ml-1 ${theme.cyan}`}> · padrão: {contextDefault === "asap" ? "ASAP" : "no fix"}</span>}
-              </div>
-              <div className="flex gap-1">
-                {modeOpts.map(({ key, label, sub }) => {
-                  const active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
-                  return (
-                    <button key={key} onClick={() => setMode(arrivalMode === key ? null : key)}
-                      className={`${btnBase} ${active ? `${theme.accentBorder} bg-amber-500/10 ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`}`}
-                      title={sub}>
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
-                <div className="flex items-center gap-3 pt-1">
-                  <button onClick={() => adjustValue(-1)}
-                    className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
-                  <div className="flex-1 text-center">
-                    <span className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
-                    <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
-                  </div>
-                  <button onClick={() => adjustValue(1)}
-                    className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <button onClick={onNext}
-            className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
-            Confirmar → ({currentAlt} ft)
-          </button>
-        </>
+        <StepNumerico
+          theme={theme}
+          label="Altitude Alvo"
+          unit="ft"
+          hint="Altitude de chegada neste fix — ex: 7000"
+          maxDigits={5}
+          allowDecimal={false}
+          validate={(v) => v >= 0 && v <= 60000}
+          initial={cp.alt != null ? String(cp.alt) : ""}
+          onConfirm={(v) => { setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false })); onNext(); }}
+        />
       )}
     </div>
   );
