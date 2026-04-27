@@ -75,7 +75,7 @@ function playAlarm() {
   else go();
 }
 
-const APP_VERSION = "20260427.0044";
+const APP_VERSION = "20260427.0057";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -196,32 +196,80 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
 
   if (altDiff > 50) { // climbing
     const climbDist = (altDiff / roc) * (tasClimb / 60);
+    const mode = cp.arrivalMode ?? "asap"; // default: start climbing right away
     if (climbDist >= dist - 0.1) {
+      // Whole leg needed for climb regardless of mode
       portions = [{ phase: "SUBIDA", dist, tas: tasClimb, gph: gphC }];
-    } else {
+    } else if (mode === "asap") {
+      // Climb right after previous fix, then cruise
       portions = [
         { phase: "SUBIDA",   dist: climbDist,       tas: tasClimb,  gph: gphC },
         { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
       ];
+    } else if (mode === "at_fix") {
+      // Late climb: cruise first, TOC exactly at the fix
+      portions = [
+        { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
+        { phase: "SUBIDA",   dist: climbDist,        tas: tasClimb,  gph: gphC },
+      ];
+    } else {
+      // before_nm / before_min: cruise → climb → cruise(beforeNm)
+      const beforeNm = mode === "before_nm"
+        ? (cp.arrivalValue ?? 0)
+        : (cp.arrivalValue ?? 0) * tasCruise / 60;
+      const cruiseFirst = dist - climbDist - beforeNm;
+      if (cruiseFirst <= 0.1) {
+        // Not enough room, fall back to asap
+        portions = [
+          { phase: "SUBIDA",   dist: climbDist,       tas: tasClimb,  gph: gphC },
+          { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
+        ];
+      } else {
+        portions = [
+          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise, gph: gphR },
+          { phase: "SUBIDA",   dist: climbDist,   tas: tasClimb,  gph: gphC },
+          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruise, gph: gphR },
+        ];
+      }
     }
   } else if (altDiff < -50) { // descending
     const descDist = (-altDiff / rod) * (tasDescent / 60);
-    const LEVEL_BOD_NM = 5; // level-off at dest altitude before fix → generates BOD
     const tasCruiseLow = correctTAS(ac.tasCruise, tAlt, isaDevC);
+    const mode = cp.arrivalMode ?? "at_fix"; // default: arrive at altitude right at the fix
     if (descDist >= dist - 0.1) {
+      // Whole leg needed for descent regardless of mode
       portions = [{ phase: "DESCIDA", dist, tas: tasDescent, gph: gphD }];
-    } else if (dist - descDist > LEVEL_BOD_NM + 0.5) {
-      // cruise → descend → level-off at dest alt (BOD zone)
-      portions = [
-        { phase: "CRUZEIRO", dist: dist - descDist - LEVEL_BOD_NM, tas: tasCruise,    gph: gphR },
-        { phase: "DESCIDA",  dist: descDist,                        tas: tasDescent,   gph: gphD },
-        { phase: "CRUZEIRO", dist: LEVEL_BOD_NM,                    tas: tasCruiseLow, gph: gphR },
-      ];
-    } else {
+    } else if (mode === "at_fix") {
+      // Arrive at dest altitude right at the fix, no level-off
       portions = [
         { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
         { phase: "DESCIDA",  dist: descDist,        tas: tasDescent, gph: gphD },
       ];
+    } else if (mode === "asap") {
+      // Start descending right after previous fix, level-off early (BOD early)
+      portions = [
+        { phase: "DESCIDA",  dist: descDist,       tas: tasDescent,   gph: gphD },
+        { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruiseLow, gph: gphR },
+      ];
+    } else {
+      // before_nm / before_min: cruise → descent → cruise(beforeNm)
+      const beforeNm = mode === "before_nm"
+        ? (cp.arrivalValue ?? 0)
+        : (cp.arrivalValue ?? 0) * tasCruiseLow / 60;
+      const cruiseFirst = dist - descDist - beforeNm;
+      if (cruiseFirst <= 0.1) {
+        // Not enough room, fall back to at_fix
+        portions = [
+          { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
+          { phase: "DESCIDA",  dist: descDist,        tas: tasDescent, gph: gphD },
+        ];
+      } else {
+        portions = [
+          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise,    gph: gphR },
+          { phase: "DESCIDA",  dist: descDist,    tas: tasDescent,   gph: gphD },
+          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruiseLow, gph: gphR },
+        ];
+      }
     }
   } else { // level
     portions = [{ phase: "CRUZEIRO", dist, tas: tasCruise, gph: gphR }];
@@ -1751,9 +1799,17 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
           {step === "nome" && (
             <StepNome cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
-          {step === "alt" && (
-            <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} theme={theme} onNext={next} />
-          )}
+          {step === "alt" && (() => {
+            const prevCpForAlt = isNew
+              ? flight.checkpoints[flight.checkpoints.length - 1]
+              : flight.checkpoints[editingIdx - 1];
+            const prevAltForStep = prevCpForAlt?.useCruiseAlt
+              ? (flight.cruiseAlt ?? 7000)
+              : (prevCpForAlt?.alt ?? null);
+            return (
+              <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} prevAlt={prevAltForStep} theme={theme} onNext={next} />
+            );
+          })()}
           {step === "tc" && (
             <StepTC
               theme={theme}
@@ -1892,13 +1948,46 @@ function StepNome({ cp, setCp, theme, onNext }) {
 }
 
 // -------- PASSO: ALTITUDE --------
-function StepAlt({ cp, setCp, cruiseAlt, theme, onNext }) {
+function StepAlt({ cp, setCp, cruiseAlt, prevAlt, theme, onNext }) {
   const useCruise = cp.useCruiseAlt ?? false;
+  const [altDone, setAltDone] = useState(cp.alt != null || useCruise);
+
+  // Infer direction from prevAlt vs current alt for default label
+  const currentAlt = useCruise ? cruiseAlt : cp.alt;
+  const isClimbing = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
+  const isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
+  const contextDefault = isDescending ? "at_fix" : "asap";
+
+  const arrivalMode = cp.arrivalMode ?? null;
+  const arrivalValue = cp.arrivalValue ?? 5;
 
   function toggleCruise() {
     const next = !useCruise;
     setCp((p) => ({ ...p, useCruiseAlt: next, alt: next ? cruiseAlt : p.alt }));
+    if (next) setAltDone(true);
   }
+
+  function confirmAlt(v) {
+    setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false }));
+    setAltDone(true);
+  }
+
+  function setMode(mode) {
+    setCp((p) => ({ ...p, arrivalMode: mode }));
+  }
+
+  function adjustValue(delta) {
+    setCp((p) => ({ ...p, arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }));
+  }
+
+  const modeOpts = [
+    { key: "asap",       label: "ASAP",       sub: "Iniciar logo após o waypoint anterior" },
+    { key: "at_fix",     label: "No fix",     sub: "Chegar na altitude exatamente no fix" },
+    { key: "before_nm",  label: "Antes (NM)", sub: "Nivelado X NM antes do fix" },
+    { key: "before_min", label: "Antes (min)",sub: "Nivelado X min antes do fix" },
+  ];
+
+  const btnBase = `flex-1 px-2 py-2 rounded-lg border text-[11px] font-bold text-center transition-colors active:scale-95`;
 
   return (
     <div className="space-y-3">
@@ -1916,23 +2005,70 @@ function StepAlt({ cp, setCp, cruiseAlt, theme, onNext }) {
         </div>
       </button>
 
-      {useCruise ? (
-        <button onClick={onNext}
-          className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
-          Confirmar → ({cruiseAlt} ft)
-        </button>
+      {!altDone ? (
+        !useCruise && (
+          <StepNumerico
+            theme={theme}
+            label="Altitude Alvo"
+            unit="ft"
+            hint="Altitude de chegada neste fix — ex: 7000"
+            maxDigits={5}
+            allowDecimal={false}
+            validate={(v) => v >= 0 && v <= 60000}
+            initial={cp.alt != null && !useCruise ? String(cp.alt) : ""}
+            onConfirm={confirmAlt}
+          />
+        )
       ) : (
-        <StepNumerico
-          theme={theme}
-          label="Altitude Alvo"
-          unit="ft"
-          hint="Altitude de chegada neste fix — ex: 7000"
-          maxDigits={5}
-          allowDecimal={false}
-          validate={(v) => v >= 0 && v <= 60000}
-          initial={cp.alt != null && !useCruise ? String(cp.alt) : ""}
-          onConfirm={(v) => { setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false })); onNext(); }}
-        />
+        <>
+          {/* Altitude confirmed — show value + edit link */}
+          {!useCruise && (
+            <button onClick={() => setAltDone(false)}
+              className={`w-full flex items-center justify-between px-4 py-2 border ${theme.panelBorder} rounded-xl ${theme.panel}`}>
+              <span className={`text-sm ${theme.fgMuted}`}>Altitude alvo</span>
+              <span className={`num font-black ${theme.accent}`}>{currentAlt} ft <span className={`text-[10px] ${theme.fgFaint}`}>editar</span></span>
+            </button>
+          )}
+
+          {/* Arrival mode — only shown when there's an altitude change */}
+          {(isClimbing || isDescending) && (
+            <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                {isClimbing ? "Subida" : "Descida"} · quando nivelar
+                {arrivalMode == null && <span className={`ml-1 ${theme.cyan}`}> · padrão: {contextDefault === "asap" ? "ASAP" : "no fix"}</span>}
+              </div>
+              <div className="flex gap-1">
+                {modeOpts.map(({ key, label, sub }) => {
+                  const active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
+                  return (
+                    <button key={key} onClick={() => setMode(arrivalMode === key ? null : key)}
+                      className={`${btnBase} ${active ? `${theme.accentBorder} bg-amber-500/10 ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`}`}
+                      title={sub}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
+                <div className="flex items-center gap-3 pt-1">
+                  <button onClick={() => adjustValue(-1)}
+                    className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
+                  <div className="flex-1 text-center">
+                    <span className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
+                    <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
+                  </div>
+                  <button onClick={() => adjustValue(1)}
+                    className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button onClick={onNext}
+            className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+            Confirmar → ({currentAlt} ft)
+          </button>
+        </>
       )}
     </div>
   );
@@ -2391,7 +2527,15 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, o
 
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
-    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: cp.useCruiseAlt ? `CRZ (${cruiseAlt} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—"), step: "alt" },
+    { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: (() => {
+        const altStr = cp.useCruiseAlt ? `CRZ (${cruiseAlt} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—");
+        const modeStr = cp.arrivalMode === "asap" ? " · ASAP"
+          : cp.arrivalMode === "at_fix" ? " · no fix"
+          : cp.arrivalMode === "before_nm" ? ` · −${cp.arrivalValue ?? 5} NM`
+          : cp.arrivalMode === "before_min" ? ` · −${cp.arrivalValue ?? 5} min`
+          : "";
+        return altStr + modeStr;
+      })(), step: "alt" },
     ...(!isOrigin ? [
       { label: "True Course",   value: cp.tc != null ? `${String(Math.round(cp.tc)).padStart(3,"0")}°` : "—", step: "tc"   },
       { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
