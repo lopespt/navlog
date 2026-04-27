@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2343";
+const APP_VERSION = "20260427.2351";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -604,13 +604,27 @@ function NavlogApp() {
 
   // Computa dados de cada checkpoint (perna ATÉ ele)
   const computed = useMemo(() => {
+    // Lat/lon is source of truth: for consecutive pairs with explicit coords,
+    // always derive TC and dist from geometry (overrides any manually stored value).
+    var resolvedCps = flight.checkpoints.map(function(cp, i) {
+      if (i === 0 || cp.isOrigin) return cp;
+      var prev = flight.checkpoints[i - 1];
+      if (prev.lat != null && prev.lon != null && cp.lat != null && cp.lon != null) {
+        return Object.assign({}, cp, {
+          tc:   Math.round(gcTC(prev.lat, prev.lon, cp.lat, cp.lon)),
+          dist: Math.round(gcDist(prev.lat, prev.lon, cp.lat, cp.lon) * 10) / 10
+        });
+      }
+      return cp;
+    });
+
     const eobtMin = parseHHMM(flight.eobt) ?? 0;
     const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
     let etaPlanned = eobtMin;
     let fuelRem = fuelStart;
     let cumDist = 0;
     let cumTime = 0;
-    var _res = flight.checkpoints.map((cp, i) => {
+    var _res = resolvedCps.map((cp, i) => {
       if (cp.isOrigin) {
         const originAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? 0);
         return {
@@ -631,7 +645,7 @@ function NavlogApp() {
       }
 
       // Altitude-per-fix: get prev fix altitude (resolve useCruiseAlt)
-      const prevCp = flight.checkpoints[i - 1];
+      const prevCp = resolvedCps[i - 1];
       const prevAlt = prevCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (prevCp?.alt ?? 0);
       const thisAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? flight.cruiseAlt ?? 7000);
 
@@ -1756,7 +1770,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                       <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate flex items-center gap-1`}>
                         {cp.isOrigin
                           ? `Origem · ${cp.useCruiseAlt ? (computed.find(c=>c.isOrigin)?.alt ?? cp.alt) : (cp.alt ?? 0)} ft`
-                          : `${cp.useCruiseAlt ? (computed[i]?.alt ?? cp.alt) : (cp.alt ?? "?")} ft · TC ${String(cp.tc ?? 0).padStart(3, "0")}° · ${cp.dist ?? 0} NM`}
+                          : `${cp.useCruiseAlt ? (computed[i]?.alt ?? cp.alt) : (cp.alt ?? "?")} ft · TC ${String(computed[i]?.tc ?? cp.tc ?? 0).padStart(3, "0")}° · ${computed[i]?.dist ?? cp.dist ?? 0} NM`}
                         {cp.useCruiseAlt && <span className={`text-[8px] ${theme.accent} border border-current rounded px-1 normal-case`}>CRZ</span>}
                       </div>
                     </div>
