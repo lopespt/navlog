@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.1112";
+const APP_VERSION = "20260427.1126";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -176,12 +176,23 @@ function validateLeg(cp, result) {
 }
 
 // Compute phase portions for a leg given altitude at prev fix → this fix
-// Returns { portions: [{phase, dist, tas, gph}], avgTas }
-function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
+// wDir/wVel/variation are wind params needed to compute wind-corrected GS per phase.
+// Returns { portions: [{phase, dist, tas, gph, timeMin}], avgTas }
+// timeMin: actual flight time for that phase (climb/descent time is fixed by alt/ROC;
+//          cruise time derived from remaining dist / wind-corrected GS)
+// dist:    horizontal distance covered during that phase (climb/descent = GS × timeMin/60)
+function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, variation) {
+  const tc = cp.tc ?? 0;
+  const wd = wDir ?? 0, wv = wVel ?? 0, va = variation ?? 0;
+
+  const tasCr0 = cp.tasCruiseOvr ?? correctTAS(ac.tasCruise, thisAlt ?? 0, isaDevC);
+  const gphCr0 = cp.gphCruiseOvr ?? ac.gphCruise;
+  // Helper: wind-corrected GS for a given TAS
+  function gs(tas) { return Math.max(1, calcLeg(tc, 1, tas, wd, wv, va, 0).gs); }
+
   if (!dist || dist <= 0) {
-    const tasCr = cp.tasCruiseOvr ?? correctTAS(ac.tasCruise, thisAlt ?? 0, isaDevC);
-    const gphCr = cp.gphCruiseOvr ?? ac.gphCruise;
-    return { portions: [{ phase: "CRUZEIRO", dist: 0, tas: tasCr, gph: gphCr }], avgTas: tasCr };
+    const tMin = 0;
+    return { portions: [{ phase: "CRUZEIRO", dist: 0, tas: tasCr0, gph: gphCr0, timeMin: tMin }], avgTas: tasCr0 };
   }
 
   const pAlt = prevAlt ?? 0;
@@ -197,96 +208,116 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
   const gphR = cp.gphCruiseOvr  ?? ac.gphCruise;
   const gphD = cp.gphDescentOvr ?? ac.gphDescent;
 
+  const gsClimb   = gs(tasClimb);
+  const gsCruise  = gs(tasCruise);
+  const gsDescent = gs(tasDescent);
+
   let portions;
   const roc = ac.rocClimb   || 500;
   const rod = ac.rodDescent || 500;
 
   if (altDiff > 50) { // climbing
-    const climbDist = (altDiff / roc) * (tasClimb / 60);
+    // Climb time fixed by physics: altitude gain / climb rate
+    const climbTimeMin = altDiff / roc;
+    // Actual horizontal distance covered while climbing (wind-corrected)
+    const climbDist = gsClimb * climbTimeMin / 60;
     const mode = cp.arrivalMode ?? "asap"; // default: start climbing right away
+
     if (climbDist >= dist - 0.1) {
-      // Whole leg needed for climb regardless of mode
-      portions = [{ phase: "SUBIDA", dist, tas: tasClimb, gph: gphC }];
+      // Whole leg is climbing — may not complete the climb but that's OK
+      const t = dist / gsClimb * 60;
+      portions = [{ phase: "SUBIDA", dist, tas: tasClimb, gph: gphC, timeMin: t }];
     } else if (mode === "asap") {
-      // Climb right after previous fix, then cruise
+      const cruiseDist = dist - climbDist;
+      const cruiseTime = cruiseDist / gsCruise * 60;
       portions = [
-        { phase: "SUBIDA",   dist: climbDist,       tas: tasClimb,  gph: gphC },
-        { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
+        { phase: "SUBIDA",   dist: climbDist,  tas: tasClimb,  gph: gphC, timeMin: climbTimeMin },
+        { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise, gph: gphR, timeMin: cruiseTime   },
       ];
     } else if (mode === "at_fix") {
-      // Late climb: cruise first, TOC exactly at the fix
+      // Late climb: cruise first, TOC at the fix
+      const cruiseDist = dist - climbDist;
+      const cruiseTime = cruiseDist / gsCruise * 60;
       portions = [
-        { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
-        { phase: "SUBIDA",   dist: climbDist,        tas: tasClimb,  gph: gphC },
+        { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise, gph: gphR, timeMin: cruiseTime   },
+        { phase: "SUBIDA",   dist: climbDist,  tas: tasClimb,  gph: gphC, timeMin: climbTimeMin },
       ];
     } else {
-      // before_nm / before_min: cruise → climb → cruise(beforeNm)
+      // before_nm / before_min: cruise → climb → cruise(buffer)
       const beforeNm = mode === "before_nm"
         ? (cp.arrivalValue ?? 0)
-        : (cp.arrivalValue ?? 0) * tasCruise / 60;
+        : (cp.arrivalValue ?? 0) * gsCruise / 60;
       const cruiseFirst = dist - climbDist - beforeNm;
       if (cruiseFirst <= 0.1) {
-        // Not enough room, fall back to asap
+        const cruiseDist = dist - climbDist;
+        const cruiseTime = cruiseDist / gsCruise * 60;
         portions = [
-          { phase: "SUBIDA",   dist: climbDist,       tas: tasClimb,  gph: gphC },
-          { phase: "CRUZEIRO", dist: dist - climbDist, tas: tasCruise, gph: gphR },
+          { phase: "SUBIDA",   dist: climbDist,  tas: tasClimb,  gph: gphC, timeMin: climbTimeMin },
+          { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise, gph: gphR, timeMin: cruiseTime   },
         ];
       } else {
         portions = [
-          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise, gph: gphR },
-          { phase: "SUBIDA",   dist: climbDist,   tas: tasClimb,  gph: gphC },
-          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruise, gph: gphR },
+          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise, gph: gphR, timeMin: cruiseFirst / gsCruise * 60 },
+          { phase: "SUBIDA",   dist: climbDist,   tas: tasClimb,  gph: gphC, timeMin: climbTimeMin               },
+          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruise, gph: gphR, timeMin: beforeNm / gsCruise * 60   },
         ];
       }
     }
   } else if (altDiff < -50) { // descending
-    const descDist = (-altDiff / rod) * (tasDescent / 60);
+    // Descent time fixed by physics: altitude loss / descent rate
+    const descentTimeMin = -altDiff / rod;
     const tasCruiseLow = correctTAS(ac.tasCruise, tAlt, isaDevC);
+    const gsCruiseLow = gs(tasCruiseLow);
+    const descDist = gsDescent * descentTimeMin / 60;
     const mode = cp.arrivalMode ?? "at_fix"; // default: arrive at altitude right at the fix
+
     if (descDist >= dist - 0.1) {
-      // Whole leg needed for descent regardless of mode
-      portions = [{ phase: "DESCIDA", dist, tas: tasDescent, gph: gphD }];
+      const t = dist / gsDescent * 60;
+      portions = [{ phase: "DESCIDA", dist, tas: tasDescent, gph: gphD, timeMin: t }];
     } else if (mode === "at_fix") {
-      // Arrive at dest altitude right at the fix, no level-off
+      const cruiseDist = dist - descDist;
+      const cruiseTime = cruiseDist / gsCruise * 60;
       portions = [
-        { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
-        { phase: "DESCIDA",  dist: descDist,        tas: tasDescent, gph: gphD },
+        { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise,  gph: gphR, timeMin: cruiseTime    },
+        { phase: "DESCIDA",  dist: descDist,   tas: tasDescent, gph: gphD, timeMin: descentTimeMin },
       ];
     } else if (mode === "asap") {
-      // Start descending right after previous fix, level-off early (BOD early)
+      const cruiseDist = dist - descDist;
+      const cruiseTime = cruiseDist / gsCruiseLow * 60;
       portions = [
-        { phase: "DESCIDA",  dist: descDist,       tas: tasDescent,   gph: gphD },
-        { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruiseLow, gph: gphR },
+        { phase: "DESCIDA",  dist: descDist,   tas: tasDescent,   gph: gphD, timeMin: descentTimeMin },
+        { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruiseLow, gph: gphR, timeMin: cruiseTime     },
       ];
     } else {
-      // before_nm / before_min: cruise → descent → cruise(beforeNm)
+      // before_nm / before_min: cruise → descent → cruise(buffer)
       const beforeNm = mode === "before_nm"
         ? (cp.arrivalValue ?? 0)
-        : (cp.arrivalValue ?? 0) * tasCruiseLow / 60;
+        : (cp.arrivalValue ?? 0) * gsCruiseLow / 60;
       const cruiseFirst = dist - descDist - beforeNm;
       if (cruiseFirst <= 0.1) {
-        // Not enough room, fall back to at_fix
+        const cruiseDist = dist - descDist;
+        const cruiseTime = cruiseDist / gsCruise * 60;
         portions = [
-          { phase: "CRUZEIRO", dist: dist - descDist, tas: tasCruise,  gph: gphR },
-          { phase: "DESCIDA",  dist: descDist,        tas: tasDescent, gph: gphD },
+          { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise,  gph: gphR, timeMin: cruiseTime    },
+          { phase: "DESCIDA",  dist: descDist,   tas: tasDescent, gph: gphD, timeMin: descentTimeMin },
         ];
       } else {
         portions = [
-          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise,    gph: gphR },
-          { phase: "DESCIDA",  dist: descDist,    tas: tasDescent,   gph: gphD },
-          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruiseLow, gph: gphR },
+          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise,    gph: gphR, timeMin: cruiseFirst / gsCruise * 60    },
+          { phase: "DESCIDA",  dist: descDist,    tas: tasDescent,   gph: gphD, timeMin: descentTimeMin                 },
+          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruiseLow, gph: gphR, timeMin: beforeNm / gsCruiseLow * 60   },
         ];
       }
     }
   } else { // level
-    portions = [{ phase: "CRUZEIRO", dist, tas: tasCruise, gph: gphR }];
+    const t = gsCruise > 0 ? dist / gsCruise * 60 : 0;
+    portions = [{ phase: "CRUZEIRO", dist, tas: tasCruise, gph: gphR, timeMin: t }];
   }
 
-  const totalD = portions.reduce((s, p) => s + p.dist, 0);
-  // Time-based effective TAS: totalDist / Σ(dist_i/tas_i)
-  // Ensures (totalD / avgTas) = actual total no-wind flight time
-  const totalNoWindTime = portions.reduce((s, p) => s + (p.tas > 0 ? p.dist / p.tas : 0), 0);
-  const avgTas = totalNoWindTime > 0 ? totalD / totalNoWindTime : tasCruise;
+  // avgTas: display TAS (cruise phase preferred)
+  const totalTime = portions.reduce((s, p) => s + (p.timeMin ?? 0), 0);
+  const totalD    = portions.reduce((s, p) => s + p.dist, 0);
+  const avgTas = totalTime > 0 ? (totalD / totalTime) * 60 : tasCruise;
 
   return { portions, avgTas };
 }
@@ -540,9 +571,6 @@ function NavlogApp() {
       const prevAlt = prevCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (prevCp?.alt ?? 0);
       const thisAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? flight.cruiseAlt ?? 7000);
 
-      // Compute phase split and weighted-average TAS
-      const { portions, avgTas } = computeLegPhases(prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0);
-
       // Vento: windMode = null/undefined → padrão da rota
       //                   "none"          → sem vento (vel=0)
       //                   "custom"        → windDir/windVel do checkpoint
@@ -557,17 +585,25 @@ function NavlogApp() {
         wVel = flight.windVel;
       }
 
-      // Per-phase wind-corrected ETE: call calcLeg for each portion with its own TAS
+      // Compute phase split — wind resolved first so GS/timeMin per phase is correct
+      const { portions, avgTas } = computeLegPhases(
+        prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0,
+        wDir, wVel, flight.variation
+      );
+
+      // ETE = sum of timeMin per portion (climb/descent time is fixed by altitude/ROC, not distance)
+      // Fuel = sum of (timeMin/60) × gph per portion
       let totalETE = 0;
       let fuelLeg = 0;
       let displayResult = null; // use cruise phase for MH/WCA/heading display
       portions.forEach((p) => {
-        const pr = calcLeg(cp.tc, p.dist, p.tas, wDir, wVel, flight.variation, 0);
-        totalETE += pr.ete;
-        fuelLeg += (pr.ete / 60) * p.gph;
+        totalETE += p.timeMin ?? 0;
+        fuelLeg += ((p.timeMin ?? 0) / 60) * p.gph;
+        // For heading/WCA display, prefer the cruise phase
+        const pr = calcLeg(cp.tc, 1, p.tas, wDir, wVel, flight.variation, 0);
         if (p.phase === "CRUZEIRO" || displayResult == null) displayResult = pr;
       });
-      if (!displayResult) displayResult = calcLeg(cp.tc, cp.dist || 0, avgTas, wDir, wVel, flight.variation, 0);
+      if (!displayResult) displayResult = calcLeg(cp.tc, 1, avgTas, wDir, wVel, flight.variation, 0);
 
       const totalDist = cp.dist || 0;
       // Effective GS = total distance / total time
@@ -647,13 +683,13 @@ function NavlogApp() {
       if (cp.portions?.length > 1) {
         let accDist = 0, accETE = 0;
         let prevVirtETE = 0, prevVirtDist = 0;
-        // Total no-wind time for this leg — used to distribute etePlanned by actual phase time
-        const legNoWindTime = cp.portions.reduce((s, p) => s + (p.tas > 0 ? p.dist / p.tas : 0), 0);
+        // Total leg time from portions (sum of timeMin), used to distribute etePlanned by phase
+        const totalLegTime = cp.portions.reduce((s, p) => s + (p.timeMin ?? 0), 0);
         for (let p = 0; p < cp.portions.length - 1; p++) {
           const por = cp.portions[p];
-          // Time fraction: how much of the leg time this phase represents
-          const timeFrac = legNoWindTime > 0 && por.tas > 0
-            ? (por.dist / por.tas) / legNoWindTime
+          // Time fraction: portion's timeMin share of total leg time
+          const timeFrac = totalLegTime > 0 && (por.timeMin ?? 0) > 0
+            ? por.timeMin / totalLegTime
             : (cp.dist > 0 ? por.dist / cp.dist : 0);
           accDist += por.dist;
           accETE += timeFrac * cp.etePlanned;
