@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.1142";
+const APP_VERSION = "20260427.1157";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -712,7 +712,7 @@ function NavlogApp() {
               distToNext: Math.round((cp.dist - accDist) * 10) / 10,
               etePlanned: accETE,
               eteLeg: Math.round(eteLeg * 10) / 10,
-              distLeg: Math.round(distLeg * 10) / 10,
+              distLeg: Math.round(distLeg * 100) / 100,
               etaPlanned: prevEta + accETE,
               ata: flight.autoWpATAs?.[autoKey] ?? null,
               gsActual: null, portions: [], warnings: [], notes: "",
@@ -2910,7 +2910,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 
           {/* Dist + alt + vento como info secundária */}
           <div className={`grid grid-cols-3 text-[10px] num ${theme.fgFaint} mb-3 px-1 gap-1`}>
-            <span>{next.distLeg ?? next.dist} NM</span>
+            <span>{(next.distLeg ?? next.dist)?.toFixed(2)} NM</span>
             <span className="text-center">{next.alt != null ? `${next.alt} ft` : "—"}</span>
             <span className="text-right">
               {next.windMode === "none" ? "W=0" : (
@@ -3104,13 +3104,13 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
   // Use eteLeg (segment delta) when available; fall back to full etePlanned for single-phase legs
   const displayETE = cp.eteLeg ?? cp.etePlanned;
   const phaseLbl = cp.eteLeg != null ? null : phaseETELabel(cp.portions, cp.etePlanned);
-  const eteLabel = phaseLbl ?? (displayETE != null ? `${displayETE.toFixed(0)} min` : null);
+  const eteLabel = phaseLbl ?? (displayETE != null ? `${displayETE.toFixed(1)} min` : null);
   const subtitle = isOrigin ? "Origem"
-    : isVirtual ? `+${cp.distLeg ?? cp.dist} NM · ${displayETE != null ? displayETE.toFixed(0) : "—"} min · ${cp.alt} ft`
+    : isVirtual ? `+${(cp.distLeg ?? cp.dist)?.toFixed(2)} NM · ${displayETE != null ? displayETE.toFixed(1) : "—"} min · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
-      : `${cp.distLeg ?? cp.dist} NM · ${eteLabel ?? "—"}${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
+      : `${(cp.distLeg ?? cp.dist)?.toFixed(2)} NM · ${eteLabel ?? "—"}${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
 
   return (
     <Wrapper
