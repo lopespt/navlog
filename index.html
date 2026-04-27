@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.0108";
+const APP_VERSION = "20260427.0117";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -326,13 +326,16 @@ function phaseETELabel(portions, totalETE) {
     .join(" ") + " min";
 }
 
-// hh:mm parser/formatter
+// hh:mm:ss parser/formatter
+// parseHHMM accepts "HH:MM" or "HH:MM:SS" → returns fractional minutes
 function parseHHMM(s) {
   if (!s) return null;
-  const [h, m] = s.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  return h * 60 + m;
+  const parts = s.split(":").map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+  const sec = parts.length >= 3 && !isNaN(parts[2]) ? parts[2] : 0;
+  return parts[0] * 60 + parts[1] + sec / 60;
 }
+// Display only: strips seconds → "HH:MM"
 function formatHHMM(totalMin) {
   if (totalMin == null || !isFinite(totalMin)) return "--:--";
   const t = ((totalMin % 1440) + 1440) % 1440;
@@ -340,9 +343,25 @@ function formatHHMM(totalMin) {
   const m = Math.floor(t % 60);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+// Storage: full precision → "HH:MM:SS"
+function formatHHMMSS(totalMin) {
+  if (totalMin == null || !isFinite(totalMin)) return "--:--:--";
+  const t = ((totalMin % 1440) + 1440) % 1440;
+  const totalSec = Math.round(t * 60);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+// Display helper: "HH:MM:SS" or "HH:MM" → "HH:MM" for Em Voo display
+function displayTime(str) {
+  if (!str) return null;
+  return str.slice(0, 5);
+}
+// nowHHMM includes seconds for recording precision
 function nowHHMM() {
   const d = new Date();
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
+  return d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60;
 }
 
 // ================= STATE INICIAL =================
@@ -682,7 +701,7 @@ function NavlogApp() {
   function markVirtual(key) {
     haptic([40]); warmUpAudio();
     const now = nowHHMM();
-    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMM(now) } }));
+    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMMSS(now) } }));
     setLegTimerStart(Date.now());
   }
   function unmarkVirtual(key) {
@@ -719,7 +738,7 @@ function NavlogApp() {
   function markCrossed(i) {
     haptic([60]); warmUpAudio();
     const now = nowHHMM();
-    setAta(i, formatHHMM(now));
+    setAta(i, formatHHMMSS(now));
     setLegTimerStart(Date.now()); // inicia cronômetro de perna
   }
 
@@ -812,7 +831,7 @@ function NavlogApp() {
   function depart() {
     haptic([50, 30, 50, 30, 80]); warmUpAudio();
     const now = nowHHMM();
-    setFlight((f) => ({ ...f, atd: formatHHMM(now) }));
+    setFlight((f) => ({ ...f, atd: formatHHMMSS(now) }));
     setLegTimerStart(Date.now());
   }
 
@@ -1301,7 +1320,7 @@ function NavlogApp() {
           onSave={(ataStr) => { setFlight((f) => ({ ...f, atd: ataStr })); setAtdEditOpen(false); }}
           onClear={() => { setFlight((f) => ({ ...f, atd: null })); setAtdEditOpen(false); }}
           onClose={() => setAtdEditOpen(false)}
-          onUseNow={() => { setFlight((f) => ({ ...f, atd: formatHHMM(nowHHMM()) })); setAtdEditOpen(false); }}
+          onUseNow={() => { setFlight((f) => ({ ...f, atd: formatHHMMSS(nowHHMM()) })); setAtdEditOpen(false); }}
         />
       )}
 
@@ -2805,7 +2824,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             <Plane className={`w-4 h-4 ${theme.success}`} />
             <div className="text-left">
               <div className={`text-[9px] uppercase ${theme.fgFaint}`}>ATD</div>
-              <div className={`font-bold num ${theme.success}`}>{flight.atd}</div>
+              <div className={`font-bold num ${theme.success}`}>{displayTime(flight.atd)}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -2972,7 +2991,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className={`text-lg font-bold ${theme.success}`}>Voo concluído</div>
           {computed.length > 0 && computed[computed.length-1].ata && (
             <div className={`text-sm ${theme.fgMuted} mt-1 num`}>
-              {computed[computed.length-1].name} · ATA {computed[computed.length-1].ata}
+              {computed[computed.length-1].name} · ATA {displayTime(computed[computed.length-1].ata)}
               {computed[computed.length-1].gsActual &&
                 ` · GS ${Math.round(computed[computed.length-1].gsActual)} kt`}
             </div>
@@ -3174,7 +3193,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
                 <div className={`text-[9px] uppercase ${isVirtual ? theme.cyan : theme.success} flex items-center gap-1 justify-end`}>
                   ATA {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-60" />}
                 </div>
-                <div className={`num font-bold ${isVirtual ? theme.cyan : theme.success}`}>{cp.ata}</div>
+                <div className={`num font-bold ${isVirtual ? theme.cyan : theme.success}`}>{displayTime(cp.ata)}</div>
                 {!isVirtual && cp.gsActual && (
                   <div className={`text-[9px] num ${theme.fgFaint}`}>GS {Math.round(cp.gsActual)} kt</div>
                 )}
@@ -3418,7 +3437,7 @@ function LogTab({ flight, computed, liveFuel, ac, theme }) {
                   <div>
                     <div className={`font-bold ${theme.success}`}>{cp.name}</div>
                     <div className={`text-[10px] ${theme.fgFaint} num`}>
-                      ETA {eta} → ATA {cp.ata}
+                      ETA {eta} → ATA {displayTime(cp.ata)}
                       {absD > 0 && <span> ({sign}{absD} min)</span>}
                     </div>
                   </div>
@@ -3870,46 +3889,45 @@ function RoutesManager({ routes, currentFlight, onLoad, onDelete, onSaveCurrent,
 
 // --------- EDITOR DE ATA ---------
 function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onClear, onClose, onUseNow, theme, fieldLabel, confirmLabel, clearLabel }) {
-  // Representação interna: string de dígitos puros, máx 4 (HHMM)
+  // Representação interna: string de dígitos puros, máx 6 (HHMMSS)
   const initialDigits = checkpoint.ata
-    ? checkpoint.ata.replace(":", "")
+    ? checkpoint.ata.replace(/:/g, "").slice(0, 6)
     : "";
   const [digits, setDigits] = useState(initialDigits);
 
-  // Formata dígitos → "HH:MM" para exibição e validação
-  function digitsToHHMM(d) {
-    const padded = d.padStart(4, "_");
-    return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
+  // Formata dígitos → "HH:MM:SS" para armazenamento
+  function digitsToHHMMSS(d) {
+    return `${d[0]||"0"}${d[1]||"0"}:${d[2]||"0"}${d[3]||"0"}:${d[4]||"0"}${d[5]||"0"}`;
   }
 
-  // Valida: 4 dígitos, HH 00-23, MM 00-59
+  // Valida: 6 dígitos, HH 00-23, MM 00-59, SS 00-59
   function isValid(d) {
-    if (d.length !== 4) return false;
+    if (d.length !== 6) return false;
     const hh = parseInt(d.slice(0, 2), 10);
     const mm = parseInt(d.slice(2, 4), 10);
-    return hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59;
+    const ss = parseInt(d.slice(4, 6), 10);
+    return hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59;
   }
 
   function pressDigit(n) {
-    setDigits((prev) => (prev.length < 4 ? prev + String(n) : prev));
+    setDigits((prev) => (prev.length < 6 ? prev + String(n) : prev));
   }
   function backspace() {
     setDigits((prev) => prev.slice(0, -1));
   }
   function useNow() {
-    const now = formatHHMM(nowHHMM()).replace(":", "");
-    setDigits(now);
+    setDigits(formatHHMMSS(nowHHMM()).replace(/:/g, ""));
   }
 
   const valid = isValid(digits);
-  const displayVal = digits.length > 0 ? digitsToHHMM(digits) : "--:--";
 
   // Delta entre ATA digitada e ETA planejada
   const deltaMin = useMemo(() => {
     if (!valid || etaPlanned == null) return null;
     const hh = parseInt(digits.slice(0, 2), 10);
     const mm = parseInt(digits.slice(2, 4), 10);
-    const ataMin = hh * 60 + mm;
+    const ss = parseInt(digits.slice(4, 6), 10);
+    const ataMin = hh * 60 + mm + ss / 60;
     let d = ataMin - etaPlanned;
     // Ajusta crossing de meia-noite
     if (d > 720) d -= 1440;
@@ -3985,23 +4003,16 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
         {/* Display do horário digitado */}
         <div className="text-center">
           <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{fieldLabel ?? "ATA"} (UTC)</div>
-          <div className={`text-5xl font-black num tracking-widest cockpit-glow transition-colors ${
+          <div className={`text-4xl font-black num tracking-widest cockpit-glow transition-colors ${
             digits.length === 0 ? theme.fgFaint :
             valid ? theme.accent : theme.fgMuted
           }`}>
-            {/* Renderiza dígito a dígito com o placeholder _ */}
-            {["H","H",":","M","M"].map((placeholder, i) => {
-              if (placeholder === ":") {
-                return <span key="colon" className={`${theme.fgFaint} mx-1`}>:</span>;
-              }
-              // Índice real no array de dígitos (desconta o ":")
-              const dIdx = i > 2 ? i - 1 : i;
+            {/* HH : MM : SS — renderiza dígito a dígito */}
+            {[0,1,null,2,3,null,4,5].map((dIdx, i) => {
+              if (dIdx === null) return <span key={`sep${i}`} className={`${theme.fgFaint} mx-0.5 text-3xl`}>:</span>;
               const ch = digits[dIdx];
-              return (
-                <span key={i} className={ch ? "" : `opacity-20`}>
-                  {ch || placeholder}
-                </span>
-              );
+              const ph = dIdx < 2 ? "H" : dIdx < 4 ? "M" : "S";
+              return <span key={i} className={ch ? "" : "opacity-20"}>{ch || ph}</span>;
             })}
           </div>
           {/* Delta */}
@@ -4063,7 +4074,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           {/* Confirmar — destaque máximo */}
           <button
             disabled={!valid}
-            onClick={() => onSave(digitsToHHMM(digits))}
+            onClick={() => onSave(digitsToHHMMSS(digits))}
             className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-lg active:scale-95 transition-transform`}
           >
             {confirmLabel ?? "Confirmar passagem"}
