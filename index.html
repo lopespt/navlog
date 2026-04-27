@@ -40,7 +40,42 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260427.0030";
+// Web Audio — AudioContext é singleton; precisa de gesto do utilizador para inicializar
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) {
+    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+  return _audioCtx;
+}
+function warmUpAudio() {
+  const ctx = getAudioCtx();
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+}
+function playAlarm() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const go = () => {
+    [0, 0.38, 0.76].forEach((delay) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const t = ctx.currentTime + delay;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.45, t + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      osc.start(t);
+      osc.stop(t + 0.3);
+    });
+  };
+  if (ctx.state === 'suspended') ctx.resume().then(go).catch(() => {});
+  else go();
+}
+
+const APP_VERSION = "20260427.0032";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -578,7 +613,7 @@ function NavlogApp() {
   }, [liveRoute]);
 
   function markVirtual(key) {
-    haptic([40]);
+    haptic([40]); warmUpAudio();
     const now = nowHHMM();
     setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMM(now) } }));
     setLegTimerStart(Date.now());
@@ -615,7 +650,7 @@ function NavlogApp() {
 
   // Marca checkpoint como cruzado (registra ATA = agora UTC, calcula GS real)
   function markCrossed(i) {
-    haptic([60]);
+    haptic([60]); warmUpAudio();
     const now = nowHHMM();
     setAta(i, formatHHMM(now));
     setLegTimerStart(Date.now()); // inicia cronômetro de perna
@@ -708,7 +743,7 @@ function NavlogApp() {
   }
 
   function depart() {
-    haptic([50, 30, 50, 30, 80]);
+    haptic([50, 30, 50, 30, 80]); warmUpAudio();
     const now = nowHHMM();
     setFlight((f) => ({ ...f, atd: formatHHMM(now) }));
     setLegTimerStart(Date.now());
@@ -2473,16 +2508,18 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     return diff >= 0;
   }, [tick, next, liveNext]); // tick muda a cada segundo → reavalia
 
-  // Alarme háptico único quando a ETA do próximo ponto é atingida
+  // Alarme sonoro + háptico único quando a ETA do próximo ponto é atingida
   const etaAlarmFiredFor = useRef(null);
   useEffect(() => {
-    if (!next || next.isVirtual) { etaAlarmFiredFor.current = null; return; }
-    if (isEtaPassed && etaAlarmFiredFor.current !== next.userIdx) {
-      etaAlarmFiredFor.current = next.userIdx;
+    if (!next) { etaAlarmFiredFor.current = null; return; }
+    const key = next.isVirtual ? next.autoKey : next.userIdx;
+    if (isEtaPassed && etaAlarmFiredFor.current !== key) {
+      etaAlarmFiredFor.current = key;
       haptic([250, 80, 250, 80, 400]);
+      playAlarm();
     }
     if (!isEtaPassed) etaAlarmFiredFor.current = null;
-  }, [isEtaPassed, next?.userIdx]);
+  }, [isEtaPassed, next?.userIdx, next?.autoKey]);
 
   // Combustível restante atual
   const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
