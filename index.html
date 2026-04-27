@@ -16,6 +16,8 @@
     html, body, #root { height: 100%; }
     body { background: #09090b; overscroll-behavior: none; }
   </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>.leaflet-container{background:#1c1c1e}.leaflet-tile-pane{filter:brightness(0.85)}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -26,6 +28,8 @@
   <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo, useRef } = React;
     const {
@@ -34,7 +38,7 @@
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
-      TrendingUp, TrendingDown, Minus
+      TrendingUp, TrendingDown, Minus, Map
     } = LucideReact;
 
 function haptic(pattern) {
@@ -141,6 +145,54 @@ const FLEET_DEFAULTS = {
 // ================= MATEMÁTICA =================
 const toRad = (d) => (d * Math.PI) / 180;
 const toDeg = (r) => (r * 180) / Math.PI;
+
+// ── Great-circle navigation ─────────────────────────────────────────────────
+function gcDist(lat1, lon1, lat2, lon2) {
+  // Haversine → NM
+  const R = 3440.065;
+  const φ1 = toRad(lat1), φ2 = toRad(lat2);
+  const Δφ = toRad(lat2 - lat1), Δλ = toRad(lon2 - lon1);
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function gcTC(lat1, lon1, lat2, lon2) {
+  // Initial true course
+  const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lon2 - lon1);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+function gcInterpolate(lat1, lon1, lat2, lon2, frac) {
+  // Linear interpolation (accurate for legs < 300 NM)
+  return [lat1 + (lat2 - lat1) * frac, lon1 + (lon2 - lon1) * frac];
+}
+// Decimal degrees → DDM string "DD°MM.MMM'N"
+function decDegToStr(dd, isLat) {
+  const hem = isLat ? (dd >= 0 ? 'N' : 'S') : (dd >= 0 ? 'E' : 'W');
+  const abs = Math.abs(dd);
+  const deg = Math.floor(abs);
+  const min = ((abs - deg) * 60).toFixed(3);
+  const degStr = isLat ? String(deg).padStart(2,'0') : String(deg).padStart(3,'0');
+  return `${degStr}°${min}'${hem}`;
+}
+function formatCoord(lat, lon) {
+  if (lat == null || lon == null) return null;
+  return `${decDegToStr(lat, true)} ${decDegToStr(lon, false)}`;
+}
+// Parse DDM digit array → decimal degrees
+// latDigits: 6 digits [D,D,M,M,m,m] → DD°MM.mm'
+// lonDigits: 7 digits [D,D,D,M,M,m,m] → DDD°MM.mm'
+function ddmDigitsToDecDeg(digits, isLon, hem) {
+  const dc = isLon ? 3 : 2;
+  const deg = parseInt(digits.slice(0, dc).join('') || '0');
+  const minInt = parseInt((digits[dc] ?? '0').toString() + (digits[dc+1] ?? '0').toString());
+  const minDec = parseInt((digits[dc+2] ?? '0').toString() + (digits[dc+3] ?? '0').toString());
+  const min = minInt + minDec / 100;
+  if (min >= 60 || (isLon ? deg > 179 : deg > 89)) return null;
+  const val = deg + min / 60;
+  return (hem === 'S' || hem === 'W') ? -val : val;
+}
+
 const mod360 = (x) => ((x % 360) + 360) % 360;
 
 function calcLeg(tc, dist, tas, windDir, windVel, variation, dev) {
@@ -680,6 +732,8 @@ function NavlogApp() {
       if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
       const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
       const prevAlt = i > 0 ? computed[i - 1].alt : 0;
+      const prevLat  = i > 0 ? computed[i - 1].lat  : null;
+      const prevLon  = i > 0 ? computed[i - 1].lon  : null;
       if (cp.portions?.length > 1) {
         let accDist = 0, accETE = 0;
         let prevVirtETE = 0, prevVirtDist = 0;
@@ -702,10 +756,14 @@ function NavlogApp() {
             const autoKey = label === "TOC" ? `toc_${tocN++}` : label === "TOD" ? `tod_${todN++}` : `bod_${bodN++}`;
             const eteLeg = accETE - prevVirtETE;
             const distLeg = accDist - prevVirtDist;
+            const vFrac = cp.dist > 0 ? accDist / cp.dist : 0;
+            const [vLat, vLon] = (prevLat != null && cp.lat != null)
+              ? gcInterpolate(prevLat, prevLon, cp.lat, cp.lon, vFrac) : [null, null];
             result.push({
               name: label, isVirtual: true, autoKey, userIdx: i,
               // TOC = leveled at dest alt; TOD = still at src alt; BOD = leveled at dest alt
               alt: (label === "TOC" || label === "BOD") ? cp.alt : (prevAlt ?? cp.alt),
+              lat: vLat, lon: vLon,
               tc: cp.tc, mh: cp.mh, mc: cp.mc, wca: cp.wca,
               windMode: cp.windMode, windDirUsed: cp.windDirUsed, windVelUsed: cp.windVelUsed,
               dist: Math.round(accDist * 10) / 10,
@@ -1274,11 +1332,17 @@ function NavlogApp() {
         {tab === "log" && (
           <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
         )}
+        {tab === "map" && (
+          <MapTab
+            flight={flight} computed={computed} liveRoute={liveRoute}
+            liveETAs={liveETAs} ac={ac} theme={theme}
+          />
+        )}
       </main>
 
       {/* TAB BAR */}
       <nav className={`fixed bottom-0 left-0 right-0 z-20 ${theme.panel} border-t ${theme.panelBorder}`}>
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           <TabButton theme={theme} active={tab === "setup"} onClick={() => setTab("setup")}
             icon={<Settings className="w-5 h-5" />} label="Setup" />
           <TabButton theme={theme} active={tab === "flight"} onClick={() => setTab("flight")}
@@ -1287,6 +1351,8 @@ function NavlogApp() {
             icon={<Fuel className="w-5 h-5" />} label="Combustível" />
           <TabButton theme={theme} active={tab === "log"} onClick={() => setTab("log")}
             icon={<BookOpen className="w-5 h-5" />} label="Diário" />
+          <TabButton theme={theme} active={tab === "map"} onClick={() => setTab("map")}
+            icon={<Map className="w-5 h-5" />} label="Mapa" />
         </div>
       </nav>
 
@@ -1772,7 +1838,7 @@ function Stat({ label, value, theme }) {
 // WAYPOINT EDITOR — wizard em passos com teclados especializados
 // =========================================================================
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
-const WP_STEPS = ["nome", "alt", "tc", "dist", "vento", "override", "resumo"];
+const WP_STEPS = ["nome", "coord", "alt", "tc", "dist", "vento", "override", "resumo"];
 
 function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
   const isNew = editingIdx == null;
@@ -1877,6 +1943,20 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
           {step === "nome" && (
             <StepNome cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
+          {step === "coord" && (() => {
+            const prevCpIdx = isNew
+              ? flight.checkpoints.length - 1
+              : (editingIdx ?? 0) - 1;
+            const prevCpCoord = prevCpIdx >= 0 ? flight.checkpoints[prevCpIdx] : null;
+            return (
+              <StepCoord
+                cp={cp} setCp={setCp}
+                prevCp={prevCpCoord}
+                theme={theme}
+                onNext={next}
+              />
+            );
+          })()}
           {step === "alt" && (() => {
             const prevCpForAlt = isNew
               ? flight.checkpoints[flight.checkpoints.length - 1]
@@ -1956,6 +2036,134 @@ const ALPHA_ROWS = [
   ["Z","X","C","V","B","N","M"],
 ];
 const DIGIT_ROW = ["1","2","3","4","5","6","7","8","9","0"];
+
+
+// ── Coordinate entry step ────────────────────────────────────────────────────
+function StepCoord({ cp, setCp, prevCp, theme, onNext }) {
+  // Pre-fill from existing cp coords
+  function toDigits(dd, isLon) {
+    if (dd == null) return [];
+    const abs = Math.abs(dd);
+    const deg = Math.floor(abs);
+    const minTotal = (abs - deg) * 60;
+    const minInt = Math.floor(minTotal);
+    const minDec = Math.round((minTotal - minInt) * 100);
+    const dc = isLon ? 3 : 2;
+    return [
+      ...String(deg).padStart(dc, '0').split('').map(Number),
+      ...String(minInt).padStart(2, '0').split('').map(Number),
+      ...String(minDec).padStart(2, '0').split('').map(Number),
+    ];
+  }
+
+  const LAT_MAX = 6, LON_MAX = 7;
+  const [latDigs, setLatDigs] = useState(() => cp.lat != null ? toDigits(cp.lat, false) : []);
+  const [lonDigs, setLonDigs] = useState(() => cp.lon != null ? toDigits(cp.lon, true)  : []);
+  const [latHem,  setLatHem]  = useState(() => cp.lat != null ? (cp.lat >= 0 ? 'N' : 'S') : 'N');
+  const [lonHem,  setLonHem]  = useState(() => cp.lon != null ? (cp.lon >= 0 ? 'E' : 'W') : 'W');
+  const editing = latDigs.length < LAT_MAX ? 'lat' : 'lon';
+
+  function press(d) {
+    if (editing === 'lat' && latDigs.length < LAT_MAX) {
+      setLatDigs(p => [...p, d]);
+    } else if (editing === 'lon' && lonDigs.length < LON_MAX) {
+      setLonDigs(p => [...p, d]);
+    }
+  }
+  function del() {
+    if (editing === 'lon' && lonDigs.length === 0) setLatDigs(p => p.slice(0,-1));
+    else if (editing === 'lon') setLonDigs(p => p.slice(0,-1));
+    else setLatDigs(p => p.slice(0,-1));
+  }
+  function clear() { setLatDigs([]); setLonDigs([]); }
+
+  const latVal = latDigs.length === LAT_MAX ? ddmDigitsToDecDeg(latDigs, false, latHem) : null;
+  const lonVal = lonDigs.length === LON_MAX ? ddmDigitsToDecDeg(lonDigs, true,  lonHem) : null;
+  const isValid = latVal != null && lonVal != null;
+
+  // Display: fill placeholders as digits come in
+  function renderField(digs, isLon, hem, active) {
+    const dc = isLon ? 3 : 2;
+    const p = (i) => digs[i] != null ? String(digs[i]) : '_';
+    const degStr = isLon
+      ? `${p(0)}${p(1)}${p(2)}`
+      : `${p(0)}${p(1)}`;
+    const minStr = `${p(dc)}${p(dc+1)}.${p(dc+2)}${p(dc+3)}`;
+    return (
+      <div className={`flex items-center justify-center gap-1 px-4 py-2 rounded-xl border ${
+        active ? theme.accentBorder : theme.panelBorder
+      } ${theme.panel}`}>
+        <span className={`text-[10px] uppercase tracking-widest w-8 ${active ? theme.accent : theme.fgFaint}`}>
+          {isLon ? 'LON' : 'LAT'}
+        </span>
+        <span className={`font-black num text-xl tracking-wider ${active ? theme.fg : theme.fgMuted}`}>
+          {degStr}°{minStr}'
+        </span>
+        <button
+          onClick={() => isLon ? setLonHem(h => h === 'E' ? 'W' : 'E') : setLatHem(h => h === 'N' ? 'S' : 'N')}
+          className={`w-8 h-8 rounded-lg border font-bold text-sm ${theme.panelBorder} ${
+            active ? `${theme.accentBg} text-black` : `${theme.panel} ${theme.fgFaint}`
+          }`}>
+          {hem}
+        </button>
+      </div>
+    );
+  }
+
+  function confirm() {
+    if (!isValid) return;
+    const updates = { lat: latVal, lon: lonVal };
+    if (prevCp?.lat != null && prevCp?.lon != null) {
+      updates.tc   = Math.round(gcTC(prevCp.lat, prevCp.lon, latVal, lonVal));
+      updates.dist = Math.round(gcDist(prevCp.lat, prevCp.lon, latVal, lonVal) * 10) / 10;
+    }
+    setCp(p => ({ ...p, ...updates }));
+    onNext();
+  }
+
+  const numRows = [['7','8','9'],['4','5','6'],['1','2','3']];
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        {renderField(latDigs, false, latHem, editing === 'lat')}
+        {renderField(lonDigs, true,  lonHem, editing === 'lon')}
+      </div>
+
+      {prevCp?.lat != null && isValid && (
+        <div className={`text-[10px] ${theme.cyan} text-center`}>
+          TC {Math.round(gcTC(prevCp.lat, prevCp.lon, latVal, lonVal))}° ·{' '}
+          {Math.round(gcDist(prevCp.lat, prevCp.lon, latVal, lonVal) * 10) / 10} NM (calculado)
+        </div>
+      )}
+
+      {/* Numpad */}
+      <div className="grid grid-cols-3 gap-1.5">
+        {numRows.map(row => row.map(k => (
+          <button key={k} onClick={() => press(Number(k))}
+            className={`${keyBase} h-12`}>{k}</button>
+        )))}
+        <button onClick={clear} className={`${keyBase} h-12 text-sm`}>CLR</button>
+        <button onClick={() => press(0)} className={`${keyBase} h-12`}>0</button>
+        <button onClick={del}  className={`${keyBase} h-12 text-sm`}>⌫</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={onNext}
+          className={`py-3 rounded-xl border ${theme.panelBorder} ${theme.fgFaint} font-bold text-sm`}>
+          Pular →
+        </button>
+        <button onClick={confirm} disabled={!isValid}
+          className={`py-3 rounded-xl font-bold text-sm ${
+            isValid ? `${theme.accentBg} ${theme.accentBgFg ?? 'text-black'}` : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Confirmar →
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StepNome({ cp, setCp, theme, onNext }) {
   const [name, setName] = useState(cp.name || "");
@@ -2545,6 +2753,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
         return altStr + modeStr;
       })(), step: "alt" },
     ...(!isOrigin ? [
+      cp.lat != null ? { label: "Coordenadas", value: formatCoord(cp.lat, cp.lon) ?? "—", step: "coord" } : null,
       { label: "TC / MH", value: cp.tc != null ? (() => {
           const tc = Math.round(cp.tc);
           const mh = Math.round(((cp.tc - (variation ?? 0)) % 360 + 360) % 360);
@@ -2562,7 +2771,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 
       {/* Card de confirmação */}
       <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
-        {rows.map(({ label, value, step }, i) => (
+        {rows.filter(Boolean).map(({ label, value, step }, i) => (
           <button key={step}
             onClick={() => onEdit(step)}
             className={`w-full flex items-center justify-between px-4 py-3 text-left border-b ${theme.panelBorder} last:border-b-0 active:opacity-70`}>
@@ -4073,6 +4282,183 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
   );
 }
 
+
+
+// ── Map tab ───────────────────────────────────────────────────────────────────
+function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
+  const mapDivRef = useRef(null);
+  const mapRef    = useRef(null);
+  const overlayRef = useRef({ route: null, markers: [], simMarker: null });
+  const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
+  const [tick, setTick] = useState(0);
+
+  // Re-render simulated position every second
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t+1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Init Leaflet map once
+  useEffect(() => {
+    if (!window.L || !mapDivRef.current || mapRef.current) return;
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
+    mapRef.current = map;
+    return () => { map.remove(); mapRef.current = null; };
+  }, []);
+
+  // Swap tile layer when tileMode changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    if (overlayRef.current.tileLayer) map.removeLayer(overlayRef.current.tileLayer);
+    const url = tileMode === 'sat'
+      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const attr = tileMode === 'sat' ? '© Esri' : '© OpenStreetMap';
+    const layer = window.L.tileLayer(url, { attribution: attr, maxZoom: 18 }).addTo(map);
+    overlayRef.current.tileLayer = layer;
+  }, [tileMode]);
+
+  // Custom icon factory
+  function makeIcon(color, label, small) {
+    const size = small ? 20 : 26;
+    const html = `<div style="background:${color};border-radius:50%;width:${size}px;height:${size}px;
+      border:2px solid #fff;display:flex;align-items:center;justify-content:center;
+      font-size:${small?7:9}px;font-weight:bold;color:#000;white-space:nowrap;overflow:hidden;
+      box-shadow:0 1px 4px rgba(0,0,0,.6)">${label}</div>`;
+    return window.L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
+  }
+  function planeIcon(heading) {
+    const html = `<div style="transform:rotate(${heading}deg);font-size:22px;filter:drop-shadow(0 1px 3px #000)">✈</div>`;
+    return window.L.divIcon({ html, className: '', iconSize: [26,26], iconAnchor: [13,13] });
+  }
+
+  // Redraw route + markers when liveRoute changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    const ov = overlayRef.current;
+    if (ov.route)   map.removeLayer(ov.route);
+    ov.markers.forEach(m => map.removeLayer(m));
+    ov.markers = [];
+
+    const userWps = liveRoute.filter(cp => !cp.isVirtual && cp.lat != null && cp.lon != null);
+    const virtWps = liveRoute.filter(cp =>  cp.isVirtual && cp.lat != null && cp.lon != null);
+
+    if (userWps.length === 0) return;
+
+    // Route polyline through user waypoints
+    const coords = userWps.map(cp => [cp.lat, cp.lon]);
+    ov.route = window.L.polyline(coords, { color: '#f59e0b', weight: 2.5, opacity: 0.9 }).addTo(map);
+    map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
+
+    // User waypoint markers
+    userWps.forEach((cp, i) => {
+      const color = cp.isOrigin ? '#22c55e' : '#f59e0b';
+      const label = cp.name?.slice(0,4) ?? String(i);
+      const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
+      const etaStr = liveETAs[cp.userIdx] != null
+        ? `<br/>ETA ${Math.floor(liveETAs[cp.userIdx]/60).toString().padStart(2,'0')}:${Math.round(liveETAs[cp.userIdx]%60).toString().padStart(2,'0')}`
+        : '';
+      m.bindPopup(`<b>${cp.name}</b>${cp.alt != null ? `<br/>${cp.alt} ft` : ''}${etaStr}`);
+      ov.markers.push(m);
+    });
+
+    // Virtual waypoint markers (TOC/TOD/BOD) — small dots on the route
+    virtWps.forEach(cp => {
+      const color = '#22d3ee';
+      const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, cp.name, true) }).addTo(map);
+      m.bindPopup(`<b>${cp.name}</b><br/>${cp.alt} ft`);
+      ov.markers.push(m);
+    });
+  }, [liveRoute]);
+
+  // Simulated aircraft position
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    const ov = overlayRef.current;
+    if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
+
+    const nowMin = nowHHMM();
+
+    // Find last crossed WP and next uncrossed WP with coords
+    let lastCp = null, nextCp = null;
+    for (const wp of liveRoute) {
+      if (wp.lat == null || wp.lon == null) continue;
+      if (wp.ata != null) lastCp = wp;
+      else if (!nextCp) nextCp = wp;
+    }
+
+    // Also try ATD at origin
+    const origin = liveRoute.find(cp => cp.isOrigin && cp.lat != null);
+    const atdMin = flight.atd ? parseHHMM(flight.atd) : null;
+
+    let simLat, simLon, simTC;
+    if (!nextCp) {
+      // All crossed — show at last WP
+      if (lastCp) { simLat = lastCp.lat; simLon = lastCp.lon; simTC = lastCp.tc ?? 0; }
+    } else if (!lastCp && atdMin != null && origin) {
+      // In flight from origin, not yet crossed any WP
+      const eta = nextCp.etaPlanned;
+      if (eta != null && eta > atdMin) {
+        const frac = Math.min(1, Math.max(0, (nowMin - atdMin) / (eta - atdMin)));
+        [simLat, simLon] = gcInterpolate(origin.lat, origin.lon, nextCp.lat, nextCp.lon, frac);
+        simTC = nextCp.tc ?? 0;
+      }
+    } else if (lastCp && nextCp) {
+      const lastATA = parseHHMM(lastCp.ata);
+      const nextETA = nextCp.etaPlanned;
+      if (lastATA != null && nextETA != null && nextETA > lastATA) {
+        const frac = Math.min(1, Math.max(0, (nowMin - lastATA) / (nextETA - lastATA)));
+        [simLat, simLon] = gcInterpolate(lastCp.lat, lastCp.lon, nextCp.lat, nextCp.lon, frac);
+        simTC = nextCp.tc ?? 0;
+      }
+    }
+
+    if (simLat != null) {
+      ov.simMarker = window.L.marker([simLat, simLon], { icon: planeIcon(simTC), zIndexOffset: 1000 }).addTo(map);
+      ov.simMarker.bindPopup('Posição estimada');
+    }
+  }, [tick, liveRoute, flight.atd, liveETAs]);
+
+  const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
+
+  return (
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Tile switcher */}
+      <div className={`flex gap-1 p-2 ${theme.panel} border-b ${theme.panelBorder} shrink-0`}>
+        {[['osm','OSM'],['sat','Satélite']].map(([key, label]) => (
+          <button key={key} onClick={() => setTileMode(key)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+              tileMode === key ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10` : `${theme.panelBorder} ${theme.fgFaint}`
+            }`}>
+            {label}
+          </button>
+        ))}
+        <div className={`ml-auto text-[10px] ${theme.fgFaint} flex items-center`}>
+          {hasCoords ? `${liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length} pontos` : 'Adicione coordenadas nos waypoints'}
+        </div>
+      </div>
+
+      {/* Map container */}
+      <div ref={mapDivRef} className="flex-1" />
+
+      {!hasCoords && (
+        <div className={`absolute inset-0 flex items-center justify-center pointer-events-none`}
+          style={{ top: '120px' }}>
+          <div className={`${theme.panel} border ${theme.panelBorder} rounded-2xl p-6 text-center mx-8`}>
+            <Map className={`w-10 h-10 ${theme.fgFaint} mx-auto mb-3`} />
+            <div className={`font-bold ${theme.fg} mb-1`}>Sem coordenadas</div>
+            <div className={`text-[11px] ${theme.fgFaint}`}>
+              Edite os waypoints no Setup e adicione coordenadas (lat/lon) para ver a rota no mapa.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
     const _root = ReactDOM.createRoot(document.getElementById('root'));
     _root.render(React.createElement(NavlogApp));
