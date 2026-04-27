@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2327";
+const APP_VERSION = "20260427.2331";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1918,6 +1918,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
         cps.push({ ...saved, ata: null, gsActual: null });
       } else {
         cps[editingIdx] = { ...saved };
+      }
+      // Recompute TC and dist for every consecutive pair with known coords
+      for (var _i = 1; _i < cps.length; _i++) {
+        var _prev = cps[_i - 1], _cur = cps[_i];
+        if (_prev.lat != null && _prev.lon != null && _cur.lat != null && _cur.lon != null) {
+          cps[_i] = Object.assign({}, cps[_i], {
+            tc:   Math.round(gcTC(_prev.lat, _prev.lon, _cur.lat, _cur.lon)),
+            dist: Math.round(gcDist(_prev.lat, _prev.lon, _cur.lat, _cur.lon) * 10) / 10
+          });
+        }
       }
       return { ...f, checkpoints: cps };
     });
