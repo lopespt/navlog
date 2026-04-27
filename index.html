@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2322";
+const APP_VERSION = "20260427.2327";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1985,6 +1985,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
                 prevCp={prevCpCoord}
                 theme={theme}
                 onNext={next}
+                allWps={flight.checkpoints}
               />
             );
           })()}
@@ -2070,8 +2071,10 @@ const DIGIT_ROW = ["1","2","3","4","5","6","7","8","9","0"];
 
 
 // ── Coordinate entry step ────────────────────────────────────────────────────
-function StepCoord({ cp, setCp, prevCp, theme, onNext }) {
+function StepCoord({ cp, setCp, prevCp, theme, onNext, allWps }) {
   // Pre-fill from existing cp coords
+  const [showMapPicker, setShowMapPicker] = useState(false);
+
   function toDigits(dd, isLon) {
     if (dd == null) return [];
     const abs = Math.abs(dd);
@@ -2111,6 +2114,14 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext }) {
   const latVal = latDigs.length === LAT_MAX ? ddmDigitsToDecDeg(latDigs, false, latHem) : null;
   const lonVal = lonDigs.length === LON_MAX ? ddmDigitsToDecDeg(lonDigs, true,  lonHem) : null;
   const isValid = latVal != null && lonVal != null;
+
+  function setFromLatLon(lat, lon) {
+    setLatDigs(toDigits(lat, false));
+    setLonDigs(toDigits(lon, true));
+    setLatHem(lat >= 0 ? 'N' : 'S');
+    setLonHem(lon >= 0 ? 'E' : 'W');
+    setShowMapPicker(false);
+  }
 
   // Display: fill placeholders as digits come in
   function renderField(digs, isLon, hem, active) {
@@ -2169,6 +2180,12 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext }) {
         </div>
       )}
 
+      {/* Map picker button */}
+      <button onClick={() => setShowMapPicker(true)}
+        className={`w-full py-2.5 rounded-xl border flex items-center justify-center gap-2 text-sm font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+        <MapIcon className="w-4 h-4" /> Selecionar no mapa
+      </button>
+
       {/* Numpad */}
       <div className="grid grid-cols-3 gap-1.5">
         {numRows.map(row => row.map(k => (
@@ -2192,6 +2209,95 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext }) {
           Confirmar →
         </button>
       </div>
+
+      {showMapPicker && (
+        <MapPicker
+          allWps={allWps ?? []}
+          initialPos={cp.lat != null ? [cp.lat, cp.lon] : null}
+          onConfirm={setFromLatLon}
+          onCancel={() => setShowMapPicker(false)}
+          theme={theme}
+        />
+      )}
+    </div>
+  );
+}
+
+function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme }) {
+  const mapDivRef = useRef(null);
+  const mapRef = useRef(null);
+  const pickedMarkerRef = useRef(null);
+  const [picked, setPicked] = useState(initialPos ?? null);
+
+  useEffect(() => {
+    if (!window.L || !mapDivRef.current || mapRef.current) return;
+    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 18
+    }).addTo(map);
+
+    const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
+    if (wps.length > 0) {
+      const coords = wps.map(cp => [cp.lat, cp.lon]);
+      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.8, dashArray: '5,5' }).addTo(map);
+      wps.forEach(cp => {
+        const html = `<div style="background:#f59e0b;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
+        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
+        window.L.marker([cp.lat, cp.lon], { icon }).addTo(map).bindPopup(cp.name || '');
+      });
+      map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
+    } else if (initialPos) {
+      map.setView(initialPos, 10);
+    } else {
+      map.setView([39.5, -8.0], 6);
+    }
+
+    map.on('click', (e) => setPicked([e.latlng.lat, e.latlng.lng]));
+
+    mapRef.current = map;
+    return () => { map.remove(); mapRef.current = null; };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    if (pickedMarkerRef.current) { map.removeLayer(pickedMarkerRef.current); pickedMarkerRef.current = null; }
+    if (picked) {
+      const html = `<div style="background:#22c55e;border-radius:50%;width:18px;height:18px;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.9)"></div>`;
+      const icon = window.L.divIcon({ html, className: '', iconSize: [18,18], iconAnchor: [9,9] });
+      pickedMarkerRef.current = window.L.marker(picked, { icon, zIndexOffset: 500 }).addTo(map);
+    }
+  }, [picked]);
+
+  const coordStr = picked
+    ? (formatCoord(picked[0], picked[1]) || (picked[0].toFixed(5) + ', ' + picked[1].toFixed(5)))
+    : null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', isolation: 'isolate' }}
+      className={theme.bg}>
+      <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
+        <button onClick={onCancel}
+          className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
+          Cancelar
+        </button>
+        <span className={`flex-1 text-center text-sm font-bold ${theme.fg}`}>
+          Toque no mapa para selecionar
+        </span>
+        <button onClick={() => { if (picked) onConfirm(picked[0], picked[1]); }}
+          disabled={!picked}
+          className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
+            picked ? `${theme.accentBg} text-black` : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Confirmar
+        </button>
+      </div>
+      <div ref={mapDivRef} style={{ flex: 1, minHeight: 0 }} />
+      {coordStr && (
+        <div className={`p-2 text-center text-xs font-bold shrink-0 ${theme.panel} border-t ${theme.panelBorder} ${theme.cyan}`}>
+          {coordStr}
+        </div>
+      )}
     </div>
   );
 }
