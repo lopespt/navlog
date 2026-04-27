@@ -75,7 +75,7 @@ function playAlarm() {
   else go();
 }
 
-const APP_VERSION = "20260427.0032";
+const APP_VERSION = "20260427.0044";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -564,6 +564,7 @@ function NavlogApp() {
       const prevAlt = i > 0 ? computed[i - 1].alt : 0;
       if (cp.portions?.length > 1) {
         let accDist = 0, accETE = 0;
+        let prevVirtETE = 0, prevVirtDist = 0;
         for (let p = 0; p < cp.portions.length - 1; p++) {
           const por = cp.portions[p];
           const frac = cp.dist > 0 ? por.dist / cp.dist : 0;
@@ -576,6 +577,8 @@ function NavlogApp() {
             : null;
           if (label) {
             const autoKey = label === "TOC" ? `toc_${tocN++}` : label === "TOD" ? `tod_${todN++}` : `bod_${bodN++}`;
+            const eteLeg = accETE - prevVirtETE;
+            const distLeg = accDist - prevVirtDist;
             result.push({
               name: label, isVirtual: true, autoKey, userIdx: i,
               // TOC = leveled at dest alt; TOD = still at src alt; BOD = leveled at dest alt
@@ -585,14 +588,23 @@ function NavlogApp() {
               dist: Math.round(accDist * 10) / 10,
               distToNext: Math.round((cp.dist - accDist) * 10) / 10,
               etePlanned: accETE,
+              eteLeg: Math.round(eteLeg * 10) / 10,
+              distLeg: Math.round(distLeg * 10) / 10,
               etaPlanned: prevEta + accETE,
               ata: flight.autoWpATAs?.[autoKey] ?? null,
               gsActual: null, portions: [], warnings: [], notes: "",
             });
+            prevVirtETE = accETE;
+            prevVirtDist = accDist;
           }
         }
+        // User waypoint gets the remaining segment after the last virtual point
+        const eteLeg = cp.etePlanned - prevVirtETE;
+        const distLeg = cp.dist - prevVirtDist;
+        result.push({ ...cp, userIdx: i, eteLeg, distLeg });
+      } else {
+        result.push({ ...cp, userIdx: i });
       }
-      result.push({ ...cp, userIdx: i });
     });
     return result;
   }, [computed, flight.autoWpATAs, flight.eobt]);
@@ -635,7 +647,7 @@ function NavlogApp() {
       if (cp.ata != null && i > 0) {
         const prevAta = computed[i - 1].ata != null
           ? parseHHMM(computed[i - 1].ata)
-          : (i - 1 === 0 ? parseHHMM(flight.eobt) : null);
+          : (i - 1 === 0 ? parseHHMM(flight.atd ?? flight.eobt) : null);
         if (prevAta != null) {
           const ataMin = parseHHMM(cp.ata);
           let elapsed = ataMin - prevAta;
@@ -2605,9 +2617,6 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </span>
             <span className={`text-[10px] ${theme.fgFaint} num`}>
               {next.alt != null ? `${next.alt} ft` : ""}
-              {!next.isVirtual && phaseETELabel(next.portions, next.etePlanned)
-                ? ` · ${phaseETELabel(next.portions, next.etePlanned)}`
-                : ""}
             </span>
           </div>
 
@@ -2637,11 +2646,8 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-3 py-3`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
               <div className={`text-3xl font-black num cockpit-glow ${theme.fg}`}>
-                {Math.round(next.etePlanned||0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
+                {Math.round(next.eteLeg ?? next.etePlanned ?? 0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
               </div>
-              {phaseETELabel(next.portions, next.etePlanned) && (
-                <div className={`text-[9px] num ${theme.fgFaint} mt-0.5`}>{phaseETELabel(next.portions, next.etePlanned)}</div>
-              )}
             </div>
             <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
@@ -2662,10 +2668,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
           {/* Barra de progresso da perna atual */}
-          {lastAtaMs != null && next.etePlanned > 0 && (
+          {lastAtaMs != null && (next.eteLeg ?? next.etePlanned) > 0 && (
             <div className="mb-3">
               {(() => {
-                const progressPct = Math.min(100, (elapsed / 60) / next.etePlanned * 100);
+                const legETE = next.eteLeg ?? next.etePlanned;
+                const progressPct = Math.min(100, (elapsed / 60) / legETE * 100);
                 return (
                 <>
                   <div className="flex items-center justify-between mb-1">
@@ -2690,7 +2697,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 
           {/* Dist + alt + vento como info secundária */}
           <div className={`grid grid-cols-3 text-[10px] num ${theme.fgFaint} mb-3 px-1 gap-1`}>
-            <span>{next.dist} NM</span>
+            <span>{next.distLeg ?? next.dist} NM</span>
             <span className="text-center">{next.alt != null ? `${next.alt} ft` : "—"}</span>
             <span className="text-right">
               {next.windMode === "none" ? "W=0" : (
@@ -2881,10 +2888,12 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
 
   // Subtítulo: depende do modo de visualização
   const altLabel = cp.alt != null ? `${cp.alt} ft` : null;
-  const phaseLbl = phaseETELabel(cp.portions, cp.etePlanned);
-  const eteLabel = phaseLbl ?? (cp.etePlanned != null ? `${cp.etePlanned.toFixed(0)} min` : null);
+  // Use eteLeg (segment delta) when available; fall back to full etePlanned for single-phase legs
+  const displayETE = cp.eteLeg ?? cp.etePlanned;
+  const phaseLbl = cp.eteLeg != null ? null : phaseETELabel(cp.portions, cp.etePlanned);
+  const eteLabel = phaseLbl ?? (displayETE != null ? `${displayETE.toFixed(0)} min` : null);
   const subtitle = isOrigin ? "Origem"
-    : isVirtual ? `${cp.dist} NM da dep. · ${cp.alt} ft`
+    : isVirtual ? `+${cp.distLeg ?? cp.dist} NM · ${displayETE != null ? displayETE.toFixed(0) : "—"} min · ${cp.alt} ft`
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
