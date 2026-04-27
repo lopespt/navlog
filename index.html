@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2331";
+const APP_VERSION = "20260427.2343";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1889,10 +1889,23 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     : "route" // padrão
   );
 
-  // Passo corrente para origens: nome + altitude de saída
-  const steps = isOrigin
+  // If both this WP and the previous WP have explicit coords, TC and dist are
+  // derived automatically — no need to ask the user for them.
+  const prevCpForSteps = isNew
+    ? flight.checkpoints[flight.checkpoints.length - 1]
+    : flight.checkpoints[editingIdx - 1];
+  const bothEndsHaveCoords = cp.lat != null && cp.lon != null
+    && prevCpForSteps?.lat != null && prevCpForSteps?.lon != null;
+  const stepsBase = isOrigin
     ? ["nome", "coord", "alt", "resumo"]
-    : WP_STEPS;
+    : bothEndsHaveCoords
+      ? ["nome", "coord", "alt", "vento", "override", "resumo"]
+      : WP_STEPS;
+  // Keep step valid if it disappears from the list after coord entry
+  const steps = stepsBase;
+  React.useEffect(() => {
+    if (!stepsBase.includes(step)) setStep("resumo");
+  }, [bothEndsHaveCoords]);
 
   const stepIdx = steps.indexOf(step);
   const isFirst = stepIdx === 0;
@@ -2058,6 +2071,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
                 cruiseAlt={flight.cruiseAlt ?? 7000}
                 prevAlt={prevAltForResumo}
                 variation={flight.variation ?? 0}
+                coordDerived={bothEndsHaveCoords}
                 onEdit={(s) => setStep(s)}
                 onSave={save}
                 onRemove={!isNew && !isOrigin ? remove : null}
@@ -2875,7 +2889,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
 }
 
 // -------- PASSO FINAL: RESUMO --------
-function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, prevAlt, variation, onEdit, onSave, onRemove }) {
+function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, prevAlt, variation, coordDerived, onEdit, onSave, onRemove }) {
   const windLabel =
     windMode === "none"   ? "Sem vento (GS = TAS)" :
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
@@ -2905,8 +2919,8 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
           const tc = Math.round(cp.tc);
           const mh = Math.round(((cp.tc - (variation ?? 0)) % 360 + 360) % 360);
           return `TC ${String(tc).padStart(3,"0")}° · MH ${String(mh).padStart(3,"0")}°`;
-        })() : "—", step: "tc" },
-      { label: "Distância",     value: cp.dist != null ? `${cp.dist} NM` : "—",                  step: "dist" },
+        })() : "—", step: "tc", derived: coordDerived },
+      { label: "Distância", value: cp.dist != null ? `${cp.dist} NM` : "—", step: "dist", derived: coordDerived },
       { label: "Vento",         value: windLabel,                                                 step: "vento"},
       { label: "Performance",   value: overrideValue,                                             step: "override" },
     ] : []),
@@ -2918,15 +2932,25 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 
       {/* Card de confirmação */}
       <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
-        {rows.filter(Boolean).map(({ label, value, step }, i) => (
+        {rows.filter(Boolean).map(({ label, value, step, derived }) => (
           <button key={step}
-            onClick={() => onEdit(step)}
-            className={`w-full flex items-center justify-between px-4 py-3 text-left border-b ${theme.panelBorder} last:border-b-0 active:opacity-70`}>
+            onClick={() => !derived && onEdit(step)}
+            className={`w-full flex items-center justify-between px-4 py-3 text-left border-b ${theme.panelBorder} last:border-b-0 ${derived ? 'opacity-60 cursor-default' : 'active:opacity-70'}`}>
             <div>
-              <div className={`text-[9px] uppercase tracking-wider ${theme.fgFaint}`}>{label}</div>
+              <div className={`text-[9px] uppercase tracking-wider ${theme.fgFaint} flex items-center gap-1.5`}>
+                {label}
+                {derived && (
+                  <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${theme.accentBg} text-black`}>
+                    GPS
+                  </span>
+                )}
+              </div>
               <div className={`text-base font-bold num ${theme.fg}`}>{value}</div>
             </div>
-            <Pencil className={`w-4 h-4 ${theme.fgFaint} shrink-0`} />
+            {derived
+              ? <span className={`text-[9px] ${theme.fgFaint} shrink-0`}>auto</span>
+              : <Pencil className={`w-4 h-4 ${theme.fgFaint} shrink-0`} />
+            }
           </button>
         ))}
       </div>
