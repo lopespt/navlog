@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260427.0019";
+const APP_VERSION = "20260427.0029";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1647,8 +1647,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
       if (isNew) {
         cps.push({ ...saved, ata: null, gsActual: null });
       } else {
-        cps[editingIdx] = { ...cps[editingIdx], ...saved };
-        if (windMode !== "custom") { delete cps[editingIdx].windDir; delete cps[editingIdx].windVel; }
+        cps[editingIdx] = { ...saved };
       }
       return { ...f, checkpoints: cps };
     });
