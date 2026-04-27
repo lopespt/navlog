@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2239";
+const APP_VERSION = "20260427.2243";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -164,6 +164,20 @@ function gcTC(lat1, lon1, lat2, lon2) {
 function gcInterpolate(lat1, lon1, lat2, lon2, frac) {
   return [lat1 + (lat2 - lat1) * frac, lon1 + (lon2 - lon1) * frac];
 }
+function projectDest(lat, lon, tc, distNM) {
+  // Great circle: given start point, true course, distance → destination
+  var d = distNM / 3440.065;
+  var tcR = toRad(tc), lat1 = toRad(lat), lon1 = toRad(lon);
+  var lat2 = Math.asin(Math.sin(lat1)*Math.cos(d) + Math.cos(lat1)*Math.sin(d)*Math.cos(tcR));
+  var lon2 = lon1 + Math.atan2(Math.sin(tcR)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+  return [toDeg(lat2), ((toDeg(lon2) + 540) % 360) - 180];
+}
+function projectSource(lat2, lon2, tc, distNM) {
+  // Reverse: given destination, course from source, distance → source
+  var reverseTc = (tc + 180) % 360;
+  return projectDest(lat2, lon2, reverseTc, distNM);
+}
+
 // Decimal degrees → DDM string "DD°MM.MMM'N"
 function decDegToStr(dd, isLat) {
   const hem = isLat ? (dd >= 0 ? 'N' : 'S') : (dd >= 0 ? 'E' : 'W');
@@ -596,7 +610,7 @@ function NavlogApp() {
     let fuelRem = fuelStart;
     let cumDist = 0;
     let cumTime = 0;
-    return flight.checkpoints.map((cp, i) => {
+    var _res = flight.checkpoints.map((cp, i) => {
       if (cp.isOrigin) {
         const originAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? 0);
         return {
@@ -687,6 +701,25 @@ function NavlogApp() {
         notes: cp.notes || "",
       };
     });
+
+    // Project lat/lon for waypoints without explicit coords using TC + dist
+    // Forward pass: project from each known coord to subsequent unknown waypoints
+    for (var _fi = 1; _fi < _res.length; _fi++) {
+      if (_res[_fi].lat == null && _res[_fi-1].lat != null
+          && _res[_fi].tc != null && (_res[_fi].dist ?? 0) > 0) {
+        var _fp = projectDest(_res[_fi-1].lat, _res[_fi-1].lon, _res[_fi].tc, _res[_fi].dist);
+        _res[_fi] = Object.assign({}, _res[_fi], { lat: _fp[0], lon: _fp[1], coordProjected: true });
+      }
+    }
+    // Backward pass: project from each known coord back through unknown predecessors
+    for (var _bi = _res.length - 2; _bi >= 0; _bi--) {
+      if (_res[_bi].lat == null && _res[_bi+1].lat != null
+          && _res[_bi+1].tc != null && (_res[_bi+1].dist ?? 0) > 0) {
+        var _bp = projectSource(_res[_bi+1].lat, _res[_bi+1].lon, _res[_bi+1].tc, _res[_bi+1].dist);
+        _res[_bi] = Object.assign({}, _res[_bi], { lat: _bp[0], lon: _bp[1], coordProjected: true });
+      }
+    }
+    return _res;
   }, [flight, ac]);
 
   // Próximo checkpoint não cruzado
@@ -4352,7 +4385,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
-      const color = cp.isOrigin ? '#22c55e' : '#f59e0b';
+      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#f59e0b';
       const label = cp.name?.slice(0,4) ?? String(i);
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
       const etaStr = liveETAs[cp.userIdx] != null
@@ -4435,7 +4468,14 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
           </button>
         ))}
         <div className={`ml-auto text-[10px] ${theme.fgFaint} flex items-center`}>
-          {hasCoords ? `${liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length} pontos` : 'Adicione coordenadas nos waypoints'}
+          {(() => {
+          const total = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length;
+          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected).length;
+          const proj = total - explicit;
+          return total === 0 ? 'Adicione coordenadas nos waypoints'
+            : proj > 0 ? `${explicit} coord · ${proj} projetado${proj>1?'s':''}`
+            : `${total} pontos`;
+        })()}
         </div>
       </div>
 
