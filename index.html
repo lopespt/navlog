@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.0117";
+const APP_VERSION = "20260427.0124";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -283,9 +283,10 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC) {
   }
 
   const totalD = portions.reduce((s, p) => s + p.dist, 0);
-  const avgTas = totalD > 0
-    ? portions.reduce((s, p) => s + p.tas * p.dist, 0) / totalD
-    : tasCruise;
+  // Time-based effective TAS: totalDist / Σ(dist_i/tas_i)
+  // Ensures (totalD / avgTas) = actual total no-wind flight time
+  const totalNoWindTime = portions.reduce((s, p) => s + (p.tas > 0 ? p.dist / p.tas : 0), 0);
+  const avgTas = totalNoWindTime > 0 ? totalD / totalNoWindTime : tasCruise;
 
   return { portions, avgTas };
 }
@@ -639,11 +640,16 @@ function NavlogApp() {
       if (cp.portions?.length > 1) {
         let accDist = 0, accETE = 0;
         let prevVirtETE = 0, prevVirtDist = 0;
+        // Total no-wind time for this leg — used to distribute etePlanned by actual phase time
+        const legNoWindTime = cp.portions.reduce((s, p) => s + (p.tas > 0 ? p.dist / p.tas : 0), 0);
         for (let p = 0; p < cp.portions.length - 1; p++) {
           const por = cp.portions[p];
-          const frac = cp.dist > 0 ? por.dist / cp.dist : 0;
+          // Time fraction: how much of the leg time this phase represents
+          const timeFrac = legNoWindTime > 0 && por.tas > 0
+            ? (por.dist / por.tas) / legNoWindTime
+            : (cp.dist > 0 ? por.dist / cp.dist : 0);
           accDist += por.dist;
-          accETE += frac * cp.etePlanned;
+          accETE += timeFrac * cp.etePlanned;
           const from = por.phase, to = cp.portions[p + 1].phase;
           let label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
             : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
