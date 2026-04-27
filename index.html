@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260427.0014";
+const APP_VERSION = "20260427.0019";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -500,26 +500,20 @@ function NavlogApp() {
     for (let i = computed.length - 1; i >= 0; i--) {
       if (computed[i].ata != null) { lastCrossed = i; break; }
     }
-    let baseMin, baseIdx, refGs;
+    let baseMin, baseIdx;
     if (lastCrossed != null) {
       baseMin = parseHHMM(computed[lastCrossed].ata);
       baseIdx = lastCrossed;
       etas[lastCrossed] = baseMin;
-      refGs = computed[lastCrossed].gsActual ?? null;
     } else if (flight.atd) {
       baseMin = parseHHMM(flight.atd);
       baseIdx = 0;
-      refGs = null;
     } else {
       return etas;
     }
     let cumMin = baseMin;
     for (let i = baseIdx + 1; i < computed.length; i++) {
-      const cp = computed[i];
-      const ete = refGs && refGs > 0 && cp.dist > 0
-        ? (cp.dist / refGs) * 60
-        : cp.etePlanned;
-      cumMin += ete;
+      cumMin += computed[i].etePlanned;
       etas[i] = cumMin;
     }
     return etas;
@@ -2602,31 +2596,18 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           </div>
 
           {/* ETE, ETA e barra de progresso da perna */}
-          {(() => {
-            // ETE corrigido pelo GS real do último ponto cruzado, se disponível
-            const lastCrossedCp = computed.slice(0, next.userIdx).reverse().find(c => c.ata != null);
-            const refGs = lastCrossedCp?.gsActual ?? null;
-            const liveETE = refGs && refGs > 0 && next.dist > 0
-              ? (next.dist / refGs) * 60
-              : next.etePlanned;
-            const eteChanged = refGs && Math.abs(liveETE - (next.etePlanned||0)) >= 1;
-            const progressPct = liveETE > 0 ? Math.min(100, (elapsed / 60) / liveETE * 100) : 0;
-            return (
-          <>
+          {/* ETE + ETA */}
           <div className="grid grid-cols-2 gap-2 mb-2">
-            <div className={`bg-black/30 border ${eteChanged ? theme.accentBorder : theme.panelBorder} rounded-lg px-3 py-3`}>
+            <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-3 py-3`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
-              <div className={`text-3xl font-black num cockpit-glow ${eteChanged ? theme.accent : theme.fg}`}>
-                {Math.round(liveETE||0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
+              <div className={`text-3xl font-black num cockpit-glow ${theme.fg}`}>
+                {Math.round(next.etePlanned||0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
               </div>
-              {eteChanged
-                ? <div className={`text-[9px] num ${theme.fgFaint}`}>plan {Math.round(next.etePlanned||0)} min</div>
-                : phaseETELabel(next.portions, next.etePlanned)
-                  ? <div className={`text-[9px] num ${theme.fgFaint} mt-0.5`}>{phaseETELabel(next.portions, next.etePlanned)}</div>
-                  : null
-              }
+              {phaseETELabel(next.portions, next.etePlanned) && (
+                <div className={`text-[9px] num ${theme.fgFaint} mt-0.5`}>{phaseETELabel(next.portions, next.etePlanned)}</div>
+              )}
             </div>
-            <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : next.isVirtual ? "border-cyan-500/40" : "border-cyan-500/40"}`}>
+            <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
               {liveNext != null ? (
                 <>
@@ -2645,27 +2626,31 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
           {/* Barra de progresso da perna atual */}
-          {lastAtaMs != null && liveETE > 0 && (
+          {lastAtaMs != null && next.etePlanned > 0 && (
             <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
-                <span className={`text-[9px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-1000 ${
-                    progressPct >= 95 ? "bg-red-500" :
-                    progressPct >= 75 ? "bg-amber-400" :
-                    isAlert ? "bg-red-500" : "bg-amber-500"
-                  }`}
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
+              {(() => {
+                const progressPct = Math.min(100, (elapsed / 60) / next.etePlanned * 100);
+                return (
+                <>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
+                    <span className={`text-[9px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        progressPct >= 95 ? "bg-red-500" :
+                        progressPct >= 75 ? "bg-amber-400" :
+                        isAlert ? "bg-red-500" : "bg-amber-500"
+                      }`}
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+                </>
+                );
+              })()}
             </div>
           )}
-          </>
-            );
-          })()}
 
           {/* Dist + alt + vento como info secundária */}
           <div className={`grid grid-cols-3 text-[10px] num ${theme.fgFaint} mb-3 px-1 gap-1`}>
