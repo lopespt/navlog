@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260426.2355";
+const APP_VERSION = "20260427.0014";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -551,7 +551,8 @@ function NavlogApp() {
               name: label, isVirtual: true, autoKey, userIdx: i,
               // TOC = leveled at dest alt; TOD = still at src alt; BOD = leveled at dest alt
               alt: (label === "TOC" || label === "BOD") ? cp.alt : (prevAlt ?? cp.alt),
-              tc: cp.tc,
+              tc: cp.tc, mh: cp.mh, mc: cp.mc, wca: cp.wca,
+              windMode: cp.windMode, windDirUsed: cp.windDirUsed, windVelUsed: cp.windVelUsed,
               dist: Math.round(accDist * 10) / 10,
               distToNext: Math.round((cp.dist - accDist) * 10) / 10,
               etePlanned: accETE,
@@ -2402,8 +2403,18 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     liveFuel, ac, prefs }) {
 
   const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
-  const liveNext = (next && !next.isVirtual) ? liveETAs[next.userIdx] : null;
   const planNext = next ? next.etaPlanned : null;
+
+  // ETA live do próximo ponto — para virtuais, interpola entre o ETA do wp anterior e do próximo
+  const liveNext = useMemo(() => {
+    if (!next) return null;
+    if (!next.isVirtual) return liveETAs[next.userIdx] ?? null;
+    const userCp = computed[next.userIdx];
+    if (!userCp?.etePlanned || userCp.etePlanned <= 0) return null;
+    const prevETA = next.userIdx > 1 ? liveETAs[next.userIdx - 1] : (flight.atd ? parseHHMM(flight.atd) : null);
+    if (prevETA == null || liveETAs[next.userIdx] == null) return null;
+    return prevETA + (next.etePlanned / userCp.etePlanned) * (liveETAs[next.userIdx] - prevETA);
+  }, [next, liveETAs, computed, flight.atd]);
   // Desvio calculado em cima do plano ajustado pelo ATD real (não pela EOBT)
   // Se saímos atrasados, isso não gera alerta — só desvios de navegação/velocidade alertam
   const eobtMin = parseHHMM(flight.eobt) ?? 0;
@@ -2548,72 +2559,46 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
       )}
 
       {next ? (
-        next.isVirtual ? (
-          /* ---- Card de TOC / TOD virtual ---- */
-          <div className={`border-2 rounded-lg p-4 transition-all border-cyan-500/60 bg-cyan-500/5`}>
-            <div className="flex items-center justify-between mb-1">
-              <span className={`text-[10px] uppercase tracking-widest ${theme.cyan}`}>
-                {next.name === "TOC" ? "Topo de Subida" : next.name === "TOD" ? "Início de Descida" : "Fim de Descida"}
-              </span>
-              <span className={`text-[10px] uppercase ${theme.fgFaint} num`}>
-                {next.alt != null ? `${next.alt} ft` : ""}
-              </span>
-            </div>
-            <div className={`text-4xl font-black cockpit-glow tracking-tight mb-3 ${theme.cyan}`}>
-              {next.name}
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <BigStat theme={theme} label="Dist" value={`${next.dist} NM`} />
-              {(() => {
-                // ETA virtual = liveETA do waypoint desta perna * fração até o ponto virtual
-                const userCp = computed[next.userIdx];
-                const prevLiveETA = next.userIdx > 1 ? liveETAs[next.userIdx - 1] : (flight.atd ? parseHHMM(flight.atd) : null);
-                const liveVirtETA = prevLiveETA != null && userCp?.etePlanned > 0
-                  ? prevLiveETA + (next.etePlanned / userCp.etePlanned) * (liveETAs[next.userIdx] - prevLiveETA)
-                  : null;
-                return <BigStat theme={theme} label="ETA" value={formatHHMM(liveVirtETA ?? planNext)} />;
-              })()}
-            </div>
-            <button onClick={() => markVirtual(next.autoKey)}
-              className={`w-full bg-cyan-700 text-white font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
-              <CircleCheckBig className="w-5 h-5" /> Atingi {next.name} agora
-            </button>
-          </div>
-        ) : (
-        /* ---- Card de waypoint normal ---- */
-        <div className={`border-2 rounded-lg p-4 transition-all ${
-          isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`
-        }`}>
-          {/* Linha topo: label + alt/fases */}
+        /* ---- Card de próximo waypoint (regular ou virtual TOC/TOD/BOD) ---- */
+        (() => {
+          const accentColor = next.isVirtual ? theme.cyan : isAlert ? theme.danger : theme.accent;
+          const borderClass = next.isVirtual
+            ? (isAlert ? "border-red-500/80 bg-red-500/10" : "border-cyan-500/60 bg-cyan-500/5")
+            : (isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`);
+          const virtLabel = next.name === "TOC" ? "Topo de Subida" : next.name === "TOD" ? "Início de Descida" : "Fim de Descida";
+          return (
+        <div className={`border-2 rounded-lg p-4 transition-all ${borderClass}`}>
+          {/* Linha topo: label + alt */}
           <div className="flex items-center justify-between mb-1">
-            <span className={`text-[10px] uppercase tracking-widest ${isAlert ? theme.danger : theme.accent}`}>
-              {isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
+            <span className={`text-[10px] uppercase tracking-widest ${accentColor}`}>
+              {next.isVirtual ? virtLabel : isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
             </span>
             <span className={`text-[10px] ${theme.fgFaint} num`}>
               {next.alt != null ? `${next.alt} ft` : ""}
-              {phaseETELabel(next.portions, next.etePlanned)
+              {!next.isVirtual && phaseETELabel(next.portions, next.etePlanned)
                 ? ` · ${phaseETELabel(next.portions, next.etePlanned)}`
                 : ""}
             </span>
           </div>
 
-          {/* Nome + proa: dois focos principais */}
+          {/* Nome + proa */}
           <div className="flex items-end justify-between mb-3 gap-2">
-            <div className={`text-4xl font-black cockpit-glow tracking-tight leading-none ${isAlert ? theme.danger : theme.accent}`}>
+            <div className={`text-4xl font-black cockpit-glow tracking-tight leading-none ${accentColor}`}>
               {next.name}
             </div>
-            {/* Proa magnética (com correção de vento) */}
-            <div className="text-right">
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
-              <div className={`text-4xl font-black num cockpit-glow leading-none ${isAlert ? theme.danger : theme.accent}`}>
-                {Math.round(next.mh).toString().padStart(3,"0")}°
-              </div>
-              {next.mc != null && next.wca != null && Math.abs(next.wca) >= 1 && (
-                <div className={`text-[10px] num ${theme.fgFaint} mt-0.5`}>
-                  MC {Math.round(next.mc).toString().padStart(3,"0")}°
+            {next.mh != null && (
+              <div className="text-right">
+                <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
+                <div className={`text-4xl font-black num cockpit-glow leading-none ${accentColor}`}>
+                  {Math.round(next.mh).toString().padStart(3,"0")}°
                 </div>
-              )}
-            </div>
+                {next.mc != null && next.wca != null && Math.abs(next.wca) >= 1 && (
+                  <div className={`text-[10px] num ${theme.fgFaint} mt-0.5`}>
+                    MC {Math.round(next.mc).toString().padStart(3,"0")}°
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ETE, ETA e barra de progresso da perna */}
@@ -2641,11 +2626,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                   : null
               }
             </div>
-            <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
+            <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : next.isVirtual ? "border-cyan-500/40" : "border-cyan-500/40"}`}>
               <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
               {liveNext != null ? (
                 <>
-                  <div className={`text-3xl font-black num cockpit-glow ${isAlert ? theme.danger : theme.cyan}`}>
+                  <div className={`text-3xl font-black num cockpit-glow ${accentColor}`}>
                     {formatHHMM(liveNext)}
                   </div>
                   {deltaMin != null && Math.abs(deltaMin) >= 1 && (
@@ -2713,12 +2698,14 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               <span className="text-amber-200 text-sm font-bold">ETA atingida — confirme passagem</span>
             </div>
           )}
-          <button onClick={() => markCrossed(next.userIdx)}
-            className={`w-full ${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
-            <CircleCheckBig className="w-5 h-5" /> Cruzei {next.name} agora
+          <button
+            onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
+            className={`w-full ${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
+            <CircleCheckBig className="w-5 h-5" /> {next.isVirtual ? "Atingi" : "Cruzei"} {next.name} agora
           </button>
         </div>
-        )
+          );
+        })()
       ) : (
         <div className="bg-green-500/15 border-2 border-green-500/50 rounded-lg p-6 text-center">
           <CircleCheckBig className={`w-10 h-10 mx-auto ${theme.success} mb-2`} />
