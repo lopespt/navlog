@@ -40,7 +40,7 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
 
-const APP_VERSION = "20260427.0029";
+const APP_VERSION = "20260427.0030";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2682,11 +2682,18 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               <span className="text-amber-200 text-sm font-bold">ETA atingida — confirme passagem</span>
             </div>
           )}
-          <button
-            onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
-            className={`w-full ${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
-            <CircleCheckBig className="w-5 h-5" /> {next.isVirtual ? "Atingi" : "Cruzei"} {next.name} agora
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
+              className={`${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all`}>
+              <CircleCheckBig className="w-4 h-4" /> Agora
+            </button>
+            <button
+              onClick={() => next.isVirtual ? onEditVirtualAta(next.autoKey) : onEditAta(next.userIdx)}
+              className={`${theme.panel} border ${next.isVirtual ? "border-cyan-600" : theme.accentBorder} ${next.isVirtual ? theme.cyan : theme.accent} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all`}>
+              <Clock className="w-4 h-4" /> Registrar hora
+            </button>
+          </div>
         </div>
           );
         })()
