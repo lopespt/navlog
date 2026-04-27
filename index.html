@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2351";
+const APP_VERSION = "20260427.2357";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1946,7 +1946,19 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
       } else {
         cps[editingIdx] = { ...saved };
       }
-      // Recompute TC and dist for every consecutive pair with known coords
+      // Pass 1 — project lat/lon from TC+dist for waypoints without coords.
+      // Runs first so that projected positions are available for the TC recompute below.
+      // Cascades naturally: each projected position enables the next.
+      for (var _j = 1; _j < cps.length; _j++) {
+        var _pj = cps[_j - 1], _cj = cps[_j];
+        if (_cj.lat == null && _pj.lat != null && _pj.lon != null
+            && _cj.tc != null && (_cj.dist ?? 0) > 0) {
+          var _proj = projectDest(_pj.lat, _pj.lon, _cj.tc, _cj.dist);
+          cps[_j] = Object.assign({}, cps[_j], { lat: _proj[0], lon: _proj[1], coordFromTC: true });
+        }
+      }
+      // Pass 2 — recompute TC and dist for every consecutive pair with known coords.
+      // Now covers all waypoints since Pass 1 filled in projected positions.
       for (var _i = 1; _i < cps.length; _i++) {
         var _prev = cps[_i - 1], _cur = cps[_i];
         if (_prev.lat != null && _prev.lon != null && _cur.lat != null && _cur.lon != null) {
@@ -2192,7 +2204,8 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext, allWps }) {
 
   function confirm() {
     if (!isValid) return;
-    const updates = { lat: latVal, lon: lonVal };
+    // Explicit coord entry clears coordFromTC — user-placed position takes over
+    const updates = { lat: latVal, lon: lonVal, coordFromTC: false };
     if (prevCp?.lat != null && prevCp?.lon != null) {
       updates.tc   = Math.round(gcTC(prevCp.lat, prevCp.lon, latVal, lonVal));
       updates.dist = Math.round(gcDist(prevCp.lat, prevCp.lon, latVal, lonVal) * 10) / 10;
@@ -4539,7 +4552,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
-      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#f59e0b';
+      const color = cp.isOrigin ? '#22c55e' : (cp.coordProjected || cp.coordFromTC) ? '#a78bfa' : '#f59e0b';
       const label = cp.name?.slice(0,4) ?? String(i);
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
       const etaStr = liveETAs[cp.userIdx] != null
@@ -4624,7 +4637,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
         <div className={`ml-auto text-[10px] ${theme.fgFaint} flex items-center`}>
           {(() => {
           const total = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length;
-          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected).length;
+          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected&&!cp.coordFromTC).length;
           const proj = total - explicit;
           return total === 0 ? 'Adicione coordenadas nos waypoints'
             : proj > 0 ? `${explicit} coord · ${proj} projetado${proj>1?'s':''}`
