@@ -38,7 +38,7 @@
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
-      TrendingUp, TrendingDown, Minus, Map
+      TrendingUp, TrendingDown, Minus, Map: MapIcon
     } = LucideReact;
 
 function haptic(pattern) {
@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2237";
+const APP_VERSION = "20260427.2239";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1350,7 +1350,7 @@ function NavlogApp() {
           <TabButton theme={theme} active={tab === "log"} onClick={() => setTab("log")}
             icon={<BookOpen className="w-5 h-5" />} label="Diário" />
           <TabButton theme={theme} active={tab === "map"} onClick={() => setTab("map")}
-            icon={<Map className="w-5 h-5" />} label="Mapa" />
+            icon={<MapIcon className="w-5 h-5" />} label="Mapa" />
         </div>
       </nav>
 
@@ -4446,7 +4446,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
         <div className={`absolute inset-0 flex items-center justify-center pointer-events-none`}
           style={{ top: '120px' }}>
           <div className={`${theme.panel} border ${theme.panelBorder} rounded-2xl p-6 text-center mx-8`}>
-            <Map className={`w-10 h-10 ${theme.fgFaint} mx-auto mb-3`} />
+            <MapIcon className={`w-10 h-10 ${theme.fgFaint} mx-auto mb-3`} />
             <div className={`font-bold ${theme.fg} mb-1`}>Sem coordenadas</div>
             <div className={`text-[11px] ${theme.fgFaint}`}>
               Edite os waypoints no Setup e adicione coordenadas (lat/lon) para ver a rota no mapa.
