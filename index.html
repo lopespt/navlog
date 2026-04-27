@@ -75,7 +75,7 @@ function playAlarm() {
   else go();
 }
 
-const APP_VERSION = "20260427.0057";
+const APP_VERSION = "20260427.0104";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1710,7 +1710,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
-  const [step, setStep] = useState(isOrigin ? "nome" : "nome");
+  const [step, setStep] = useState(isNew ? "nome" : "resumo");
   const [windMode, setWindMode] = useState(
     initial.windMode === "none" ? "none"
     : initial.windMode === "custom" ? "custom"
@@ -1730,7 +1730,10 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     if (!isFirst) setStep(steps[stepIdx - 1]);
   }
   function next() {
-    if (!isLast) setStep(steps[stepIdx + 1]);
+    if (isLast) return;
+    // When editing existing waypoint, always return to summary after any step
+    if (!isNew) setStep("resumo");
+    else setStep(steps[stepIdx + 1]);
   }
   function skipToResumo() { setStep("resumo"); }
 
@@ -1843,17 +1846,26 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
           {step === "override" && (
             <StepOverride cp={cp} setCp={setCp} theme={theme} onNext={next} />
           )}
-          {step === "resumo" && (
-            <StepResumo
-              theme={theme}
-              cp={cp} isNew={isNew} isOrigin={isOrigin}
-              windMode={windMode}
-              cruiseAlt={flight.cruiseAlt ?? 7000}
-              onEdit={(s) => setStep(s)}
-              onSave={save}
-              onRemove={!isNew && !isOrigin ? remove : null}
-            />
-          )}
+          {step === "resumo" && (() => {
+            const prevCpForResumo = isNew
+              ? flight.checkpoints[flight.checkpoints.length - 1]
+              : flight.checkpoints[(editingIdx ?? flight.checkpoints.length) - 1];
+            const prevAltForResumo = prevCpForResumo?.useCruiseAlt
+              ? (flight.cruiseAlt ?? 7000)
+              : (prevCpForResumo?.alt ?? null);
+            return (
+              <StepResumo
+                theme={theme}
+                cp={cp} setCp={setCp} isNew={isNew} isOrigin={isOrigin}
+                windMode={windMode}
+                cruiseAlt={flight.cruiseAlt ?? 7000}
+                prevAlt={prevAltForResumo}
+                onEdit={(s) => setStep(s)}
+                onSave={save}
+                onRemove={!isNew && !isOrigin ? remove : null}
+              />
+            );
+          })()}
         </div>
 
       </div>
@@ -2512,7 +2524,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
 }
 
 // -------- PASSO FINAL: RESUMO --------
-function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, onSave, onRemove }) {
+function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, prevAlt, onEdit, onSave, onRemove }) {
   const windLabel =
     windMode === "none"   ? "Sem vento (GS = TAS)" :
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
@@ -2562,6 +2574,62 @@ function StepResumo({ theme, cp, isNew, isOrigin, windMode, cruiseAlt, onEdit, o
           </button>
         ))}
       </div>
+
+      {/* Arrival mode — inline no resumo, só para pernas com variação de altitude */}
+      {!isOrigin && setCp && (() => {
+        const currentAlt = cp.useCruiseAlt ? cruiseAlt : cp.alt;
+        const isClimbing  = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
+        const isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
+        if (!isClimbing && !isDescending) return null;
+        const contextDefault = isDescending ? "at_fix" : "asap";
+        const arrivalMode = cp.arrivalMode ?? null;
+        const arrivalValue = cp.arrivalValue ?? 5;
+        const modeOpts = [
+          { key: "asap",       label: "ASAP" },
+          { key: "at_fix",     label: "No fix" },
+          { key: "before_nm",  label: "−NM" },
+          { key: "before_min", label: "−min" },
+        ];
+        function setMode(key) {
+          setCp((p) => ({ ...p, arrivalMode: p.arrivalMode === key ? null : key }));
+        }
+        function adjustValue(delta) {
+          setCp((p) => ({ ...p, arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }));
+        }
+        return (
+          <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+              {isClimbing ? "↗ Subida" : "↘ Descida"} · nivelar
+              {arrivalMode == null && <span className={`ml-1 ${theme.cyan}`}>· padrão: {contextDefault === "asap" ? "ASAP" : "no fix"}</span>}
+            </div>
+            <div className="flex gap-1">
+              {modeOpts.map(({ key, label }) => {
+                const active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
+                return (
+                  <button key={key} onClick={() => setMode(key)}
+                    className={`flex-1 py-2 rounded-lg border text-[11px] font-bold transition-colors active:scale-95 ${
+                      active ? `${theme.accentBorder} bg-amber-500/10 ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`
+                    }`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
+              <div className="flex items-center gap-3">
+                <button onClick={() => adjustValue(-1)}
+                  className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
+                <div className="flex-1 text-center">
+                  <span className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
+                  <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
+                </div>
+                <button onClick={() => adjustValue(1)}
+                  className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="space-y-2 pt-1">
         <button onClick={onSave}
