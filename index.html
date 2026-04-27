@@ -82,7 +82,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.1126";
+const APP_VERSION = "20260427.1142";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -3110,7 +3110,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
     : isAuto ? `AUTO · ${cp.alt} ft · +${cp.dist?.toFixed(1)} NM da perna`
     : viewMode === "cum"
       ? `Σ ${cp.cumDist?.toFixed(0)} NM · Σ ${cp.cumTime?.toFixed(0)} min${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`
-      : `${cp.dist} NM · ${eteLabel ?? "—"}${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
+      : `${cp.distLeg ?? cp.dist} NM · ${eteLabel ?? "—"}${altLabel ? ` · ${altLabel}` : ""} · MC ${Math.round(cp.mc ?? cp.mh).toString().padStart(3, "0")}°`;
 
   return (
     <Wrapper
