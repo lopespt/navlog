@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0140";
+const APP_VERSION = "20260428.0144";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4886,9 +4886,12 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
     pickModeRef.current = true;
     function handler(e) {
       if (!pickModeRef.current) return;
-      var pts = mapPts.concat([[e.latlng.lat, e.latlng.lng]]);
-      setMapPts(pts);
-      if (pts.length >= 2) { pickModeRef.current = false; }
+      var latlng = [e.latlng.lat, e.latlng.lng];
+      setMapPts(function(prev) {
+        var pts = prev.concat([latlng]);
+        if (pts.length >= 2) { pickModeRef.current = false; }
+        return pts;
+      });
     }
     map.on('click', handler);
     return () => { pickModeRef.current = false; map.off('click', handler); };
