@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1318";
+const APP_VERSION = "20260428.1516";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -778,7 +778,30 @@ function NavlogApp() {
   const [notesIdx, setNotesIdx] = useState(null);
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const [deviationOpen, setDeviationOpen] = useState(false);
+  const [userPoints, setUserPoints] = useState([]);
+  const [pointFinderOpen, setPointFinderOpen] = useState(false);
   const wakeLockRef = useRef(null);
+
+  // Load user points library from IndexedDB on mount
+  useEffect(() => {
+    (async () => {
+      const all = await userPtsAll();
+      setUserPoints(all || []);
+    })();
+  }, []);
+
+  async function addUserPoint(pt) {
+    const rec = await userPtsPut(pt);
+    if (rec) setUserPoints((p) => {
+      const filtered = p.filter((x) => x.id !== rec.id);
+      return filtered.concat([rec]);
+    });
+    return rec;
+  }
+  async function deleteUserPoint(id) {
+    await userPtsDelete(id);
+    setUserPoints((p) => p.filter((x) => x.id !== id));
+  }
   const [fleet, setFleet] = useState(() => {
     try {
       const saved = localStorage.getItem('navlog_fleet');
@@ -1706,6 +1729,9 @@ function NavlogApp() {
             fleet={fleet}
             onManageFleet={() => setFleetOpen(true)}
             computed={computed}
+            userPoints={userPoints}
+            onAddUserPoint={addUserPoint}
+            onDeleteUserPoint={deleteUserPoint}
           />
         )}
         {tab === "flight" && (
@@ -1774,6 +1800,9 @@ function NavlogApp() {
           ac={ac}
           theme={theme}
           pdfOverlays={pdfOverlays}
+          userPoints={userPoints}
+          onAddUserPoint={addUserPoint}
+          onDeleteUserPoint={deleteUserPoint}
           onClose={() => { setEditorOpen(false); setInsertAfterIdx(null); setInsertCoords(null); }}
         />
       )}
@@ -1956,6 +1985,326 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
+function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "" }) {
+  const [tab, setTab] = useState("search");
+  const [innerOpen, setInnerOpen] = useState(false);
+  const [innerSlot, setInnerSlot] = useState(null); // 'anchor'
+
+  // Search tab state
+  const [query, setQuery] = useState(initialQuery || "");
+  const [airacResults, setAiracResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const abortRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  function triggerSearch(q) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (abortRef.current) { try { abortRef.current.abort(); } catch (_) {} abortRef.current = null; }
+    if (!q || q.length < 2) { setAiracResults(null); setSearching(false); return; }
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      try {
+        const data = await airacSearch(q, ctrl.signal);
+        if (ctrl === abortRef.current) {
+          setAiracResults(data || { airports: [], navaids: [], waypoints: [] });
+          setSearching(false);
+        }
+      } catch (_) { /* aborted */ }
+    }, 300);
+  }
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) { try { abortRef.current.abort(); } catch (_) {} }
+    };
+  }, []);
+  useEffect(() => { if (initialQuery) triggerSearch(initialQuery); }, []); // eslint-disable-line
+
+  // Local matches (substring on name / notes / tags)
+  const localMatches = useMemo(() => {
+    if (!query || query.length < 1) return [];
+    const q = query.toUpperCase();
+    return (userPoints || []).filter((pt) => {
+      if ((pt.name || "").toUpperCase().includes(q)) return true;
+      if ((pt.notes || "").toUpperCase().includes(q)) return true;
+      if ((pt.tags || []).some((t) => (t || "").toUpperCase().includes(q))) return true;
+      return false;
+    });
+  }, [userPoints, query]);
+
+  // Radial+distance tab state
+  const [anchor, setAnchor] = useState(null);
+  const [bearingMode, setBearingMode] = useState("mc");
+  const [bearing, setBearing] = useState("");
+  const [distance, setDistance] = useState("");
+
+  const radialResult = (function() {
+    if (!anchor || anchor.lat == null || anchor.lon == null) return null;
+    const brg = parseFloat(bearing);
+    const dist = parseFloat(distance);
+    if (isNaN(brg) || isNaN(dist) || dist <= 0) return null;
+    const variation = getDecl(anchor.lat, anchor.lon, anchor.alt || 0) ?? (flight.variation ?? 0);
+    const tc = bearingMode === "mc" ? (((brg + variation) % 360) + 360) % 360 : brg;
+    const proj = projectDest(anchor.lat, anchor.lon, tc, dist);
+    return {
+      name: ((anchor.name || "PT") + Math.round(brg).toString().padStart(3, "0") + Math.round(dist)).slice(0, 10).toUpperCase(),
+      lat: Math.round(proj[0] * 1e6) / 1e6,
+      lon: Math.round(proj[1] * 1e6) / 1e6,
+      kind: "computed",
+      notes: (anchor.name || "") + " " + bearingMode.toUpperCase() + " " + Math.round(brg) + "° / " + dist + " NM",
+    };
+  })();
+
+  function pickFromAirac(item, kind) {
+    const lat = item.latitude != null ? Number(item.latitude) : (item.coordinates && item.coordinates.lat);
+    const lon = item.longitude != null ? Number(item.longitude) : (item.coordinates && item.coordinates.lon);
+    if (lat == null || lon == null) return null;
+    return {
+      name: (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "PT",
+      kind,
+      lat: Math.round(Number(lat) * 1e6) / 1e6,
+      lon: Math.round(Number(lon) * 1e6) / 1e6,
+      alt: kind === "airport" && item.elevation_ft != null ? Number(item.elevation_ft) : null,
+      notes: kind === "airport" ? [item.name, item.city].filter(Boolean).join(" · ") : (item.name || ""),
+    };
+  }
+
+  function chooseAndConfirm(pt) {
+    if (!pt) return;
+    onConfirm(pt);
+  }
+  async function saveToLib(pt) {
+    if (!pt || pt.lat == null || pt.lon == null) return;
+    if (!onAddUserPoint) return;
+    await onAddUserPoint({
+      name: pt.name || "CUSTOM",
+      kind: pt.kind || "custom",
+      lat: pt.lat, lon: pt.lon,
+      alt: pt.alt ?? null,
+      notes: pt.notes || "",
+    });
+  }
+
+  const headerLabel = depth > 0 ? "Escolher ponto · âncora" : "Localizar ponto";
+  const inputCls = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl num focus:outline-none`;
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ position: "fixed", inset: 0, zIndex: 9999 + depth * 20, display: "flex", flexDirection: "column", isolation: "isolate" }}
+      className={theme.bg}>
+      <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
+        <button onClick={onCancel} className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
+          {depth > 0 ? "← Voltar" : "Cancelar"}
+        </button>
+        <div className="flex-1 text-center">
+          <div className={`text-sm font-bold ${theme.cyan}`}>{headerLabel}</div>
+          {depth > 0 && (
+            <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>nível {depth + 1}</div>
+          )}
+        </div>
+        <div style={{ width: 80 }} />
+      </div>
+
+      <div className={`flex shrink-0 border-b ${theme.panelBorder}`}>
+        {[["search", "Buscar"], ["radial", "Radial + Dist"]].map(function(pair) {
+          const key = pair[0], label = pair[1];
+          return (
+            <button key={key} onClick={() => setTab(key)}
+              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
+                tab === key ? `${theme.accent} border-b-2 border-current` : theme.fgFaint
+              }`}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {tab === "search" && (
+          <div className="p-3 space-y-2">
+            <input type="text" autoFocus placeholder="Mín. 2 letras (nome / ICAO / fix)"
+              value={query}
+              onChange={(e) => { const v = e.target.value.toUpperCase(); setQuery(v); triggerSearch(v); }}
+              className={inputCls + " text-base font-bold tracking-widest"}
+            />
+            {localMatches.length > 0 && (
+              <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
+                <div className={`px-3 py-1.5 text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Meus pontos</div>
+                {localMatches.map((pt) => (
+                  <button key={pt.id || pt.name}
+                    onClick={() => chooseAndConfirm({ name: pt.name, kind: pt.kind || "custom", lat: pt.lat, lon: pt.lon, alt: pt.alt, notes: pt.notes })}
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 text-left active:opacity-70 border-t ${theme.panelBorder}`}>
+                    <span className="text-base">⭐</span>
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
+                      <div className={`text-[10px] truncate ${theme.fgFaint} num`}>
+                        {pt.lat?.toFixed(4)}, {pt.lon?.toFixed(4)}{pt.notes ? " · " + pt.notes : ""}
+                      </div>
+                    </div>
+                    {pt.alt != null && <span className={`text-[10px] num ${theme.fgFaint}`}>{pt.alt} ft</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {searching && <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} px-2`}>Buscando AIRAC…</div>}
+            {airacResults && (function() {
+              const aps = airacResults.airports || [];
+              const nvs = airacResults.navaids || [];
+              const wps = airacResults.waypoints || [];
+              const total = aps.length + nvs.length + wps.length;
+              if (total === 0 && !searching) {
+                return <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} px-2`}>Sem resultados em AIRAC</div>;
+              }
+              const rowBase = "w-full flex items-center gap-2 px-3 py-2.5 text-left active:opacity-70";
+              return (
+                <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
+                  <div className={`px-3 py-1.5 text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>AIRAC</div>
+                  {aps.map((it, i) => {
+                    const pt = pickFromAirac(it, "airport"); if (!pt) return null;
+                    return (
+                      <button key={"a" + i} onClick={() => chooseAndConfirm(pt)}
+                        className={`${rowBase} border-t ${theme.panelBorder}`}>
+                        <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>✈ APT</span>
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
+                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                        </div>
+                        {pt.alt != null && <span className={`text-[10px] num shrink-0 ${theme.fgFaint}`}>{pt.alt} ft</span>}
+                      </button>
+                    );
+                  })}
+                  {nvs.map((it, i) => {
+                    const pt = pickFromAirac(it, "navaid"); if (!pt) return null;
+                    return (
+                      <button key={"n" + i} onClick={() => chooseAndConfirm(pt)}
+                        className={`${rowBase} border-t ${theme.panelBorder}`}>
+                        <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>⊕ NAV</span>
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
+                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {wps.map((it, i) => {
+                    const pt = pickFromAirac(it, "waypoint"); if (!pt) return null;
+                    return (
+                      <button key={"w" + i} onClick={() => chooseAndConfirm(pt)}
+                        className={`${rowBase} border-t ${theme.panelBorder}`}>
+                        <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>◇ WPT</span>
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
+                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "radial" && (
+          <div className="p-3 space-y-3">
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Âncora</label>
+              <div className="flex items-center gap-2">
+                <div className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-2 min-h-[44px] flex items-center`}>
+                  {anchor ? (
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-bold truncate ${theme.fg}`}>{anchor.name || "—"}</div>
+                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                        {anchor.lat?.toFixed(4)}, {anchor.lon?.toFixed(4)}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className={`text-sm ${theme.fgFaint}`}>Selecione âncora</span>
+                  )}
+                </div>
+                <button onClick={() => { setInnerSlot("anchor"); setInnerOpen(true); }}
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
+                  🔍 Buscar
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Radial</label>
+              <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder} mb-2`}>
+                {[["mc", "MC (Mag)"], ["tc", "TC (True)"]].map(function(pair) {
+                  const m = pair[0], label = pair[1];
+                  return (
+                    <button key={m} onClick={() => setBearingMode(m)}
+                      className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider ${bearingMode === m ? theme.accentBg + " text-black" : theme.fgFaint}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <input type="number" inputMode="numeric" min="0" max="359" placeholder="0–359°"
+                value={bearing} onChange={(e) => setBearing(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Distância (NM)</label>
+              <input type="number" inputMode="decimal" min="0" placeholder="ex: 12.5"
+                value={distance} onChange={(e) => setDistance(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            {(function() {
+              const r = radialResult;
+              if (!r) {
+                return (
+                  <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                    Preencha âncora, radial e distância
+                  </div>
+                );
+              }
+              return (
+                <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Resultado</div>
+                  <div className={`text-2xl font-black ${theme.cyan} num`}>{r.name}</div>
+                  <div className={`text-xs num ${theme.fgMuted}`}>{r.lat.toFixed(4)}, {r.lon.toFixed(4)}</div>
+                  <div className={`text-[10px] num ${theme.fgFaint}`}>{r.notes}</div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button onClick={() => saveToLib(r)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+                      ⭐ Salvar na biblioteca
+                    </button>
+                    <button onClick={() => chooseAndConfirm(r)}
+                      className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
+                      Usar este ponto
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+
+      {innerOpen && (
+        <PointFinder
+          flight={flight} ac={ac} theme={theme}
+          userPoints={userPoints}
+          onAddUserPoint={onAddUserPoint}
+          onDeleteUserPoint={onDeleteUserPoint}
+          depth={depth + 1}
+          onConfirm={(pt) => {
+            if (innerSlot === "anchor") setAnchor(pt);
+            setInnerOpen(false);
+          }}
+          onCancel={() => setInnerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
   const dev = flight.activeDeviation || null;
   const mapDivRef = useRef(null);
@@ -2180,7 +2529,7 @@ function AiracBadge({ theme }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -2437,6 +2786,40 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           </button>
         </div>
       </Section>
+
+      {/* MEUS PONTOS */}
+      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}>
+        {(userPoints || []).length === 0 ? (
+          <div className={`text-[11px] ${theme.fgFaint} text-center py-2`}>
+            Nenhum ponto guardado. Use o botão 🔍 no editor de waypoint para criar (busca / radial+dist) e <strong>Salvar na biblioteca</strong>.
+          </div>
+        ) : (
+          <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl divide-y ${theme.panelBorder} overflow-hidden`}>
+            {[...userPoints].sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); }).map(function(pt) {
+              return (
+                <div key={pt.id || pt.name} className="flex items-center gap-2 px-3 py-2">
+                  <span className={`text-[10px] font-bold w-12 shrink-0 ${theme.accent}`}>⭐ {pt.kind === "computed" ? "CALC" : pt.kind === "airport" ? "APT" : pt.kind === "navaid" ? "NAV" : pt.kind === "waypoint" ? "WPT" : "MEU"}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
+                    <div className={`text-[10px] truncate num ${theme.fgFaint}`}>
+                      {pt.lat != null ? pt.lat.toFixed(4) : "—"}, {pt.lon != null ? pt.lon.toFixed(4) : "—"}
+                      {pt.alt != null ? ` · ${pt.alt} ft` : ""}
+                      {pt.notes ? ` · ${pt.notes}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    onClick={function() {
+                      if (confirm(`Remover ${pt.name} da biblioteca?`)) onDeleteUserPoint(pt.id);
+                    }}
+                    className={`px-2 py-1 rounded border border-red-500/40 text-red-400 text-[10px] active:scale-95`}>
+                    Remover
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
@@ -2514,7 +2897,8 @@ function Stat({ label, value, theme }) {
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
 const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, pdfOverlays }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+  const [finderOpen, setFinderOpen] = useState(false);
   const isNew    = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   const cruiseAlt = flight.cruiseAlt ?? 7000;
@@ -2563,13 +2947,22 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
     };
   }, []);
   function applyAiracSuggestion(item, kind) {
-    const name = (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "";
-    const lat = item.latitude != null ? Number(item.latitude) : (item.coordinates?.lat != null ? Number(item.coordinates.lat) : null);
-    const lon = item.longitude != null ? Number(item.longitude) : (item.coordinates?.lon != null ? Number(item.coordinates.lon) : null);
+    let name, lat, lon, alt = null;
+    if (kind === "local") {
+      name = item.name || "";
+      lat = item.lat != null ? Number(item.lat) : null;
+      lon = item.lon != null ? Number(item.lon) : null;
+      alt = item.alt != null ? Number(item.alt) : null;
+    } else {
+      name = (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "";
+      lat = item.latitude != null ? Number(item.latitude) : (item.coordinates?.lat != null ? Number(item.coordinates.lat) : null);
+      lon = item.longitude != null ? Number(item.longitude) : (item.coordinates?.lon != null ? Number(item.coordinates.lon) : null);
+      if (kind === "airport" && item.elevation_ft != null) alt = Number(item.elevation_ft);
+    }
     setCp(p => {
       const n = Object.assign({}, p, { name: String(name).slice(0, 10).toUpperCase() });
       if (lat != null && lon != null) { n.lat = Math.round(lat * 1e6) / 1e6; n.lon = Math.round(lon * 1e6) / 1e6; n._tcDistEdited = true; }
-      if (kind === "airport" && item.elevation_ft != null) { n.alt = Number(item.elevation_ft); n.useCruiseAlt = false; }
+      if (alt != null) { n.alt = alt; n.useCruiseAlt = false; }
       return n;
     });
     setAiracSugs(null);
@@ -2761,27 +3154,40 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               placeholder="LPPT"
               className={`w-full ${theme.inputBg} border-2 ${cp.name ? theme.accentBorder : theme.inputBorder} ${theme.fg} px-4 py-3 text-2xl font-black tracking-widest rounded-xl num focus:outline-none`}
             />
-            {(airacSearching || airacSugs) && (function() {
+            {(function() {
+              var q = (cp.name || "").toUpperCase();
+              var locals = (userPoints || []).filter(function(pt) {
+                if (!q || q.length < 1) return false;
+                if ((pt.name || "").toUpperCase().indexOf(q) >= 0) return true;
+                if ((pt.notes || "").toUpperCase().indexOf(q) >= 0) return true;
+                return false;
+              });
+              var hasAny = airacSearching || airacSugs || locals.length > 0;
+              if (!hasAny) return null;
               var aps = (airacSugs && airacSugs.airports)  || [];
               var nvs = (airacSugs && airacSugs.navaids)   || [];
               var wps = (airacSugs && airacSugs.waypoints) || [];
-              var total = aps.length + nvs.length + wps.length;
+              var total = aps.length + nvs.length + wps.length + locals.length;
               if (!airacSearching && total === 0 && airacSugs != null) {
                 return (
                   <div className={`mt-1 ${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-2 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-                    Sem resultados em AIRAC {airacSugs ? "" : ""}
+                    Sem resultados
                   </div>
                 );
               }
               var rowBase = "w-full text-left px-3 py-2 active:opacity-70";
               function row(key, kind, item, label, sub, right) {
+                var iconLabel = kind === "airport" ? "✈ APT"
+                  : kind === "navaid" ? "⊕ NAV"
+                  : kind === "local" ? "⭐ MEU"
+                  : "◇ WPT";
                 return (
                   <button key={key} type="button"
                     onMouseDown={function(e) { e.preventDefault(); }}
                     onClick={function() { applyAiracSuggestion(item, kind); }}
                     className={`${rowBase} flex items-center gap-2 border-b ${theme.panelBorder} last:border-b-0`}>
-                    <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>
-                      {kind === "airport" ? "✈ APT" : kind === "navaid" ? "⊕ NAV" : "◇ WPT"}
+                    <span className={`text-[10px] font-bold w-12 shrink-0 ${kind === "local" ? theme.accent : theme.cyan}`}>
+                      {iconLabel}
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{label}</div>
@@ -2793,9 +3199,14 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               }
               return (
                 <div className={`mt-1 ${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden max-h-72 overflow-y-auto`}>
+                  {locals.slice(0, 5).map(function(pt) {
+                    var sub = [pt.lat != null ? pt.lat.toFixed(3) + "," + pt.lon.toFixed(3) : null, pt.notes].filter(Boolean).join(" · ");
+                    var right = pt.alt != null ? `${pt.alt} ft` : null;
+                    return row("l-" + (pt.id || pt.name), "local", pt, pt.name || "—", sub, right);
+                  })}
                   {airacSearching && (
                     <div className={`px-3 py-2 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-                      Buscando…
+                      Buscando AIRAC…
                     </div>
                   )}
                   {aps.slice(0, 5).map(function(it) {
@@ -2897,10 +3308,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 </div>
               );
             })()}
-            <button onClick={function() { setShowMapPicker(true); }}
-              className={`w-full py-2.5 rounded-xl border flex items-center justify-center gap-2 text-sm font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
-              <MapIcon className="w-4 h-4" /> Selecionar no mapa
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={function() { setShowMapPicker(true); }}
+                className={`py-2.5 rounded-xl border flex items-center justify-center gap-2 text-sm font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+                <MapIcon className="w-4 h-4" /> No mapa
+              </button>
+              <button onClick={function() { setFinderOpen(true); }}
+                className={`py-2.5 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} flex items-center justify-center gap-2 text-sm font-bold`}>
+                🔍 Buscar / Calcular
+              </button>
+            </div>
             {prevCp != null && prevCp.lat != null && cp.lat != null && cp.lon != null && (
               <div className={`text-[10px] ${theme.cyan} text-center`}>
                 TC {cp.tc ?? "—"}° · {cp.dist ?? "—"} NM (calculado)
@@ -3210,6 +3627,34 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           onCancel={function() { setShowMapPicker(false); }}
           theme={theme}
           pdfOverlays={pdfOverlays}
+        />
+      )}
+
+      {finderOpen && (
+        <PointFinder
+          flight={flight} ac={ac} theme={theme}
+          userPoints={userPoints}
+          onAddUserPoint={onAddUserPoint}
+          onDeleteUserPoint={onDeleteUserPoint}
+          initialQuery={cp.name || ""}
+          onCancel={function() { setFinderOpen(false); }}
+          onConfirm={function(pt) {
+            setCp(function(p) {
+              const out = Object.assign({}, p, { name: (pt.name || "").slice(0, 10).toUpperCase() });
+              if (pt.lat != null && pt.lon != null) {
+                out.lat = Math.round(pt.lat * 1e6) / 1e6;
+                out.lon = Math.round(pt.lon * 1e6) / 1e6;
+                out._tcDistEdited = true;
+              }
+              if (pt.kind === "airport" && pt.alt != null) {
+                out.alt = Number(pt.alt);
+                out.useCruiseAlt = false;
+              }
+              return out;
+            });
+            if (pt.lat != null && pt.lon != null) applyCoords(pt.lat, pt.lon);
+            setFinderOpen(false);
+          }}
         />
       )}
     </div>
@@ -6009,6 +6454,49 @@ async function deletePdfHandle(id) {
 }
 // Keep old name as alias for compat
 async function savePdfHandle(id, handle) { /* no-op, use savePdfOverlayIdb */ }
+
+// ── IndexedDB helpers for user-managed points (custom waypoints library) ──────
+function _userPtsDb() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open('navlog_userpts', 1);
+    req.onupgradeneeded = function(e) {
+      e.target.result.createObjectStore('points', { keyPath: 'id' });
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function() { reject(req.error); };
+  });
+}
+async function userPtsAll() {
+  try {
+    var db = await _userPtsDb();
+    return new Promise(function(resolve) {
+      var tx = db.transaction('points', 'readonly');
+      var req = tx.objectStore('points').getAll();
+      req.onsuccess = function(e) { resolve(e.target.result || []); };
+      req.onerror = function() { resolve([]); };
+    });
+  } catch (_) { return []; }
+}
+async function userPtsPut(pt) {
+  try {
+    var db = await _userPtsDb();
+    var rec = Object.assign({}, pt, {
+      id: pt.id || (Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)),
+      createdAt: pt.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    var tx = db.transaction('points', 'readwrite');
+    tx.objectStore('points').put(rec);
+    return rec;
+  } catch (_) { return null; }
+}
+async function userPtsDelete(id) {
+  try {
+    var db = await _userPtsDb();
+    var tx = db.transaction('points', 'readwrite');
+    tx.objectStore('points').delete(id);
+  } catch (_) {}
+}
 async function renderPdfFromHandle(handle) {
   if (!handle) return null;
   try {
