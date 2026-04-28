@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0157";
+const APP_VERSION = "20260428.0205";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5385,68 +5385,88 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
 
-  // Sync PDF overlay layers with Leaflet map
+  // Sync PDF overlay layers with Leaflet map using L.imageOverlay
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
 
-    // Build a CSS matrix transform from 2 reference points.
-    // The div is appended directly to the map container (not overlayPane)
-    // so we use latLngToContainerPoint — coordinates relative to the map div.
+    // Compute geographic bounds from 2 PDF reference points and create L.imageOverlay.
+    // Assumes the chart is north-up (standard for aeronautical charts).
+    // From (u1,v1)→(lat1,lon1) and (u2,v2)→(lat2,lon2) we derive scale factors
+    // and extrapolate to the full image corners.
     function makeLayer(ov) {
-      if (!ov.dataUrl) return { div: null, update: function(){}, remove: function(){} };
-      var container = map.getContainer();
-      var div = document.createElement('div');
-      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:450;';
-      var img = document.createElement('img');
-      img.src = ov.dataUrl;
-      img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
-      div.appendChild(img);
-      container.appendChild(div);
+      if (!ov.dataUrl) return { remove: function(){} };
+      var pts = ov.pdfPts, mpts = ov.mapPts;
+      if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return { remove: function(){} };
 
-      function update() {
-        if (!ov.visible || !ov.dataUrl) { div.style.display = 'none'; return; }
-        div.style.display = '';
-        div.style.opacity = String(ov.opacity);
-        var pts = ov.pdfPts, mpts = ov.mapPts;
-        if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return;
-        var u1 = pts[0][0], v1 = pts[0][1], u2 = pts[1][0], v2 = pts[1][1];
-        // Use containerPoint — same coordinate system as the div position
-        var p1 = map.latLngToContainerPoint([mpts[0][0], mpts[0][1]]);
-        var p2 = map.latLngToContainerPoint([mpts[1][0], mpts[1][1]]);
-        var du = u2 - u1, dv = v2 - v1;
-        var den = du*du + dv*dv;
-        if (den === 0) return;
-        var a  = ((p2.x-p1.x)*du + (p2.y-p1.y)*dv) / den;
-        var b  = ((p2.y-p1.y)*du - (p2.x-p1.x)*dv) / den;
-        var tx = p1.x - a*u1 + b*v1;
-        var ty = p1.y - b*u1 - a*v1;
-        div.style.transform = 'matrix(' + a + ',' + b + ',' + (-b) + ',' + a + ',' + tx + ',' + ty + ')';
-      }
+      var u1 = pts[0][0], v1 = pts[0][1];
+      var u2 = pts[1][0], v2 = pts[1][1];
+      var lat1 = mpts[0][0], lon1 = mpts[0][1];
+      var lat2 = mpts[1][0], lon2 = mpts[1][1];
+      var W = ov.width, H = ov.height;
 
-      map.on('zoom move zoomend moveend viewreset', update);
-      update();
-      return { div, update, remove: function() {
-        map.off('zoom move zoomend moveend viewreset', update);
-        if (div.parentNode) div.parentNode.removeChild(div);
-      }};
+      // Compute similarity transform: PDF pixel → geographic coords
+      // Using least-squares from 2 points (4 equations, 4 unknowns: a,b,tx,ty)
+      // lat = a*v + b*u + ty  (v goes down = lat goes down)
+      // lon = a*u - b*v + tx
+      var du = u2 - u1, dv = v2 - v1;
+      var den = du*du + dv*dv;
+      if (den < 1) return { remove: function(){} };
+
+      // Scale+rotation components (similarity transform)
+      var aLat = ((lat2-lat1)*dv + (lon2-lon1)*du) / den;  // NOT USED — use simpler approach
+      // Simpler: independent scale per axis (assumes north-up chart)
+      var latPerV = (lat2 - lat1) / dv;  // degrees lat per rendered pixel (v increases downward → lat decreases)
+      var lonPerU = (lon2 - lon1) / du;  // degrees lon per rendered pixel
+
+      // If either component is near zero, try to estimate from the other + aspect ratio
+      if (Math.abs(dv) < 1) latPerV = -lonPerU * (W / H); // fallback
+      if (Math.abs(du) < 1) lonPerU =  latPerV * (W / H); // fallback
+
+      // Extrapolate to image corners
+      var latTop  = lat1 + latPerV * (0 - v1);   // v=0 → top of image
+      var latBot  = lat1 + latPerV * (H - v1);   // v=H → bottom of image
+      var lonLeft = lon1 + lonPerU * (0 - u1);   // u=0 → left of image
+      var lonRight= lon1 + lonPerU * (W - u1);   // u=W → right of image
+
+      var south = Math.min(latTop, latBot);
+      var north = Math.max(latTop, latBot);
+      var west  = Math.min(lonLeft, lonRight);
+      var east  = Math.max(lonLeft, lonRight);
+
+      var leafletLayer = window.L.imageOverlay(ov.dataUrl,
+        [[south, west], [north, east]],
+        { opacity: ov.opacity, interactive: false, zIndex: 450 }
+      );
+      if (ov.visible) leafletLayer.addTo(map);
+
+      return {
+        remove: function() { leafletLayer.remove(); },
+        setOverlay: function(newOv) {
+          leafletLayer.setOpacity(newOv.opacity);
+          if (newOv.visible) leafletLayer.addTo(map);
+          else leafletLayer.remove();
+        }
+      };
     }
 
     // Add new overlays, remove deleted ones, update changed ones
-    var ids = new Set(pdfOverlays.map(o => o.id));
-    // Remove layers for deleted overlays
+    var ids = new Set(pdfOverlays.map(function(o) { return o.id; }));
     Object.keys(pdfLayerRefs.current).forEach(function(id) {
       if (!ids.has(Number(id))) {
         pdfLayerRefs.current[id].remove();
         delete pdfLayerRefs.current[id];
       }
     });
-    // Add/update remaining
     pdfOverlays.forEach(function(ov) {
       if (pdfLayerRefs.current[ov.id]) {
-        // Remove and re-create to pick up dataUrl/opacity/visibility changes
-        pdfLayerRefs.current[ov.id].remove();
-        pdfLayerRefs.current[ov.id] = makeLayer(ov);
+        // Update opacity/visibility without re-creating if possible
+        if (pdfLayerRefs.current[ov.id].setOverlay) {
+          pdfLayerRefs.current[ov.id].setOverlay(ov);
+        } else {
+          pdfLayerRefs.current[ov.id].remove();
+          pdfLayerRefs.current[ov.id] = makeLayer(ov);
+        }
       } else {
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
