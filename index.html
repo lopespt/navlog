@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0137";
+const APP_VERSION = "20260428.0140";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4933,7 +4933,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   // ── Render ──
   if (phase === 'loading' && !imgData) {
     return (
-      <div className="fixed inset-0 z-[9000] flex flex-col items-center justify-center gap-4"
+      <div className="absolute inset-0 z-[9000] flex flex-col items-center justify-center gap-4"
         style={{ background: 'rgba(0,0,0,0.92)' }}>
         <div className={`text-lg font-bold ${theme.fg}`}>Adicionar overlay de carta</div>
         <div className={`text-sm ${theme.fgMuted} text-center px-8`}>
@@ -4951,7 +4951,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
 
   if (phase === 'loading' && imgData) {
     return (
-      <div className="fixed inset-0 z-[9000] flex items-center justify-center"
+      <div className="absolute inset-0 z-[9000] flex items-center justify-center"
         style={{ background: 'rgba(0,0,0,0.92)' }}>
         <div className={`text-sm ${theme.fg}`}>Processando PDF…</div>
       </div>
@@ -4961,7 +4961,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   if (phase === 'pdf') {
     const ptColors = ['#ef4444','#3b82f6'];
     return (
-      <div className="fixed inset-0 z-[9000] flex flex-col" style={{ background: '#111' }}>
+      <div className="absolute inset-0 z-[9000] flex flex-col" style={{ background: '#111' }}>
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-3 bg-black shrink-0">
           <div className={`text-xs font-bold flex-1 ${pdfPts.length < 2 ? 'text-amber-400' : 'text-green-400'}`}>
@@ -5005,8 +5005,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
         </div>
 
         {/* Single footer row: − zoom + | Refazer | Próximo */}
-        <div className="bg-black border-t border-zinc-800 shrink-0 flex items-center gap-2 px-3 py-3"
-          style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+        <div className="bg-black border-t border-zinc-800 shrink-0 flex items-center gap-2 px-3 py-3">
           <button onClick={() => changeZoom(-0.25)}
             className="w-12 h-12 bg-zinc-700 text-white rounded-xl text-2xl font-bold active:scale-95 flex items-center justify-center shrink-0">−</button>
           <span className="text-white text-xs w-10 text-center shrink-0">{Math.round(zoom*100)}%</span>
@@ -5034,7 +5033,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
     const ptColors = ['#ef4444','#3b82f6'];
     const needed = 2 - mapPts.length;
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-[9000] pointer-events-none">
+      <div className="absolute bottom-0 left-0 right-0 z-[9000] pointer-events-none">
         {/* Floating instruction banner */}
         <div className="pointer-events-auto mx-3 mb-2 rounded-2xl overflow-hidden"
           style={{ background: 'rgba(0,0,0,0.88)' }}>
@@ -5108,7 +5107,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
 function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
   return (
-    <div className="fixed inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
+    <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
       <div className={`flex items-center gap-2 px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
         <div className={`font-bold ${theme.fg} flex-1`}>🗺 Cartas PDF</div>
