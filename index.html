@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1055";
+const APP_VERSION = "20260428.1113";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -334,8 +334,8 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
     } else {
       // before_nm / before_min: cruise → climb → cruise(buffer)
       const beforeNm = mode === "before_nm"
-        ? (cp.arrivalValue ?? 0)
-        : (cp.arrivalValue ?? 0) * gsCruise / 60;
+        ? (cp.arrivalValue ?? 5)
+        : (cp.arrivalValue ?? 5) * gsCruise / 60;
       const cruiseFirst = dist - climbDist - beforeNm;
       if (cruiseFirst <= 0.1) {
         const cruiseDist = dist - climbDist;
@@ -380,8 +380,8 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
     } else {
       // before_nm / before_min: cruise → descent → cruise(buffer)
       const beforeNm = mode === "before_nm"
-        ? (cp.arrivalValue ?? 0)
-        : (cp.arrivalValue ?? 0) * gsCruiseLow / 60;
+        ? (cp.arrivalValue ?? 5)
+        : (cp.arrivalValue ?? 5) * gsCruiseLow / 60;
       const cruiseFirst = dist - descDist - beforeNm;
       if (cruiseFirst <= 0.1) {
         const cruiseDist = dist - descDist;
@@ -2433,7 +2433,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               { key: "before_min", label: "−min" },
             ];
             function setMode(key) {
-              setCp(function(p) { return Object.assign({}, p, { arrivalMode: p.arrivalMode === key ? null : key }); });
+              setCp(function(p) {
+                var nextMode = p.arrivalMode === key ? null : key;
+                var updates = { arrivalMode: nextMode };
+                // Persist a sensible default when activating a "before_*" mode so the
+                // computeLegPhases math matches what the picker shows on screen.
+                if ((nextMode === "before_nm" || nextMode === "before_min") && p.arrivalValue == null) {
+                  updates.arrivalValue = 5;
+                }
+                return Object.assign({}, p, updates);
+              });
             }
             function adjustValue(delta) {
               setCp(function(p) { return Object.assign({}, p, { arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }); });
@@ -3913,7 +3922,10 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           const borderClass = next.isVirtual
             ? (isAlert ? "border-red-500/80 bg-red-500/10" : "border-cyan-500/60 bg-cyan-500/5")
             : (isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`);
-          const virtLabel = next.name === "TOC" ? "Topo de Subida" : next.name === "TOD" ? "Início de Descida" : "Fim de Descida";
+          const virtLabel = next.name === "BOC" ? "Início da Subida"
+            : next.name === "TOC" ? "Topo de Subida"
+            : next.name === "TOD" ? "Início de Descida"
+            : "Fim de Descida";
           return (
         <div className={`border-2 rounded-lg p-4 transition-all ${borderClass}`}>
           {/* Linha topo: label + alt */}
@@ -4218,9 +4230,9 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
           ) : isNext ? (
             <ChevronRight className={`w-5 h-5 ${isVirtual ? theme.cyan : theme.accent} mx-auto animate-pulse`} />
           ) : isVirtual ? (
-            cp.name === "TOC" ? <TrendingUp  className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} /> :
-            cp.name === "TOD" ? <TrendingDown className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} /> :
-                                <Minus        className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} />
+            (cp.name === "BOC" || cp.name === "TOC") ? <TrendingUp  className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} /> :
+            (cp.name === "TOD" || cp.name === "BOD") ? <TrendingDown className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} /> :
+                                                       <Minus        className={`w-4 h-4 ${theme.cyan} opacity-70 mx-auto`} />
           ) : (
             <span className={`text-[10px] num ${theme.fgFaint}`}>{index + 1}</span>
           )}
