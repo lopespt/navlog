@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1516";
+const APP_VERSION = "20260428.1531";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1985,7 +1985,135 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
-function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "" }) {
+function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, onSave }) {
+  const mapDivRef = useRef(null);
+  const mapRef = useRef(null);
+  const pickedMarkerRef = useRef(null);
+  const pdfLayerRefs = useRef({});
+  const [picked, setPicked] = useState(null);
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    if (!window.L || !mapDivRef.current || mapRef.current) return;
+    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 18,
+    }).addTo(map);
+
+    map.createPane('pfRoute');
+    map.getPane('pfRoute').style.zIndex = 500;
+    map.createPane('pfLib');
+    map.getPane('pfLib').style.zIndex = 510;
+
+    const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
+    if (wps.length >= 2) {
+      const coords = wps.map(cp => [cp.lat, cp.lon]);
+      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.7, dashArray: '4,4', pane: 'pfRoute' }).addTo(map);
+      wps.forEach(cp => {
+        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
+        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
+        window.L.marker([cp.lat, cp.lon], { icon, pane: 'pfRoute' }).addTo(map).bindPopup(cp.name || '');
+      });
+      map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
+    } else if (wps.length === 1) {
+      map.setView([wps[0].lat, wps[0].lon], 9);
+    } else {
+      map.setView([39.5, -8.0], 6);
+    }
+
+    // Library points (⭐)
+    (userPoints || []).forEach(pt => {
+      if (pt.lat == null || pt.lon == null) return;
+      const html = `<div style="background:#f59e0b;border-radius:50%;width:14px;height:14px;border:2px solid #fff;box-shadow:0 1px 3px #000;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">★</div>`;
+      const icon = window.L.divIcon({ html, className: '', iconSize: [14,14], iconAnchor: [7,7] });
+      window.L.marker([pt.lat, pt.lon], { icon, pane: 'pfLib' }).addTo(map).bindPopup(pt.name || '');
+    });
+
+    map.on('click', (e) => setPicked([e.latlng.lat, e.latlng.lng]));
+
+    mapRef.current = map;
+    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
+    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
+  }, []);
+
+  // PDF overlays
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L || !pdfOverlays) return;
+    Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
+    pdfLayerRefs.current = {};
+    pdfOverlays.forEach(ov => {
+      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
+      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
+        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450,
+      }).addTo(map);
+      pdfLayerRefs.current[ov.id] = layer;
+    });
+    return () => {
+      Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
+      pdfLayerRefs.current = {};
+    };
+  }, [pdfOverlays]);
+
+  // Picked marker
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    if (pickedMarkerRef.current) { map.removeLayer(pickedMarkerRef.current); pickedMarkerRef.current = null; }
+    if (!picked) return;
+    const html = `<div style="background:#22c55e;border-radius:50%;width:18px;height:18px;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.9)"></div>`;
+    const icon = window.L.divIcon({ html, className: '', iconSize: [18,18], iconAnchor: [9,9] });
+    pickedMarkerRef.current = window.L.marker(picked, { icon, zIndexOffset: 900 }).addTo(map);
+  }, [picked]);
+
+  function buildPoint() {
+    if (!picked) return null;
+    const lat = Math.round(picked[0] * 1e6) / 1e6;
+    const lon = Math.round(picked[1] * 1e6) / 1e6;
+    let n = (name || "").trim().slice(0, 10).toUpperCase();
+    if (!n) {
+      // Auto name: M + abs(lat°)*100 + abs(lon°)*100, e.g., M2350-4664 trimmed
+      n = "MAP" + Math.abs(Math.round(lat * 10)).toString().slice(-3) + Math.abs(Math.round(lon * 10)).toString().slice(-3);
+      n = n.slice(0, 10);
+    }
+    return { name: n, kind: "custom", lat, lon };
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div ref={mapDivRef} style={{ flex: 1, minHeight: 0 }} />
+      <div className={`p-3 shrink-0 ${theme.panel} border-t ${theme.panelBorder} space-y-2`}>
+        {picked ? (
+          <div className={`text-center text-[11px] num ${theme.cyan}`}>
+            {picked[0].toFixed(4)}, {picked[1].toFixed(4)}
+          </div>
+        ) : (
+          <div className={`text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+            Toque no mapa para definir o ponto
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <input type="text" placeholder="Nome (auto)" maxLength={10}
+            value={name} onChange={(e) => setName(e.target.value.toUpperCase())}
+            className={`${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none num`}
+          />
+          <button onClick={() => { const p = buildPoint(); if (p) onSave(p); }}
+            disabled={!picked}
+            className={`px-3 py-2 rounded-xl border text-xs font-bold ${picked ? theme.panelBorder + ' ' + theme.fgMuted : theme.panel + ' ' + theme.fgFaint + ' opacity-40'}`}>
+            ⭐ Salvar
+          </button>
+        </div>
+        <button onClick={() => { const p = buildPoint(); if (p) onConfirm(p); }}
+          disabled={!picked}
+          className={`w-full py-3 rounded-xl font-bold text-base ${picked ? theme.accentBg + ' ' + (theme.accentBgFg ?? 'text-black') : theme.panel + ' ' + theme.fgFaint + ' opacity-40'}`}>
+          Usar este ponto
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays }) {
   const [tab, setTab] = useState("search");
   const [innerOpen, setInnerOpen] = useState(false);
   const [innerSlot, setInnerSlot] = useState(null); // 'anchor'
@@ -2108,7 +2236,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
       </div>
 
       <div className={`flex shrink-0 border-b ${theme.panelBorder}`}>
-        {[["search", "Buscar"], ["radial", "Radial + Dist"]].map(function(pair) {
+        {[["search", "Buscar"], ["radial", "Radial + Dist"], ["map", "Mapa"]].map(function(pair) {
           const key = pair[0], label = pair[1];
           return (
             <button key={key} onClick={() => setTab(key)}
@@ -2121,9 +2249,9 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         })}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 flex flex-col">
         {tab === "search" && (
-          <div className="p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
             <input type="text" autoFocus placeholder="Mín. 2 letras (nome / ICAO / fix)"
               value={query}
               onChange={(e) => { const v = e.target.value.toUpperCase(); setQuery(v); triggerSearch(v); }}
@@ -2208,7 +2336,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         )}
 
         {tab === "radial" && (
-          <div className="p-3 space-y-3">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
             <div>
               <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Âncora</label>
               <div className="flex items-center gap-2">
@@ -2285,6 +2413,15 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
             })()}
           </div>
         )}
+
+        {tab === "map" && (
+          <PointFinderMapTab
+            flight={flight} theme={theme} pdfOverlays={pdfOverlays}
+            userPoints={userPoints}
+            onConfirm={chooseAndConfirm}
+            onSave={saveToLib}
+          />
+        )}
       </div>
 
       {innerOpen && (
@@ -2293,6 +2430,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
           userPoints={userPoints}
           onAddUserPoint={onAddUserPoint}
           onDeleteUserPoint={onDeleteUserPoint}
+          pdfOverlays={pdfOverlays}
           depth={depth + 1}
           onConfirm={(pt) => {
             if (innerSlot === "anchor") setAnchor(pt);
@@ -3636,6 +3774,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           userPoints={userPoints}
           onAddUserPoint={onAddUserPoint}
           onDeleteUserPoint={onDeleteUserPoint}
+          pdfOverlays={pdfOverlays}
           initialQuery={cp.name || ""}
           onCancel={function() { setFinderOpen(false); }}
           onConfirm={function(pt) {
