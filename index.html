@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.2316";
+const APP_VERSION = "20260428.2336";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -7325,6 +7325,40 @@ async function renderPdfToImage(file, scale) {
   return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
 }
 
+// Build the 3-point affine transform { a, b, c, d, tx, ty } so that
+//   mx = a*u + c*v + tx
+//   my = b*u + d*v + ty
+// maps pdf pixel (u, v) to mercator (mx, my). Returns null if the points are
+// (near-)collinear.
+function affineFrom3Points(pdfPts, mercPts) {
+  var u1=pdfPts[0][0],v1=pdfPts[0][1], u2=pdfPts[1][0],v2=pdfPts[1][1], u3=pdfPts[2][0],v3=pdfPts[2][1];
+  var det = u1*(v2-v3) - v1*(u2-u3) + (u2*v3-u3*v2);
+  if (Math.abs(det) < 0.5) return null;
+  function sol(x1,x2,x3) {
+    return [
+      (x1*(v2-v3) - v1*(x2-x3) + (x2*v3-x3*v2)) / det,
+      (u1*(x2-x3) - x1*(u2-u3) + (u2*x3-u3*x2)) / det,
+      (u1*(v2*x3-v3*x2) - v1*(u2*x3-u3*x2) + x1*(u2*v3-u3*v2)) / det
+    ];
+  }
+  var rx = sol(mercPts[0].x, mercPts[1].x, mercPts[2].x);
+  var ry = sol(mercPts[0].y, mercPts[1].y, mercPts[2].y);
+  return { a: rx[0], c: rx[1], tx: rx[2], b: ry[0], d: ry[1], ty: ry[2] };
+}
+// Inverse of a 2D affine transform; returns null when degenerate.
+function invertAffine(t) {
+  if (!t) return null;
+  var det = t.a * t.d - t.b * t.c;
+  if (Math.abs(det) < 1e-9) return null;
+  return {
+    a:  t.d / det, c: -t.c / det, tx: (t.c * t.ty - t.d * t.tx) / det,
+    b: -t.b / det, d:  t.a / det, ty: (t.b * t.tx - t.a * t.ty) / det,
+  };
+}
+function applyAffinePt(t, u, v) {
+  return [t.a * u + t.c * v + t.tx, t.b * u + t.d * v + t.ty];
+}
+
 // Warp PDF image to Mercator-aligned canvas using 3-point affine transform.
 // Returns { dataUrl, width, height, bounds } ready for L.imageOverlay.
 async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
@@ -7464,6 +7498,34 @@ function applyOverlayCalibration(bounds, calibration) {
     [midLat - halfH * sy + dLat, midLng - halfW * sx + dLng],
     [midLat + halfH * sy + dLat, midLng + halfW * sx + dLng],
   ];
+}
+
+// Re-renders the original PDF and warps it with a brand-new pair of control
+// point arrays. Returns { dataUrl, width, height, bounds } ready to splat into
+// the overlay record, or null when the handle isn't available / permission was
+// denied. Used by the calibration flow to fix a chart whose georef drifted.
+async function rewarpOverlayFromHandle(overlayId, pdfPts, mapPts, mapLeaflet, opts) {
+  if (!overlayId || !pdfPts || !mapPts || !mapLeaflet || !window.pdfjsLib) return null;
+  if (pdfPts.length < 3 || mapPts.length < 3) return null;
+  var rec = await getPdfOverlayIdb(overlayId);
+  if (!rec || !rec.handle) return null;
+  var handle = rec.handle;
+  try {
+    var perm = await handle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') return null;
+    var file = await handle.getFile();
+    var scale = (opts && opts.scale) || 3;
+    var imgData = await renderPdfToImage(file, scale);
+    var warped = await computeWarpedImage(imgData, { pdfPts: pdfPts, mapPts: mapPts }, mapLeaflet);
+    if (!warped) return null;
+    return {
+      dataUrl: warped.dataUrl,
+      width: warped.width,
+      height: warped.height,
+      bounds: warped.bounds,
+    };
+  } catch (_) { return null; }
 }
 
 // Re-renders the original PDF for a given overlay at a higher scale, warps with
@@ -7893,52 +7955,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
 }
 
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
-function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
-  const [calibratingId, setCalibratingId] = useState(null);
-  const [calibStep, setCalibStep] = useState("coarse"); // coarse | fine
-
-  function patchCalibration(id, partial) {
-    setOverlays(function(os) {
-      return os.map(function(o) {
-        if (o.id !== id) return o;
-        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
-        const next = Object.assign({}, cur, partial);
-        return Object.assign({}, o, { calibration: next });
-      });
-    });
-  }
-  function nudge(id, axis, sign) {
-    // Use overlay span * step as the unit so the nudge feels consistent regardless of bbox size.
-    setOverlays(function(os) {
-      return os.map(function(o) {
-        if (o.id !== id || !o.bounds) return o;
-        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
-        const span = axis === "lat"
-          ? Math.abs(o.bounds[1][0] - o.bounds[0][0])
-          : Math.abs(o.bounds[1][1] - o.bounds[0][1]);
-        const factor = calibStep === "fine" ? 0.0015 : 0.01; // ~0.15% / 1% of span
-        const delta = span * factor * sign;
-        const key = axis === "lat" ? "dLat" : "dLng";
-        return Object.assign({}, o, { calibration: Object.assign({}, cur, { [key]: (cur[key] || 0) + delta }) });
-      });
-    });
-  }
-  function bumpScale(id, axis, sign) {
-    setOverlays(function(os) {
-      return os.map(function(o) {
-        if (o.id !== id) return o;
-        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
-        const factor = calibStep === "fine" ? 0.005 : 0.02; // 0.5% / 2%
-        const cur_v = cur[axis === "X" ? "scaleX" : "scaleY"] || 1;
-        const next_v = Math.max(0.5, Math.min(1.5, cur_v + sign * factor));
-        const key = axis === "X" ? "scaleX" : "scaleY";
-        return Object.assign({}, o, { calibration: Object.assign({}, cur, { [key]: next_v }) });
-      });
-    });
-  }
-  function resetCalibration(id) {
-    setOverlays(function(os) { return os.map(function(o) { return o.id === id ? Object.assign({}, o, { calibration: null }) : o; }); });
-  }
+function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibration, onClose }) {
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
@@ -8005,9 +8022,10 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
                   {ov.visible ? 'ON' : 'OFF'}
                 </button>
               )}
-              {ov.dataUrl && (
-                <button onClick={() => setCalibratingId(calibratingId === ov.id ? null : ov.id)}
-                  className={`text-xs px-2 py-1 rounded border ${calibratingId === ov.id ? 'border-amber-500 text-amber-400' : 'border-zinc-600 text-zinc-500'}`}>
+              {ov.dataUrl && onStartCalibration && (
+                <button onClick={() => onStartCalibration(ov.id)}
+                  title="Calibrar no mapa"
+                  className={`text-xs px-2 py-1 rounded border border-amber-500 text-amber-400`}>
                   Calibrar
                 </button>
               )}
@@ -8022,69 +8040,6 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
                 className="flex-1" />
               <span className={`text-[10px] ${theme.fgFaint} w-8 text-right`}>{Math.round(ov.opacity*100)}%</span>
             </div>
-            {calibratingId === ov.id && (
-              <div className={`mt-3 ${theme.panel} border ${theme.panelBorder} rounded-lg p-2 space-y-2`}>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] uppercase tracking-widest ${theme.fgMuted}`}>Calibrar</span>
-                  <div className={`flex rounded overflow-hidden border ${theme.panelBorder} ml-auto`}>
-                    <button onClick={() => setCalibStep("coarse")}
-                      className={`px-2 py-1 text-[10px] font-bold ${calibStep === "coarse" ? "bg-amber-500/20 text-amber-300" : "text-zinc-500"}`}>
-                      Grosso
-                    </button>
-                    <button onClick={() => setCalibStep("fine")}
-                      className={`px-2 py-1 text-[10px] font-bold ${calibStep === "fine" ? "bg-amber-500/20 text-amber-300" : "text-zinc-500"}`}>
-                      Fino
-                    </button>
-                  </div>
-                  <button onClick={() => resetCalibration(ov.id)}
-                    className="text-[10px] px-2 py-1 rounded border border-red-500/40 text-red-400">
-                    Reset
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-1 text-center">
-                  <div></div>
-                  <button onClick={() => nudge(ov.id, "lat", +1)}
-                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>↑</button>
-                  <div></div>
-                  <button onClick={() => nudge(ov.id, "lng", -1)}
-                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>←</button>
-                  <div className={`text-[9px] ${theme.fgFaint} flex items-center justify-center num`}>
-                    {(function() {
-                      const c = ov.calibration || {};
-                      return `Δ ${(c.dLat || 0).toFixed(4)}°, ${(c.dLng || 0).toFixed(4)}°`;
-                    })()}
-                  </div>
-                  <button onClick={() => nudge(ov.id, "lng", +1)}
-                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>→</button>
-                  <div></div>
-                  <button onClick={() => nudge(ov.id, "lat", -1)}
-                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>↓</button>
-                  <div></div>
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  <div className="flex items-center gap-1">
-                    <span className={`text-[9px] uppercase ${theme.fgFaint} w-3`}>X</span>
-                    <button onClick={() => bumpScale(ov.id, "X", -1)}
-                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>−</button>
-                    <span className={`text-[9px] num ${theme.fgFaint} w-10 text-center`}>
-                      {(((ov.calibration && ov.calibration.scaleX) || 1) * 100).toFixed(0)}%
-                    </span>
-                    <button onClick={() => bumpScale(ov.id, "X", +1)}
-                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>+</button>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className={`text-[9px] uppercase ${theme.fgFaint} w-3`}>Y</span>
-                    <button onClick={() => bumpScale(ov.id, "Y", -1)}
-                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>−</button>
-                    <span className={`text-[9px] num ${theme.fgFaint} w-10 text-center`}>
-                      {(((ov.calibration && ov.calibration.scaleY) || 1) * 100).toFixed(0)}%
-                    </span>
-                    <button onClick={() => bumpScale(ov.id, "Y", +1)}
-                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>+</button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -8122,6 +8077,83 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Threshold above which we want the hi-res rasterization
   const HIRES_ZOOM = 14;
 
+  // Calibration: replace one of the existing 3 control points by clicking on
+  // the chart (where the user sees the feature) and then on the map (where the
+  // feature actually lives). Closest existing pdfPt is replaced. Re-warps via
+  // the saved file handle.
+  const [calibratingId, setCalibratingId] = useState(null);
+  const [calibStep, setCalibStep] = useState("idle"); // idle | pickChart | pickMap | applying
+  const calibratingIdRef = useRef(null);
+  const calibStepRef = useRef("idle");
+  const calibChartLLRef = useRef(null);
+  useEffect(() => { calibratingIdRef.current = calibratingId; }, [calibratingId]);
+  useEffect(() => { calibStepRef.current = calibStep; }, [calibStep]);
+  function startCalibration(id) {
+    calibChartLLRef.current = null;
+    setLayersOpen(false);
+    setCalibratingId(id);
+    setCalibStep("pickChart");
+  }
+  function cancelCalibration() {
+    calibChartLLRef.current = null;
+    setCalibratingId(null);
+    setCalibStep("idle");
+  }
+  async function applyCalibPair(chartLL, mapLL) {
+    var map = mapRef.current;
+    var ov = (pdfOverlays || []).find(function(o) { return o.id === calibratingIdRef.current; });
+    if (!map || !ov || !ov.pdfPts || !ov.mapPts || ov.pdfPts.length < 3) {
+      cancelCalibration(); return;
+    }
+    setCalibStep("applying");
+    try {
+      var REF_ZOOM = 14;
+      var mercPts = ov.mapPts.map(function(m) { return map.project(window.L.latLng(m[0], m[1]), REF_ZOOM); });
+      var aff = affineFrom3Points(ov.pdfPts.slice(0, 3), mercPts.slice(0, 3));
+      var inv = invertAffine(aff);
+      if (!inv) throw new Error("Afim inválida (pontos colineares?)");
+      var chartMerc = map.project(window.L.latLng(chartLL[0], chartLL[1]), REF_ZOOM);
+      var newPdfPair = applyAffinePt(inv, chartMerc.x, chartMerc.y);
+      var u = Math.round(newPdfPair[0]);
+      var v = Math.round(newPdfPair[1]);
+      // Replace closest existing pdfPt
+      var bestIdx = 0; var bestDist = Infinity;
+      for (var i = 0; i < ov.pdfPts.length; i++) {
+        var du = ov.pdfPts[i][0] - u, dv = ov.pdfPts[i][1] - v;
+        var d = du*du + dv*dv;
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      var newPdfPts = ov.pdfPts.slice();
+      var newMapPts = ov.mapPts.slice();
+      newPdfPts[bestIdx] = [u, v];
+      newMapPts[bestIdx] = [mapLL[0], mapLL[1]];
+      // Re-warp
+      var rew = await rewarpOverlayFromHandle(ov.id, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 3 });
+      if (!rew) {
+        alert("Não foi possível re-warpear (PDF original indisponível ou permissão negada).");
+        cancelCalibration(); return;
+      }
+      setPdfOverlays(function(os) {
+        return os.map(function(o) {
+          if (o.id !== ov.id) return o;
+          return Object.assign({}, o, {
+            dataUrl: rew.dataUrl,
+            dataUrlHi: null,           // invalidate; will be re-rendered on next zoom-in
+            width: rew.width,
+            height: rew.height,
+            bounds: rew.bounds,
+            pdfPts: newPdfPts.slice(0, 3),
+            mapPts: newMapPts.slice(0, 3),
+            calibration: null,         // legacy nudge fields no longer apply
+          });
+        });
+      });
+    } catch (e) {
+      alert("Calibração falhou: " + (e && e.message ? e.message : e));
+    }
+    cancelCalibration();
+  }
+
   // Re-render simulated position every second
   useEffect(() => {
     const id = setInterval(() => setTick(t => t+1), 1000);
@@ -8151,6 +8183,18 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     map.getPane('legLabelPane').style.pointerEvents = 'none';
 
     map.on('click', function(e) {
+      // Calibration takes precedence over WP pick mode
+      if (calibratingIdRef.current != null) {
+        var ll = [e.latlng.lat, e.latlng.lng];
+        if (calibStepRef.current === "pickChart") {
+          calibChartLLRef.current = ll;
+          setCalibStep("pickMap");
+        } else if (calibStepRef.current === "pickMap" && calibChartLLRef.current) {
+          // Schedule the async work outside the Leaflet click handler
+          setTimeout(function() { applyCalibPairRef.current(calibChartLLRef.current, ll); }, 0);
+        }
+        return;
+      }
       if (!pickModeRef.current) return;
       setPickMode(false);
       var lat = e.latlng.lat, lon = e.latlng.lng;
@@ -8180,6 +8224,10 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Stable ref so the Leaflet click handler always calls the current callback
   const onInsertWaypointRef = useRef(onInsertWaypoint);
   useEffect(() => { onInsertWaypointRef.current = onInsertWaypoint; }, [onInsertWaypoint]);
+  // Same trick for the calibration applier — re-bound on every render so the
+  // click handler always sees the latest pdfOverlays and setPdfOverlays.
+  const applyCalibPairRef = useRef(function() {});
+  useEffect(() => { applyCalibPairRef.current = applyCalibPair; });
 
   // Swap tile layer when tileMode changes
   useEffect(() => {
@@ -8208,13 +8256,19 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     function chooseBounds(ov) {
       return applyOverlayCalibration(ov.bounds, ov.calibration);
     }
+    function chooseOpacity(ov) {
+      // While the user is picking the "real" map location, fade the chart so they
+      // can see what is underneath without losing it altogether.
+      if (calibratingId === ov.id && calibStep === "pickMap") return 0.25;
+      return ov.opacity;
+    }
 
     function makeLayer(ov) {
       const url = chooseUrl(ov);
       const bounds = chooseBounds(ov);
       if (!url || !bounds) return { remove: function(){}, setOverlay: function(){} };
       var layer = window.L.imageOverlay(url, bounds, {
-        opacity: ov.opacity, interactive: false, zIndex: 450
+        opacity: chooseOpacity(ov), interactive: false, zIndex: 450
       });
       if (ov.visible) layer.addTo(map);
       var currentUrl = url;
@@ -8231,7 +8285,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             try { layer.setBounds(window.L.latLngBounds(nb[0], nb[1])); } catch (_) {}
             currentBounds = nb;
           }
-          layer.setOpacity(newOv.opacity);
+          layer.setOpacity(chooseOpacity(newOv));
           if (newOv.visible) layer.addTo(map); else layer.remove();
         }
       };
@@ -8251,7 +8305,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
     });
-  }, [pdfOverlays, mapZoom]);
+  }, [pdfOverlays, mapZoom, calibratingId, calibStep]);
 
   // Lazy hi-res rendering: when the user zooms past HIRES_ZOOM, schedule a
   // background re-render of every visible overlay that doesn't yet have
@@ -8519,6 +8573,24 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         </div>
       )}
 
+      {/* Calibration banner (replaces or co-exists with pickMode) */}
+      {calibratingId && (
+        <div className="absolute top-12 left-0 right-0 z-50 flex justify-center px-3 pointer-events-none">
+          <div className="bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-lg mt-1 flex items-center gap-2 max-w-full pointer-events-auto">
+            <span>
+              {calibStep === "pickChart" && "Calibrar (1/2): toque na CARTA num ponto reconhecível"}
+              {calibStep === "pickMap"   && "Calibrar (2/2): toque no MAPA onde esse ponto realmente fica"}
+              {calibStep === "applying"  && "Re-warpeando a carta…"}
+            </span>
+            <button onClick={cancelCalibration}
+              disabled={calibStep === "applying"}
+              className="px-2 py-0.5 rounded border border-white/60 text-[10px]">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Map container */}
       <div ref={mapDivRef} className="flex-1" />
 
@@ -8541,6 +8613,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           overlays={pdfOverlays}
           setOverlays={setPdfOverlays}
           onAddNew={() => { setLayersOpen(false); setGeorefActive(true); }}
+          onStartCalibration={startCalibration}
           onClose={() => setLayersOpen(false)}
         />
       )}
