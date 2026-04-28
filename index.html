@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1710";
+const APP_VERSION = "20260428.2136";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -744,6 +744,81 @@ async function airacProcedures(icao) {
     _airacCacheSet("proc_" + code, j.data, 14 * 86_400_000);
     return j.data;
   } catch (_) { return null; }
+}
+
+async function airacProcedureDetail(airport, identifier) {
+  if (!airport || !identifier) return null;
+  const ap = String(airport).toUpperCase().trim();
+  const id = String(identifier).toUpperCase().trim();
+  const key = "procd_" + ap + "_" + id;
+  const cached = _airacCacheGet(key);
+  if (cached) return cached;
+  try {
+    const r = await fetch(AIRAC_BASE + "/procedures/" + ap + "/" + id, { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.status !== "success" || !j.data) return null;
+    _airacCacheSet(key, j.data, 14 * 86_400_000);
+    return j.data;
+  } catch (_) { return null; }
+}
+
+// Build the ordered leg list for a chosen (procedure, transition).
+// Resolves runway-transition (key "RW35B" → look up "35B") vs fix-transition (key as-is).
+// Concatenation order:
+//   APP        : transitionLegs + commonRoute  (you arrive via the IAF, then onto common path)
+//   SID / STAR : commonRoute + transitionLegs  (you fly the body, then exit via the transition)
+// Consecutive duplicate fix_identifier are collapsed (e.g. transition ends at USITO and
+// the common_route also starts at USITO).
+function pickProcedureLegs(detail, transitionName, typeCode) {
+  if (!detail) return [];
+  function bySeq(a, b) { return (a.sequence || 0) - (b.sequence || 0); }
+  let transLegs = [];
+  if (transitionName) {
+    if (/^RW/i.test(transitionName)) {
+      const rwy = transitionName.replace(/^RW/i, "");
+      transLegs = (detail.runway_transitions && detail.runway_transitions[rwy]) || [];
+    } else {
+      transLegs = (detail.transitions && detail.transitions[transitionName]) || [];
+    }
+  }
+  transLegs = (transLegs || []).slice().sort(bySeq);
+  const commonLegs = (detail.common_route || []).slice().sort(bySeq);
+  const combined = String(typeCode).toUpperCase() === "APP"
+    ? transLegs.concat(commonLegs)
+    : commonLegs.concat(transLegs);
+  const out = [];
+  for (const leg of combined) {
+    const last = out[out.length - 1];
+    if (last && last.fix_identifier && leg.fix_identifier && last.fix_identifier === leg.fix_identifier) continue;
+    out.push(leg);
+  }
+  return out;
+}
+
+function legToCheckpoint(leg, source, typeCode) {
+  if (!leg.fix_coordinates || leg.fix_coordinates.lat == null || leg.fix_coordinates.lon == null) return null;
+  const lat = Math.round(Number(leg.fix_coordinates.lat) * 1e6) / 1e6;
+  const lon = Math.round(Number(leg.fix_coordinates.lon) * 1e6) / 1e6;
+  const cp = {
+    name: String(leg.fix_identifier || leg.fix_name || "PT").slice(0, 10).toUpperCase(),
+    lat: lat, lon: lon,
+    ata: null, gsActual: null,
+    source: Object.assign({}, source, { sequence: leg.sequence }),
+  };
+  if (leg.altitude_ft != null) {
+    cp.alt = Number(leg.altitude_ft);
+    cp.useCruiseAlt = false;
+  }
+  const isClimb = String(typeCode).toUpperCase() === "SID";
+  if (leg.altitude_restriction === "at_or_above") {
+    cp.arrivalMode = "asap";
+  } else if (leg.altitude_restriction === "at_or_below") {
+    cp.arrivalMode = "at_fix";
+  } else if (leg.altitude_ft != null) {
+    cp.arrivalMode = isClimb ? "asap" : "at_fix";
+  }
+  return cp;
 }
 
 // ================= STATE INICIAL =================
@@ -3487,17 +3562,31 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
         </div>
       )}
       {proceduresIcao && (
-        <ProceduresPanel icao={proceduresIcao} theme={theme} onClose={() => setProceduresIcao(null)} />
+        <ProceduresPanel
+          icao={proceduresIcao}
+          flight={flight}
+          setFlight={setFlight}
+          theme={theme}
+          onClose={() => setProceduresIcao(null)}
+        />
       )}
     </section>
   );
 }
 
-function ProceduresPanel({ icao, theme, onClose }) {
+function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all"); // all | sid | star | approach
+  const [filter, setFilter] = useState("all"); // all | SID | STAR | APP
+
+  // Detail (procedure + transition selected by user)
+  const [selected, setSelected] = useState(null); // { typeCode, identifier, transition }
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErr, setDetailErr] = useState(null);
+  const [insertAfterIdx, setInsertAfterIdx] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setErr(null); setData(null);
@@ -3509,50 +3598,165 @@ function ProceduresPanel({ icao, theme, onClose }) {
     return () => { cancelled = true; };
   }, [icao]);
 
-  // Defensive normalization: try common shapes that AIRAC.net might use.
-  const groups = (function() {
-    if (!data) return null;
-    var sids, stars, apps;
-    if (Array.isArray(data)) {
-      var arr = data;
-      sids  = arr.filter(p => /sid/i.test(p.type || p.kind || p.category || ""));
-      stars = arr.filter(p => /star/i.test(p.type || p.kind || p.category || ""));
-      apps  = arr.filter(p => /(app|approach|iap)/i.test(p.type || p.kind || p.category || ""));
-      var rest = arr.filter(p => !sids.includes(p) && !stars.includes(p) && !apps.includes(p));
-      return { sids: sids, stars: stars, approaches: apps, other: rest };
-    }
-    if (typeof data === "object") {
-      sids = data.sids || data.SIDs || data.departures || [];
-      stars = data.stars || data.STARs || data.arrivals || [];
-      apps = data.approaches || data.iaps || data.approach || [];
-      return { sids: sids, stars: stars, approaches: apps, other: [] };
-    }
-    return null;
+  useEffect(() => {
+    if (!selected) { setDetail(null); setDetailErr(null); return; }
+    let cancelled = false;
+    setDetailLoading(true); setDetailErr(null); setDetail(null);
+    airacProcedureDetail(icao, selected.identifier).then(d => {
+      if (cancelled) return;
+      if (!d) { setDetailErr("Falha ao carregar procedimento"); setDetailLoading(false); return; }
+      setDetail(d); setDetailLoading(false);
+      const cps = (flight && flight.checkpoints) || [];
+      const def = selected.typeCode === "SID"
+        ? 0
+        : Math.max(0, cps.length - 2);
+      setInsertAfterIdx(def);
+    }).catch(e => { if (!cancelled) { setDetailErr(e.message || String(e)); setDetailLoading(false); } });
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  // Group listing by typeCode → identifier → [transitions]
+  const grouped = (function() {
+    if (!data || typeof data !== "object") return null;
+    const out = { SID: {}, STAR: {}, APP: {} };
+    Object.keys(data).forEach(typeKey => {
+      const list = data[typeKey];
+      if (!Array.isArray(list)) return;
+      const tCode = String(typeKey).toUpperCase();
+      const target = out[tCode] || (out[tCode] = {});
+      list.forEach(item => {
+        const id = item.identifier || item.name;
+        if (!id) return;
+        if (!target[id]) target[id] = [];
+        const t = item.transition || "";
+        if (!target[id].includes(t)) target[id].push(t);
+      });
+    });
+    return out;
   })();
 
-  function renderList(list, kind) {
-    if (!list || !list.length) return <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} px-2 py-1`}>—</div>;
+  function applyProcedure() {
+    if (!selected || !detail) return;
+    const legs = pickProcedureLegs(detail, selected.transition, selected.typeCode);
+    const source = {
+      kind: "procedure",
+      airport: icao,
+      procedure: selected.identifier,
+      transition: selected.transition,
+      type: selected.typeCode,
+    };
+    const newCps = [];
+    legs.forEach(leg => {
+      const cp = legToCheckpoint(leg, source, selected.typeCode);
+      if (cp) newCps.push(cp);
+    });
+    if (newCps.length === 0) {
+      alert("Nenhum fixo com coordenadas neste procedimento.");
+      return;
+    }
+    setFlight(f => {
+      const cps = [...((f && f.checkpoints) || [])];
+      const max = Math.max(0, cps.length - 1);
+      const after = Math.max(0, Math.min(insertAfterIdx, max));
+      cps.splice(after + 1, 0, ...newCps);
+      return Object.assign({}, f, { checkpoints: cps });
+    });
+    onClose();
+  }
+
+  // ── Detail view ─────────────────────────────────────────────────────────────
+  if (selected) {
+    const legs = detail ? pickProcedureLegs(detail, selected.transition, selected.typeCode) : [];
+    const insertableLegs = legs.filter(l => l.fix_coordinates && l.fix_coordinates.lat != null);
+    const cps = (flight && flight.checkpoints) || [];
     return (
-      <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden divide-y ${theme.panelBorder}`}>
-        {list.map((p, i) => {
-          const name = p.name || p.identifier || p.ident || p.id || ("Item " + (i + 1));
-          const rwy  = p.runway || p.runway_identifier || p.rwy || "";
-          const trans = p.transition || p.transition_identifier || "";
-          const sub = [rwy && ("RWY " + rwy), trans && ("TRANS " + trans)].filter(Boolean).join(" · ");
-          return (
-            <div key={i} className="px-3 py-2 flex items-center gap-2">
-              <span className={`text-[10px] font-bold w-12 shrink-0 ${theme.cyan}`}>{kind}</span>
-              <div className="flex-1 min-w-0">
-                <div className={`font-bold truncate ${theme.fg}`}>{name}</div>
-                {sub && <div className={`text-[10px] truncate ${theme.fgFaint}`}>{sub}</div>}
-              </div>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column" }}
+        className={theme.bg}>
+        <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
+          <button onClick={() => setSelected(null)}
+            className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
+            ← Voltar
+          </button>
+          <div className="flex-1 text-center">
+            <div className={`text-sm font-bold ${theme.cyan}`}>
+              {selected.typeCode} · {selected.identifier}{selected.transition ? " · " + selected.transition : ""}
             </div>
-          );
-        })}
+            <div className={`text-[9px] ${theme.fgFaint}`}>{icao}</div>
+          </div>
+          <div style={{ width: 80 }} />
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {detailLoading && <div className={`text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>A carregar…</div>}
+          {detailErr && <div className={`text-center text-xs text-red-400`}>⚠ {detailErr}</div>}
+          {detail && legs.length > 0 && (
+            <>
+              <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden divide-y ${theme.panelBorder}`}>
+                {legs.map((leg, i) => {
+                  const hasCoords = leg.fix_coordinates && leg.fix_coordinates.lat != null;
+                  const altStr = leg.altitude_ft != null
+                    ? (leg.altitude_restriction === "at_or_above" ? `≥ ${leg.altitude_ft} ft`
+                      : leg.altitude_restriction === "at_or_below" ? `≤ ${leg.altitude_ft} ft`
+                      : `${leg.altitude_ft} ft`)
+                    : "—";
+                  return (
+                    <div key={i} className={`px-3 py-2 ${hasCoords ? "" : "opacity-50"}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] num w-8 shrink-0 ${theme.fgFaint}`}>#{leg.sequence != null ? leg.sequence : i}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className={`font-bold truncate ${theme.fg}`}>
+                            {leg.fix_identifier || leg.fix_name || "—"}
+                            {!hasCoords && <span className={`ml-2 text-[10px] ${theme.fgFaint}`}>(sem coords, ignorado)</span>}
+                          </div>
+                          <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                            {altStr}
+                            {leg.course != null ? ` · MC ${leg.course}°` : ""}
+                            {leg.turn_direction ? ` · turn ${leg.turn_direction}` : ""}
+                            {leg.path_terminator ? ` · ${leg.path_terminator}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div>
+                <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>
+                  Inserir após qual ponto da rota
+                </label>
+                <select value={insertAfterIdx}
+                  onChange={(e) => setInsertAfterIdx(Number(e.target.value))}
+                  className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none`}>
+                  {cps.map((cp, i) => (
+                    <option key={i} value={i}>
+                      {i + 1}. {cp.name || "(sem nome)"}{cp.isOrigin ? " · origem" : i === cps.length - 1 ? " · destino" : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className={`text-[10px] ${theme.fgFaint} mt-1`}>
+                  Default: {selected.typeCode === "SID" ? "depois da origem" : "antes do destino"}.
+                </div>
+              </div>
+              <button onClick={applyProcedure}
+                disabled={insertableLegs.length === 0}
+                className={`w-full py-3 rounded-xl font-bold text-sm ${
+                  insertableLegs.length === 0
+                    ? `${theme.panel} ${theme.fgFaint} opacity-40`
+                    : `${theme.accentBg} ${theme.accentBgFg ?? "text-black"}`
+                }`}>
+                Adicionar à rota ({insertableLegs.length} fixo{insertableLegs.length !== 1 ? "s" : ""})
+              </button>
+            </>
+          )}
+          {detail && legs.length === 0 && (
+            <div className={`text-center text-[11px] ${theme.fgFaint}`}>Sem fixes neste procedimento.</div>
+          )}
+        </div>
       </div>
     );
   }
 
+  // ── Listing view ───────────────────────────────────────────────────────────
   return (
     <div onClick={(e) => e.stopPropagation()}
       style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", isolation: "isolate" }}
@@ -3568,7 +3772,7 @@ function ProceduresPanel({ icao, theme, onClose }) {
         <div style={{ width: 80 }} />
       </div>
       <div className={`flex shrink-0 border-b ${theme.panelBorder} overflow-x-auto`}>
-        {[["all", "Todos"], ["sid", "SIDs"], ["star", "STARs"], ["approach", "Approaches"]].map(([key, label]) => (
+        {[["all", "Todos"], ["SID", "SIDs"], ["STAR", "STARs"], ["APP", "Approaches"]].map(([key, label]) => (
           <button key={key} onClick={() => setFilter(key)}
             className={`flex-1 min-w-[64px] py-3 text-[10px] font-bold uppercase tracking-wider ${filter === key ? theme.accent + " border-b-2 border-current" : theme.fgFaint}`}>
             {label}
@@ -3578,38 +3782,49 @@ function ProceduresPanel({ icao, theme, onClose }) {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {loading && <div className={`text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>A carregar…</div>}
         {err && <div className={`text-center text-xs text-red-400`}>⚠ {err}</div>}
-        {groups && (filter === "all" || filter === "sid") && groups.sids.length > 0 && (
-          <div>
-            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>SID — saídas instrumentais ({groups.sids.length})</div>
-            {renderList(groups.sids, "SID")}
-          </div>
-        )}
-        {groups && (filter === "all" || filter === "star") && groups.stars.length > 0 && (
-          <div>
-            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>STAR — chegadas ({groups.stars.length})</div>
-            {renderList(groups.stars, "STAR")}
-          </div>
-        )}
-        {groups && (filter === "all" || filter === "approach") && groups.approaches.length > 0 && (
-          <div>
-            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>Approach ({groups.approaches.length})</div>
-            {renderList(groups.approaches, "APP")}
-          </div>
-        )}
-        {groups && filter === "all" && groups.other.length > 0 && (
-          <div>
-            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>Outros ({groups.other.length})</div>
-            {renderList(groups.other, "?")}
-          </div>
-        )}
-        {data && groups && groups.sids.length + groups.stars.length + groups.approaches.length + groups.other.length === 0 && (
+        {grouped && [["SID", "SIDs"], ["STAR", "STARs"], ["APP", "Approaches"]].map(([typeCode, label]) => {
+          if (filter !== "all" && filter !== typeCode) return null;
+          const ids = Object.keys(grouped[typeCode] || {}).sort();
+          if (ids.length === 0) return null;
+          return (
+            <div key={typeCode}>
+              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>
+                {label} ({ids.length})
+              </div>
+              <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden divide-y ${theme.panelBorder}`}>
+                {ids.map(id => {
+                  const transitions = grouped[typeCode][id] || [];
+                  return (
+                    <div key={id} className="px-3 py-2">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`text-[10px] font-bold w-12 shrink-0 ${theme.cyan}`}>{typeCode}</span>
+                        <div className={`font-bold ${theme.fg}`}>{id}</div>
+                        <div className={`text-[10px] num ${theme.fgFaint} ml-auto`}>
+                          {transitions.length} trans.
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1 ml-12">
+                        {transitions.length === 0 ? (
+                          <button onClick={() => setSelected({ typeCode, identifier: id, transition: "" })}
+                            className={`text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}>
+                            Selecionar
+                          </button>
+                        ) : transitions.map(t => (
+                          <button key={t || "(none)"} onClick={() => setSelected({ typeCode, identifier: id, transition: t })}
+                            className={`text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}>
+                            {t || "(direct)"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {grouped && Object.values(grouped).every(g => Object.keys(g).length === 0) && !loading && (
           <div className={`text-center text-[11px] ${theme.fgFaint}`}>Sem procedimentos publicados para {icao}.</div>
-        )}
-        {data && (
-          <details className={`${theme.panel} border ${theme.panelBorder} rounded p-2`}>
-            <summary className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} cursor-pointer`}>JSON bruto da API</summary>
-            <pre className={`text-[10px] num ${theme.fgFaint} mt-2 overflow-x-auto`} style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(data, null, 2)}</pre>
-          </details>
         )}
       </div>
     </div>
