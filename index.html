@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0150";
+const APP_VERSION = "20260428.0151";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1396,6 +1396,8 @@ function NavlogApp() {
         if (rr) setSavedRoutes(JSON.parse(rr));
         const pp = await store.get("prefs");
         if (pp) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(pp) });
+        const po = await store.get("pdfOverlays");
+        if (po) setPdfOverlays(JSON.parse(po));
       } catch {}
     })();
   }, []);
@@ -1407,6 +1409,10 @@ function NavlogApp() {
   useEffect(() => {
     store.set("routes", JSON.stringify(savedRoutes));
   }, [savedRoutes]);
+
+  useEffect(() => {
+    try { store.set("pdfOverlays", JSON.stringify(pdfOverlays)); } catch {}
+  }, [pdfOverlays]);
 
   useEffect(() => {
     try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch {}
