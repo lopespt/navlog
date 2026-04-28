@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1138";
+const APP_VERSION = "20260428.1141";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2158,6 +2158,47 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const [showPerf, setShowPerf] = useState(false);
   const altDragRef = useRef({ active: false, startY: 0, startVal: 0 });
 
+  // DDM (degrees + decimal minutes) editing state, kept in sync with cp.lat/cp.lon.
+  function decToDdm(dd, isLon) {
+    if (dd == null || isNaN(dd)) return { deg: "", min: "", hem: isLon ? "W" : "N" };
+    const abs = Math.abs(dd);
+    const deg = Math.floor(abs);
+    const min = (abs - deg) * 60;
+    return {
+      deg: String(deg),
+      min: min.toFixed(2),
+      hem: isLon ? (dd < 0 ? "W" : "E") : (dd < 0 ? "S" : "N"),
+    };
+  }
+  function ddmToDec(parts, isLon) {
+    const deg = parts.deg === "" ? null : Math.abs(parseFloat(parts.deg));
+    const min = parts.min === "" ? 0 : Math.abs(parseFloat(parts.min));
+    if (deg == null || isNaN(deg) || isNaN(min) || min >= 60) return null;
+    if (isLon ? deg > 180 : deg > 90) return null;
+    const v = deg + min / 60;
+    return (parts.hem === "S" || parts.hem === "W") ? -v : v;
+  }
+  const [latParts, setLatParts] = useState(() => decToDdm(initial.lat, false));
+  const [lonParts, setLonParts] = useState(() => decToDdm(initial.lon, true));
+  // When cp.lat/cp.lon change externally (e.g. from MapPicker), refresh the inputs
+  // unless they already represent the same value (avoids snapping the user's typing).
+  useEffect(() => {
+    const local = ddmToDec(latParts, false);
+    if (cp.lat == null && (latParts.deg !== "" || latParts.min !== "")) {
+      setLatParts({ deg: "", min: "", hem: "N" });
+    } else if (cp.lat != null && (local == null || Math.abs(local - cp.lat) > 0.0001)) {
+      setLatParts(decToDdm(cp.lat, false));
+    }
+  }, [cp.lat]);
+  useEffect(() => {
+    const local = ddmToDec(lonParts, true);
+    if (cp.lon == null && (lonParts.deg !== "" || lonParts.min !== "")) {
+      setLonParts({ deg: "", min: "", hem: "W" });
+    } else if (cp.lon != null && (local == null || Math.abs(local - cp.lon) > 0.0001)) {
+      setLonParts(decToDdm(cp.lon, true));
+    }
+  }, [cp.lon]);
+
   const prevCp = isNew
     ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
     : flight.checkpoints[editingIdx - 1];
@@ -2298,31 +2339,83 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
 
           {/* POSIÇÃO */}
           <div className={sect}>
-            <label className={lbl}>Posição (graus decimais)</label>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LAT (ex: 38.7169)</span>
-                <input type="number" step="0.0001" placeholder="38.7169"
-                  value={cp.lat != null ? cp.lat : ""}
-                  onChange={function(e) {
-                    var v = e.target.value === "" ? null : parseFloat(e.target.value);
-                    applyCoords(isNaN(v) ? null : v, cp.lon);
-                  }}
-                  className={fld}
-                />
-              </div>
-              <div>
-                <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LON (ex: -9.1395)</span>
-                <input type="number" step="0.0001" placeholder="-9.1395"
-                  value={cp.lon != null ? cp.lon : ""}
-                  onChange={function(e) {
-                    var v = e.target.value === "" ? null : parseFloat(e.target.value);
-                    applyCoords(cp.lat, isNaN(v) ? null : v);
-                  }}
-                  className={fld}
-                />
-              </div>
-            </div>
+            <label className={lbl}>Posição (graus + minutos)</label>
+            {(function() {
+              const subFld = `${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-2 text-base rounded-xl num focus:outline-none w-full text-center`;
+              const unit  = `text-base font-bold ${theme.fgMuted} px-1`;
+              const hemBtn = function(active) {
+                return `w-12 px-0 py-2 rounded-xl border-2 text-base font-black ${active ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint} active:scale-95`;
+              };
+              function pushLat(parts) {
+                setLatParts(parts);
+                const dd = ddmToDec(parts, false);
+                if (dd != null) applyCoords(dd, cp.lon);
+                else if (parts.deg === "" && parts.min === "") applyCoords(null, cp.lon);
+              }
+              function pushLon(parts) {
+                setLonParts(parts);
+                const dd = ddmToDec(parts, true);
+                if (dd != null) applyCoords(cp.lat, dd);
+                else if (parts.deg === "" && parts.min === "") applyCoords(cp.lat, null);
+              }
+              return (
+                <div className="space-y-2">
+                  {/* LAT */}
+                  <div>
+                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LAT</span>
+                    <div className="flex items-center gap-1">
+                      <input type="number" inputMode="numeric" min="0" max="90" step="1" placeholder="38"
+                        value={latParts.deg}
+                        onChange={(e) => pushLat({ ...latParts, deg: e.target.value })}
+                        className={subFld} style={{ flex: "0 0 4.5rem" }}
+                      />
+                      <span className={unit}>°</span>
+                      <input type="number" inputMode="decimal" min="0" max="59.99" step="0.01" placeholder="43.01"
+                        value={latParts.min}
+                        onChange={(e) => pushLat({ ...latParts, min: e.target.value })}
+                        className={subFld} style={{ flex: "1 1 auto" }}
+                      />
+                      <span className={unit}>'</span>
+                      <button type="button"
+                        onClick={() => pushLat({ ...latParts, hem: latParts.hem === "N" ? "S" : "N" })}
+                        title="Toggle N/S"
+                        className={hemBtn(true)}>
+                        {latParts.hem || "N"}
+                      </button>
+                    </div>
+                  </div>
+                  {/* LON */}
+                  <div>
+                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LON</span>
+                    <div className="flex items-center gap-1">
+                      <input type="number" inputMode="numeric" min="0" max="180" step="1" placeholder="9"
+                        value={lonParts.deg}
+                        onChange={(e) => pushLon({ ...lonParts, deg: e.target.value })}
+                        className={subFld} style={{ flex: "0 0 4.5rem" }}
+                      />
+                      <span className={unit}>°</span>
+                      <input type="number" inputMode="decimal" min="0" max="59.99" step="0.01" placeholder="08.37"
+                        value={lonParts.min}
+                        onChange={(e) => pushLon({ ...lonParts, min: e.target.value })}
+                        className={subFld} style={{ flex: "1 1 auto" }}
+                      />
+                      <span className={unit}>'</span>
+                      <button type="button"
+                        onClick={() => pushLon({ ...lonParts, hem: lonParts.hem === "E" ? "W" : "E" })}
+                        title="Toggle E/W"
+                        className={hemBtn(true)}>
+                        {lonParts.hem || "W"}
+                      </button>
+                    </div>
+                  </div>
+                  {(cp.lat != null && cp.lon != null) && (
+                    <div className={`text-[10px] ${theme.fgFaint} text-center num`}>
+                      {(cp.lat).toFixed(4)}, {(cp.lon).toFixed(4)} (decimal)
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <button onClick={function() { setShowMapPicker(true); }}
               className={`w-full py-2.5 rounded-xl border flex items-center justify-center gap-2 text-sm font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
               <MapIcon className="w-4 h-4" /> Selecionar no mapa
