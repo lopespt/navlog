@@ -97,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0054";
+const APP_VERSION = "20260428.0057";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4836,13 +4836,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Init Leaflet map once
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, {
-      zoomControl: true, attributionControl: true, tap: true, tapTolerance: 15
-    });
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
 
-    function handleMapTap(e) {
-      if (!e.latlng) return;
-      var lat = e.latlng.lat, lon = e.latlng.lng;
+    function triggerWpMenu(lat, lon) {
       var cps = flightRef.current.checkpoints;
       var bestIdx = null, bestDist = Infinity;
       for (var ci = 0; ci + 1 < cps.length; ci++) {
@@ -4853,17 +4849,56 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       }
       if (bestIdx == null && cps.length > 0) bestIdx = cps.length - 1;
       if (bestIdx == null) return;
-      var afterName = cps[bestIdx]?.name || String(bestIdx);
-      var beforeName = cps[bestIdx + 1]?.name || null;
-      setMenuRef.current({ lat, lon, afterIdx: bestIdx, afterName, beforeName });
+      setMenuRef.current({
+        lat, lon,
+        afterIdx: bestIdx,
+        afterName: cps[bestIdx]?.name || String(bestIdx),
+        beforeName: cps[bestIdx + 1]?.name || null,
+      });
     }
 
-    // Listen to both 'click' (desktop) and 'tap' (Leaflet's mobile touch emulation)
-    map.on('click', handleMapTap);
-    map.on('tap', handleMapTap);
+    // Desktop: standard Leaflet click
+    map.on('click', function(e) { triggerWpMenu(e.latlng.lat, e.latlng.lng); });
+
+    // Mobile: native touch events for both short tap and long press
+    var _touch = null, _longTimer = null;
+    var el = mapDivRef.current;
+
+    function getLatLng(cx, cy) {
+      var rect = el.getBoundingClientRect();
+      return map.containerPointToLatLng(window.L.point(cx - rect.left, cy - rect.top));
+    }
+
+    el.addEventListener('touchstart', function(e) {
+      if (e.touches.length !== 1) { clearTimeout(_longTimer); _touch = null; return; }
+      _touch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      _longTimer = setTimeout(function() {
+        if (!_touch) return;
+        var ll = getLatLng(_touch.x, _touch.y);
+        _touch = null;
+        triggerWpMenu(ll.lat, ll.lng);
+      }, 600);
+    }, { passive: true });
+
+    el.addEventListener('touchmove', function(e) {
+      if (!_touch) return;
+      var dx = e.touches[0].clientX - _touch.x, dy = e.touches[0].clientY - _touch.y;
+      if (Math.sqrt(dx*dx + dy*dy) > 10) { clearTimeout(_longTimer); _touch = null; }
+    }, { passive: true });
+
+    el.addEventListener('touchend', function(e) {
+      clearTimeout(_longTimer);
+      if (!_touch || e.changedTouches.length !== 1) { _touch = null; return; }
+      var dx = e.changedTouches[0].clientX - _touch.x, dy = e.changedTouches[0].clientY - _touch.y;
+      var cx = e.changedTouches[0].clientX, cy = e.changedTouches[0].clientY;
+      _touch = null;
+      if (Math.sqrt(dx*dx + dy*dy) > 10) return;
+      var ll = getLatLng(cx, cy);
+      triggerWpMenu(ll.lat, ll.lng);
+    }, { passive: true });
 
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; };
+    return () => { clearTimeout(_longTimer); map.remove(); mapRef.current = null; };
   }, []);
 
   // Swap tile layer when tileMode changes
