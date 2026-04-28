@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0205";
+const APP_VERSION = "20260428.0215";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1396,17 +1396,17 @@ function NavlogApp() {
         if (rr) setSavedRoutes(JSON.parse(rr));
         const pp = await store.get("prefs");
         if (pp) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(pp) });
-        const po = await store.get("pdfOverlays");
-        if (po) {
-          var metas = JSON.parse(po);
-          // Try to re-render each overlay from its stored file handle
-          var loaded = await Promise.all(metas.map(async function(meta) {
-            var handle = await getPdfHandle(meta.id);
-            if (handle) {
-              var imgData = await renderPdfFromHandle(handle);
-              if (imgData) return Object.assign({}, meta, imgData);
+        // Load PDF overlays from IndexedDB (stores full data including dataUrl)
+        var idbOverlays = await getAllPdfOverlaysIdb();
+        if (idbOverlays.length > 0) {
+          var loaded = await Promise.all(idbOverlays.map(async function(rec) {
+            // Try to refresh from file handle for latest version
+            if (rec.handle) {
+              var imgData = await renderPdfFromHandle(rec.handle);
+              if (imgData) return Object.assign({}, rec, imgData);
             }
-            return Object.assign({}, meta, { dataUrl: null }); // missing
+            // Fall back to stored dataUrl
+            return rec;
           }));
           setPdfOverlays(loaded);
         }
@@ -1423,25 +1423,15 @@ function NavlogApp() {
   }, [savedRoutes]);
 
   useEffect(() => {
-    try {
-      // Save only metadata — no dataUrl (file handle stored separately in IndexedDB)
-      var meta = pdfOverlays.map(function(o) {
-        return { id: o.id, pdfPts: o.pdfPts, mapPts: o.mapPts,
-                 opacity: o.opacity, visible: o.visible,
-                 width: o.width, height: o.height };
-      });
-      store.set("pdfOverlays", JSON.stringify(meta));
-      // Clean up IndexedDB handles for removed overlays
-      var ids = new Set(pdfOverlays.map(function(o) { return o.id; }));
-      _pdfHandleDb().then(function(db) {
-        var tx = db.transaction('handles', 'readonly');
-        tx.objectStore('handles').getAllKeys().onsuccess = function(e) {
-          e.target.result.forEach(function(k) {
-            if (!ids.has(k)) deletePdfHandle(k);
-          });
-        };
-      }).catch(function() {});
-    } catch(e) {}
+    // Save each overlay (with dataUrl) to IndexedDB
+    pdfOverlays.forEach(function(o) {
+      savePdfOverlayIdb(o, null); // handle was saved separately on creation
+    });
+    // Clean up deleted overlays
+    var ids = new Set(pdfOverlays.map(function(o) { return o.id; }));
+    getAllPdfOverlaysIdb().then(function(all) {
+      all.forEach(function(rec) { if (!ids.has(rec.id)) deletePdfHandle(rec.id); });
+    }).catch(function() {});
   }, [pdfOverlays]);
 
   useEffect(() => {
@@ -4867,23 +4857,41 @@ function _pdfHandleDb() {
     req.onerror = function() { reject(req.error); };
   });
 }
-async function savePdfHandle(id, handle) {
+// Stores full overlay record (handle + dataUrl + metadata) in IndexedDB
+async function savePdfOverlayIdb(ov, handle) {
   try {
     var db = await _pdfHandleDb();
     var tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put({ id: id, handle: handle });
+    tx.objectStore('handles').put({
+      id: ov.id, handle: handle || null,
+      dataUrl: ov.dataUrl || null,
+      width: ov.width, height: ov.height,
+      pdfPts: ov.pdfPts, mapPts: ov.mapPts,
+      opacity: ov.opacity, visible: ov.visible
+    });
   } catch(e) {}
 }
-async function getPdfHandle(id) {
+async function getPdfOverlayIdb(id) {
   try {
     var db = await _pdfHandleDb();
     return new Promise(function(resolve) {
       var tx = db.transaction('handles', 'readonly');
       var req = tx.objectStore('handles').get(id);
-      req.onsuccess = function(e) { resolve(e.target.result ? e.target.result.handle : null); };
+      req.onsuccess = function(e) { resolve(e.target.result || null); };
       req.onerror = function() { resolve(null); };
     });
   } catch(e) { return null; }
+}
+async function getAllPdfOverlaysIdb() {
+  try {
+    var db = await _pdfHandleDb();
+    return new Promise(function(resolve) {
+      var tx = db.transaction('handles', 'readonly');
+      var req = tx.objectStore('handles').getAll();
+      req.onsuccess = function(e) { resolve(e.target.result || []); };
+      req.onerror = function() { resolve([]); };
+    });
+  } catch(e) { return []; }
 }
 async function deletePdfHandle(id) {
   try {
@@ -4892,6 +4900,8 @@ async function deletePdfHandle(id) {
     tx.objectStore('handles').delete(id);
   } catch(e) {}
 }
+// Keep old name as alias for compat
+async function savePdfHandle(id, handle) { /* no-op, use savePdfOverlayIdb */ }
 async function renderPdfFromHandle(handle) {
   if (!handle) return null;
   try {
@@ -4973,7 +4983,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
       var latlng = [e.latlng.lat, e.latlng.lng];
       setMapPts(function(prev) {
         var pts = prev.concat([latlng]);
-        if (pts.length >= 2) { pickModeRef.current = false; }
+        if (pts.length >= 3) { pickModeRef.current = false; }
         return pts;
       });
     }
@@ -5025,7 +5035,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   }
 
   function handleImgClick(e) {
-    if (phase !== 'pdf' || pdfPts.length >= 2) return;
+    if (phase !== 'pdf' || pdfPts.length >= 3) return;
     var rect = e.currentTarget.getBoundingClientRect();
     var u = (e.clientX - rect.left) / zoom;
     var v = (e.clientY - rect.top) / zoom;
@@ -5033,7 +5043,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   }
 
   function finish() {
-    if (pdfPts.length < 2 || mapPts.length < 2) return;
+    if (pdfPts.length < 3 || mapPts.length < 3) return;
     onDone({
       id: Date.now(),
       dataUrl: imgData.dataUrl,
@@ -5075,20 +5085,19 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   }
 
   if (phase === 'pdf') {
-    const ptColors = ['#ef4444','#3b82f6'];
+    const ptColors = ['#ef4444','#3b82f6','#22c55e'];
+    const ptLabels = ['vermelho','azul','verde'];
     return (
       <div className="absolute inset-0 z-[9000] flex flex-col" style={{ background: '#111' }}>
-        {/* Header */}
         <div className="flex items-center gap-2 px-3 py-3 bg-black shrink-0">
-          <div className={`text-xs font-bold flex-1 ${pdfPts.length < 2 ? 'text-amber-400' : 'text-green-400'}`}>
-            {pdfPts.length === 0 && 'Passo 1 — toque no ponto 1 (🔴)'}
-            {pdfPts.length === 1 && 'Passo 1 — toque no ponto 2 (🔵)'}
-            {pdfPts.length >= 2 && '✓ 2 pontos marcados'}
+          <div className={`text-xs font-bold flex-1 ${pdfPts.length < 3 ? 'text-amber-400' : 'text-green-400'}`}>
+            {pdfPts.length < 3
+              ? `Passo 1 — toque no ponto ${pdfPts.length + 1} (${ptLabels[pdfPts.length]})`
+              : '✓ 3 pontos marcados'}
           </div>
           <button onClick={onCancel} className="text-zinc-400 text-lg px-2 leading-none">✕</button>
         </div>
 
-        {/* PDF image — scrollable + pinch zoom */}
         <div ref={scrollRef} className="flex-1 overflow-auto"
           style={{ cursor: 'crosshair', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
           onTouchStart={handleScrollTouchStart}
@@ -5120,7 +5129,6 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
           </div>
         </div>
 
-        {/* Single footer row: − zoom + | Refazer | Próximo */}
         <div className="bg-black border-t border-zinc-800 shrink-0 flex items-center gap-2 px-3 py-3">
           <button onClick={() => changeZoom(-0.25)}
             className="w-12 h-12 bg-zinc-700 text-white rounded-xl text-2xl font-bold active:scale-95 flex items-center justify-center shrink-0">−</button>
@@ -5134,11 +5142,11 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
             </button>
           )}
           <button onClick={() => { setMapPts([]); setPhase('map'); }}
-            disabled={pdfPts.length < 2}
+            disabled={pdfPts.length < 3}
             className={`flex-1 h-12 rounded-xl text-sm font-bold active:scale-95 transition-transform ${
-              pdfPts.length >= 2 ? 'bg-violet-600 text-white' : 'bg-zinc-800 text-zinc-600'
+              pdfPts.length >= 3 ? 'bg-violet-600 text-white' : 'bg-zinc-800 text-zinc-600'
             }`}>
-            {pdfPts.length >= 2 ? 'Próximo →' : `Faltam ${2 - pdfPts.length} pt`}
+            {pdfPts.length >= 3 ? 'Próximo →' : `Faltam ${3 - pdfPts.length} pt`}
           </button>
         </div>
       </div>
@@ -5146,42 +5154,37 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
   }
 
   if (phase === 'map') {
-    const ptColors = ['#ef4444','#3b82f6'];
-    const needed = 2 - mapPts.length;
+    const ptColors = ['#ef4444','#3b82f6','#22c55e'];
+    const ptLabels = ['vermelho','azul','verde'];
     return (
       <div className="absolute bottom-0 left-0 right-0 z-[9000] pointer-events-none">
-        {/* Floating instruction banner */}
         <div className="pointer-events-auto mx-3 mb-2 rounded-2xl overflow-hidden"
           style={{ background: 'rgba(0,0,0,0.88)' }}>
-          {/* PDF thumbnail with picked points */}
           <div className="flex items-start gap-3 p-3">
             <div style={{ position: 'relative', width: 80, height: 60, flexShrink: 0,
               background: '#222', borderRadius: 6, overflow: 'hidden' }}>
               <img src={imgData.dataUrl} alt="ref"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              {pdfPts.map(([u, v], idx) => {
-                var left = (u / imgData.width) * 100;
-                var top  = (v / imgData.height) * 100;
-                return (
-                  <div key={idx} style={{
-                    position: 'absolute', left: left + '%', top: top + '%',
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: ptColors[idx],
-                    transform: 'translate(-50%,-50%)',
-                    border: '1px solid white',
-                  }} />
-                );
-              })}
+              {pdfPts.map(([u, v], idx) => (
+                <div key={idx} style={{
+                  position: 'absolute',
+                  left: (u / imgData.width) * 100 + '%',
+                  top:  (v / imgData.height) * 100 + '%',
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: ptColors[idx],
+                  transform: 'translate(-50%,-50%)',
+                  border: '1px solid white',
+                }} />
+              ))}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-white font-bold text-sm">Passo 2: Marcar no mapa</div>
-              {mapPts.length < 2 ? (
+              {mapPts.length < 3 ? (
                 <div style={{ color: ptColors[mapPts.length], fontSize: 12, marginTop: 2 }}>
-                  Toque no mapa onde está o ponto {mapPts.length + 1}
-                  {' '}(círculo {mapPts.length === 0 ? 'vermelho' : 'azul'} no PDF)
+                  Toque onde está o ponto {mapPts.length + 1} ({ptLabels[mapPts.length]})
                 </div>
               ) : (
-                <div className="text-green-400 text-xs mt-1">2 pontos marcados ✓</div>
+                <div className="text-green-400 text-xs mt-1">3 pontos marcados ✓</div>
               )}
             </div>
           </div>
@@ -5205,11 +5208,11 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
               className="px-3 py-2 bg-zinc-700 text-white rounded-xl text-xs font-bold active:scale-95">
               ← PDF
             </button>
-            <button disabled={mapPts.length < 2} onClick={finish}
+            <button disabled={mapPts.length < 3} onClick={finish}
               className={`flex-1 py-2 rounded-xl text-sm font-bold active:scale-95 ${
-                mapPts.length >= 2 ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-zinc-500'
+                mapPts.length >= 3 ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-zinc-500'
               }`}>
-              Adicionar overlay ✓
+              {mapPts.length >= 3 ? 'Adicionar overlay ✓' : `Faltam ${3 - mapPts.length} pt`}
             </button>
           </div>
         </div>
@@ -5293,7 +5296,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
             </div>
             <div className="mt-2 flex items-center gap-2">
               <span className={`text-[10px] ${theme.fgFaint}`}>Opac.</span>
-              <input type="range" min="0.1" max="1" step="0.05"
+              <input type="range" min="0" max="1" step="0.05"
                 value={ov.opacity}
                 onChange={e => setOverlays(os => os.map(o => o.id === ov.id ? {...o, opacity: parseFloat(e.target.value)} : o))}
                 className="flex-1" />
@@ -5385,72 +5388,74 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
 
-  // Sync PDF overlay layers with Leaflet map using L.imageOverlay
+  // Sync PDF overlay layers with Leaflet map — 3-point affine transform
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
 
-    // Compute geographic bounds from 2 PDF reference points and create L.imageOverlay.
-    // Assumes the chart is north-up (standard for aeronautical charts).
-    // From (u1,v1)→(lat1,lon1) and (u2,v2)→(lat2,lon2) we derive scale factors
-    // and extrapolate to the full image corners.
+    // Solve affine transform: 3 PDF pixels → container pixels
+    // Returns CSS matrix(a,b,c,d,tx,ty) coefficients
+    // where screen_x = a*u + c*v + tx,  screen_y = b*u + d*v + ty
+    function solveAffine(pts, mpts) {
+      var p = mpts.map(function(m) { return map.latLngToContainerPoint([m[0], m[1]]); });
+      var u1=pts[0][0], v1=pts[0][1];
+      var u2=pts[1][0], v2=pts[1][1];
+      var u3=pts[2][0], v3=pts[2][1];
+      // det of the 3x3 system matrix [[u1,v1,1],[u2,v2,1],[u3,v3,1]]
+      var det = u1*(v2-v3) - v1*(u2-u3) + (u2*v3 - u3*v2);
+      if (Math.abs(det) < 0.5) return null; // collinear points
+      function solve3(x1, x2, x3) {
+        var a  = (x1*(v2-v3) - v1*(x2-x3) + (x2*v3 - x3*v2)) / det;
+        var c  = (u1*(x2-x3) - x1*(u2-u3) + (u2*x3 - u3*x2)) / det;
+        var tx = (u1*(v2*x3-v3*x2) - v1*(u2*x3-u3*x2) + x1*(u2*v3-u3*v2)) / det;
+        return [a, c, tx];
+      }
+      var rx = solve3(p[0].x, p[1].x, p[2].x);
+      var ry = solve3(p[0].y, p[1].y, p[2].y);
+      // CSS matrix(a,b,c,d,tx,ty): a=rx[0], b=ry[0], c=rx[1], d=ry[1]
+      return { a:rx[0], b:ry[0], c:rx[1], d:ry[1], tx:rx[2], ty:ry[2] };
+    }
+
     function makeLayer(ov) {
-      if (!ov.dataUrl) return { remove: function(){} };
+      if (!ov.dataUrl) return { remove: function(){}, setOverlay: function(){} };
       var pts = ov.pdfPts, mpts = ov.mapPts;
-      if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return { remove: function(){} };
+      if (!pts || pts.length < 3 || !mpts || mpts.length < 3) return { remove: function(){}, setOverlay: function(){} };
 
-      var u1 = pts[0][0], v1 = pts[0][1];
-      var u2 = pts[1][0], v2 = pts[1][1];
-      var lat1 = mpts[0][0], lon1 = mpts[0][1];
-      var lat2 = mpts[1][0], lon2 = mpts[1][1];
-      var W = ov.width, H = ov.height;
+      var ovRef = ov; // mutable ref updated by setOverlay
+      var container = map.getContainer();
+      var div = document.createElement('div');
+      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:450;';
+      var img = document.createElement('img');
+      img.src = ov.dataUrl;
+      img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
+      div.appendChild(img);
+      container.appendChild(div);
 
-      // Compute similarity transform: PDF pixel → geographic coords
-      // Using least-squares from 2 points (4 equations, 4 unknowns: a,b,tx,ty)
-      // lat = a*v + b*u + ty  (v goes down = lat goes down)
-      // lon = a*u - b*v + tx
-      var du = u2 - u1, dv = v2 - v1;
-      var den = du*du + dv*dv;
-      if (den < 1) return { remove: function(){} };
+      function update() {
+        if (!ovRef.visible || !ovRef.dataUrl) { div.style.display = 'none'; return; }
+        div.style.display = '';
+        div.style.opacity = String(ovRef.opacity);
+        var m = solveAffine(ovRef.pdfPts, ovRef.mapPts);
+        if (!m) return;
+        div.style.transform = 'matrix('+m.a+','+m.b+','+m.c+','+m.d+','+m.tx+','+m.ty+')';
+      }
 
-      // Scale+rotation components (similarity transform)
-      var aLat = ((lat2-lat1)*dv + (lon2-lon1)*du) / den;  // NOT USED — use simpler approach
-      // Simpler: independent scale per axis (assumes north-up chart)
-      var latPerV = (lat2 - lat1) / dv;  // degrees lat per rendered pixel (v increases downward → lat decreases)
-      var lonPerU = (lon2 - lon1) / du;  // degrees lon per rendered pixel
-
-      // If either component is near zero, try to estimate from the other + aspect ratio
-      if (Math.abs(dv) < 1) latPerV = -lonPerU * (W / H); // fallback
-      if (Math.abs(du) < 1) lonPerU =  latPerV * (W / H); // fallback
-
-      // Extrapolate to image corners
-      var latTop  = lat1 + latPerV * (0 - v1);   // v=0 → top of image
-      var latBot  = lat1 + latPerV * (H - v1);   // v=H → bottom of image
-      var lonLeft = lon1 + lonPerU * (0 - u1);   // u=0 → left of image
-      var lonRight= lon1 + lonPerU * (W - u1);   // u=W → right of image
-
-      var south = Math.min(latTop, latBot);
-      var north = Math.max(latTop, latBot);
-      var west  = Math.min(lonLeft, lonRight);
-      var east  = Math.max(lonLeft, lonRight);
-
-      var leafletLayer = window.L.imageOverlay(ov.dataUrl,
-        [[south, west], [north, east]],
-        { opacity: ov.opacity, interactive: false, zIndex: 450 }
-      );
-      if (ov.visible) leafletLayer.addTo(map);
+      map.on('zoom move zoomend moveend viewreset', update);
+      update();
 
       return {
-        remove: function() { leafletLayer.remove(); },
+        remove: function() {
+          map.off('zoom move zoomend moveend viewreset', update);
+          if (div.parentNode) div.parentNode.removeChild(div);
+        },
         setOverlay: function(newOv) {
-          leafletLayer.setOpacity(newOv.opacity);
-          if (newOv.visible) leafletLayer.addTo(map);
-          else leafletLayer.remove();
+          ovRef = newOv;
+          if (newOv.dataUrl) img.src = newOv.dataUrl;
+          update();
         }
       };
     }
 
-    // Add new overlays, remove deleted ones, update changed ones
     var ids = new Set(pdfOverlays.map(function(o) { return o.id; }));
     Object.keys(pdfLayerRefs.current).forEach(function(id) {
       if (!ids.has(Number(id))) {
@@ -5460,13 +5465,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     });
     pdfOverlays.forEach(function(ov) {
       if (pdfLayerRefs.current[ov.id]) {
-        // Update opacity/visibility without re-creating if possible
-        if (pdfLayerRefs.current[ov.id].setOverlay) {
-          pdfLayerRefs.current[ov.id].setOverlay(ov);
-        } else {
-          pdfLayerRefs.current[ov.id].remove();
-          pdfLayerRefs.current[ov.id] = makeLayer(ov);
-        }
+        pdfLayerRefs.current[ov.id].setOverlay(ov);
       } else {
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
@@ -5649,7 +5648,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           mapRef={mapRef}
           onDone={(overlay, handle) => {
             setPdfOverlays(os => [...os, overlay]);
-            if (handle) savePdfHandle(overlay.id, handle).catch(() => {});
+            savePdfOverlayIdb(overlay, handle || null).catch(() => {});
             setGeorefActive(false);
           }}
           onCancel={() => setGeorefActive(false)}
