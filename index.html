@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0122";
+const APP_VERSION = "20260428.0124";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5063,16 +5063,22 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
 function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
   return (
-    <div className="fixed inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.85)' }}>
-      <div className={`flex items-center px-4 py-3 border-b ${theme.panelBorder} ${theme.panel}`}>
-        <div className={`font-bold ${theme.fg} flex-1`}>Camadas / Cartas</div>
-        <button onClick={onClose} className={`${theme.fgFaint} text-xl px-2`}>✕</button>
+    <div className="fixed inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
+      {/* Header com botão de adicionar */}
+      <div className={`flex items-center gap-2 px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
+        <div className={`font-bold ${theme.fg} flex-1`}>🗺 Cartas PDF</div>
+        <button onClick={onAddNew}
+          className="px-4 py-2 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+          + Adicionar
+        </button>
+        <button onClick={onClose} className="text-zinc-400 text-xl px-2 leading-none">✕</button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {overlays.length === 0 && (
-          <div className={`text-sm ${theme.fgFaint} text-center py-8`}>
-            Nenhuma carta adicionada
+          <div className="text-sm text-zinc-400 text-center py-12">
+            Nenhuma carta adicionada.<br/>
+            <span className="text-violet-400 font-bold">Toca em "+ Adicionar" acima.</span>
           </div>
         )}
         {overlays.map(ov => (
@@ -5089,7 +5095,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
                 </div>
               </div>
               <button onClick={() => setOverlays(os => os.map(o => o.id === ov.id ? {...o, visible: !o.visible} : o))}
-                className={`text-xs px-2 py-1 rounded border ${ov.visible ? 'border-violet-500 text-violet-400' : theme.panelBorder + ' ' + theme.fgFaint}`}>
+                className={`text-xs px-2 py-1 rounded border ${ov.visible ? 'border-violet-500 text-violet-400' : 'border-zinc-600 text-zinc-500'}`}>
                 {ov.visible ? 'ON' : 'OFF'}
               </button>
               <button onClick={() => setOverlays(os => os.filter(o => o.id !== ov.id))}
@@ -5105,13 +5111,6 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
             </div>
           </div>
         ))}
-      </div>
-
-      <div className="p-3 border-t border-zinc-700" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
-        <button onClick={onAddNew}
-          className="w-full py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
-          + Adicionar carta PDF
-        </button>
       </div>
     </div>
   );
