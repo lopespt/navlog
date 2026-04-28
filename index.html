@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.2344";
+const APP_VERSION = "20260428.2357";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2221,9 +2221,9 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
 
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18,
+      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4,
     }).addTo(map);
 
     map.createPane('pfRoute');
@@ -2946,9 +2946,9 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
   // Init map
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18,
+      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4,
     }).addTo(map);
     map.createPane('devRoute');
     map.getPane('devRoute').style.zIndex = 500;
@@ -3320,7 +3320,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
             const isOver = dragOverIdx === i && dragIdx != null && dragIdx !== i;
             return (
             <div key={i} data-wp-idx={i}
-              className={`flex items-stretch gap-1 rounded transition-all ${isDragging ? "opacity-50 scale-[0.98]" : ""} ${isOver ? `ring-2 ${theme.accentBorder} bg-amber-500/10` : ""}`}>
+              className={`flex items-stretch gap-1 rounded transition-all duration-150 ${isDragging ? "opacity-50 scale-[0.98]" : ""} ${isOver ? `ring-2 ${theme.accentBorder} bg-amber-500/10` : ""}`}>
               {/* Alça de arrasto — apenas para waypoints manuais não-origem */}
               {!cp.isOrigin && !cp.isAuto ? (
                 <div
@@ -4354,7 +4354,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 setAlt(s.startVal + inc * s.step);
               }
               function onPU() { altDragRef.current.active = false; }
-              var handleCls = "w-11 flex flex-col items-center justify-center select-none text-[10px] font-black uppercase tracking-wider active:scale-95 transition-transform";
+              var handleCls = "w-11 flex flex-col items-center justify-center select-none text-[10px] font-black uppercase tracking-wider active:scale-95 transition-transform duration-100";
               return (
                 <div className={`flex items-stretch ${theme.inputBg} border ${theme.inputBorder} rounded-xl overflow-hidden mt-2`}>
                   <input type="number" inputMode="numeric" placeholder="7000" min="0" max="60000" step="100"
@@ -4597,7 +4597,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             </button>
           )}
           <button onClick={save} disabled={!cp.name || !cp.name.trim()}
-            className={`flex-1 py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${cp.name && cp.name.trim() ? "bg-violet-600 text-white" : theme.panel + " " + theme.fgFaint + " opacity-40"}`}>
+            className={`flex-1 py-3 rounded-xl font-bold text-base active:scale-95 transition-transform duration-100 ${cp.name && cp.name.trim() ? "bg-violet-600 text-white" : theme.panel + " " + theme.fgFaint + " opacity-40"}`}>
             {isNew ? "Adicionar waypoint" : "Guardar alterações"}
           </button>
         </div>
@@ -4751,7 +4751,7 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext, allWps }) {
   }
 
   const numRows = [['7','8','9'],['4','5','6'],['1','2','3']];
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform duration-100 select-none`;
 
   return (
     <div className="space-y-3">
@@ -4819,9 +4819,9 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
 
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18
+      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4
     }).addTo(map);
 
     // Pane for waypoints/route on top of PDF overlays
@@ -4955,7 +4955,7 @@ function StepNome({ cp, setCp, theme, onNext }) {
     onNext(); // cp.name already synced on every keypress
   }
 
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-lg flex items-center justify-center font-bold active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-lg flex items-center justify-center font-bold active:scale-95 transition-transform duration-100 select-none`;
 
   return (
     <div className="space-y-3">
@@ -5000,7 +5000,7 @@ function StepNome({ cp, setCp, theme, onNext }) {
           <button
             disabled={!name}
             onClick={confirm}
-            className={`col-span-2 ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-3 font-bold text-base active:scale-95 transition-transform`}>
+            className={`col-span-2 ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-3 font-bold text-base active:scale-95 transition-transform duration-100`}>
             Confirmar →
           </button>
         </div>
@@ -5058,7 +5058,7 @@ function StepAlt({ cp, setCp, cruiseAlt, prevAlt, isOrigin, theme, onNext }) {
 
       {useCruise ? (
         <button onClick={onNext}
-          className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+          className={`w-full ${theme.accentBg} ${theme.accentBgFg ?? "text-black"} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}>
           Confirmar → ({cruiseAlt} ft)
         </button>
       ) : (
@@ -5126,7 +5126,7 @@ function StepTCDist({ theme, variation, cp, setCp, onNext }) {
   }
 
   const canConfirm = tcVal != null || distVal != null;
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform duration-100 select-none`;
   const numRows = [["7","8","9"],["4","5","6"],["1","2","3"]];
 
   return (
@@ -5238,7 +5238,7 @@ function StepTC({ theme, variation, initial, onConfirm }) {
   function del() { setDigits((prev) => prev.slice(0, -1)); }
   function clear() { setDigits(""); }
 
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform duration-100 select-none`;
   const numKeys = [["1","2","3"],["4","5","6"],["7","8","9"]];
 
   return (
@@ -5312,7 +5312,7 @@ function StepTC({ theme, variation, initial, onConfirm }) {
       <button
         disabled={!isValidInput}
         onClick={() => onConfirm(tc)}
-        className={`w-full ${theme.accentBg} disabled:opacity-40 text-black rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}
+        className={`w-full ${theme.accentBg} disabled:opacity-40 text-black rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}
       >
         Confirmar →
       </button>
@@ -5418,7 +5418,7 @@ function StepOverride({ cp, setCp, theme, onNext }) {
 
       <button
         onClick={() => { apply(); onNext(); }}
-        className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}
+        className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}
       >
         {hasAny ? "Confirmar overrides →" : "Sem overrides →"}
       </button>
@@ -5454,7 +5454,7 @@ function StepNumerico({ theme, label, unit, hint, maxDigits, allowDecimal, valid
   const numVal = parseFloat(digits);
   const valid = digits !== "" && !isNaN(numVal) && validate(numVal);
 
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform duration-100 select-none`;
   const numKeys = [["1","2","3"],["4","5","6"],["7","8","9"]];
 
   return (
@@ -5514,7 +5514,7 @@ function StepNumerico({ theme, label, unit, hint, maxDigits, allowDecimal, valid
       <button
         disabled={!valid}
         onClick={() => onConfirm(digits)}
-        className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+        className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}>
         Confirmar →
       </button>
     </div>
@@ -5553,7 +5553,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
 
   const customReady = windMode !== "custom" || (dir !== "" && Number(dir) <= 359 && vel !== "");
 
-  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform duration-100 select-none`;
 
   const windOptions = [
     {
@@ -5587,7 +5587,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
         {windOptions.map(({ key, label, sub, icon }) => (
           <button key={key}
             onClick={() => setWindMode(key)}
-            className={`w-full ${theme.panel} border-2 rounded-xl px-4 py-3 flex items-center gap-4 active:scale-[0.98] transition-transform ${
+            className={`w-full ${theme.panel} border-2 rounded-xl px-4 py-3 flex items-center gap-4 active:scale-[0.98] transition-transform duration-100 ${
               windMode === key ? theme.accentBorder : theme.panelBorder
             }`}
           >
@@ -5612,7 +5612,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
               { key: "vel", label: "Vel.",    unit: "kt", val: vel },
             ].map(({ key, label, unit, val }) => (
               <button key={key} onClick={() => setField(key)}
-                className={`${theme.panel} border-2 rounded-xl px-3 py-3 text-center transition-all ${
+                className={`${theme.panel} border-2 rounded-xl px-3 py-3 text-center transition-all duration-150 ${
                   field === key ? theme.accentBorder : theme.panelBorder
                 }`}>
                 <div className={`text-[9px] uppercase ${field === key ? theme.accent : theme.fgFaint}`}>{label}</div>
@@ -5645,7 +5645,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
       )}
 
       <button onClick={confirm} disabled={!customReady}
-        className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+        className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}>
         Confirmar →
       </button>
     </div>
@@ -5780,12 +5780,12 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 
       <div className="space-y-2 pt-1">
         <button onClick={onSave}
-          className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform`}>
+          className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}>
           {isNew ? "Adicionar waypoint" : "Salvar alterações"}
         </button>
         {onRemove && (
           <button onClick={onRemove}
-            className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
+            className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform duration-100">
             <Trash className="w-4 h-4" /> Remover waypoint
           </button>
         )}
@@ -5960,13 +5960,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
           <button onClick={depart}
-            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all`}>
+            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}>
             <Plane className="w-5 h-5" /> Partir agora
           </button>
         </div>
       ) : flight.atd ? (
         <button onClick={onEditAtd}
-          className={`w-full ${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between active:scale-[0.98] transition-all`}>
+          className={`w-full ${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center justify-between active:scale-[0.98] transition-all duration-150`}>
           <div className="flex items-center gap-2">
             <Plane className={`w-4 h-4 ${theme.success}`} />
             <div className="text-left">
@@ -6040,7 +6040,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               ? virtLabel
               : isAlert ? "DESVIO DE ETA" : "Próximo Waypoint";
           return (
-        <div className={`border-2 rounded-lg p-4 transition-all ${borderClass}`}>
+        <div className={`border-2 rounded-lg p-4 transition-all duration-150 ${borderClass}`}>
           {/* Linha topo: label + alt */}
           <div className="flex items-center justify-between mb-1">
             <span className={`text-[10px] uppercase tracking-widest ${accentColor}`}>
@@ -6112,7 +6112,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                   </div>
                   <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-1000 ${
+                      className={`h-full rounded-full transition-all duration-150 duration-1000 ${
                         progressPct >= 95 ? "bg-red-500" :
                         progressPct >= 75 ? "bg-amber-400" :
                         isAlert ? "bg-red-500" : "bg-amber-500"
@@ -6160,12 +6160,12 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
-              className={`${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all`}>
+              className={`${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all duration-150`}>
               <CircleCheckBig className="w-4 h-4" /> Agora
             </button>
             <button
               onClick={() => next.isVirtual ? onEditVirtualAta(next.autoKey) : onEditAta(next.userIdx)}
-              className={`${theme.panel} border ${next.isVirtual ? "border-cyan-600" : theme.accentBorder} ${next.isVirtual ? theme.cyan : theme.accent} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all`}>
+              className={`${theme.panel} border ${next.isVirtual ? "border-cyan-600" : theme.accentBorder} ${next.isVirtual ? theme.cyan : theme.accent} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all duration-150`}>
               <Clock className="w-4 h-4" /> Registrar hora
             </button>
           </div>
@@ -6333,7 +6333,7 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
   return (
     <Wrapper
       {...wrapperProps}
-      className={`w-full text-left border rounded px-2 py-2 ${ringClass} ${isVirtual ? "border-dashed opacity-80" : ""} ${isClickable ? "active:scale-[0.99] transition-transform" : ""}`}
+      className={`w-full text-left border rounded px-2 py-2 ${ringClass} ${isVirtual ? "border-dashed opacity-80" : ""} ${isClickable ? "active:scale-[0.99] transition-transform duration-100" : ""}`}
     >
       <div className="flex items-center gap-2">
         {/* Indicador */}
@@ -6422,6 +6422,25 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
     </Wrapper>
   );
 }
+// Per-tick re-renders in the parent (every 1 s while ATD is set) only need to
+// reach a row whose live ETA / crossed-state actually moved. Skip the rest.
+CheckpointRow = React.memo(CheckpointRow, function(a, b) {
+  return (
+    a.cp === b.cp &&
+    a.index === b.index &&
+    a.isNext === b.isNext &&
+    a.etaPlanned === b.etaPlanned &&
+    a.etaLive === b.etaLive &&
+    a.crossed === b.crossed &&
+    a.isOrigin === b.isOrigin &&
+    a.isVirtual === b.isVirtual &&
+    a.hasLiveBase === b.hasLiveBase &&
+    a.departDelay === b.departDelay &&
+    a.viewMode === b.viewMode &&
+    a.theme === b.theme &&
+    a.etaOriginLabel === b.etaOriginLabel
+  );
+});
 
 // --------- TAB COMBUSTÍVEL ---------
 function FuelTab({ flight, computed, liveFuel, ac, theme }) {
@@ -6478,7 +6497,7 @@ function FuelTab({ flight, computed, liveFuel, ac, theme }) {
         </div>
         <div className="h-3 bg-black/40 rounded-full overflow-hidden">
           <div
-            className={`h-full transition-all ${
+            className={`h-full transition-all duration-150 ${
               pct < 25 ? "bg-red-500" : pct < 50 ? "bg-amber-500" : "bg-green-500"
             }`}
             style={{ width: `${pct}%` }}
@@ -7220,7 +7239,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
                 <button
                   key={n}
                   onClick={() => pressDigit(n)}
-                  className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-2xl font-bold num ${theme.fg} active:scale-95 active:${theme.accentBg} active:${theme.accentBgFg} transition-all`}
+                  className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-2xl font-bold num ${theme.fg} active:scale-95 active:${theme.accentBg} active:${theme.accentBgFg} transition-all duration-150`}
                 >
                   {n}
                 </button>
@@ -7231,25 +7250,25 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           <div className="grid grid-cols-4 gap-2">
             <button
               onClick={() => setDigits("")}
-              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-sm font-bold ${theme.fgMuted} active:scale-95 transition-transform`}
+              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-sm font-bold ${theme.fgMuted} active:scale-95 transition-transform duration-100`}
             >
               CLR
             </button>
             <button
               onClick={() => pressDigit(0)}
-              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-2xl font-bold num ${theme.fg} active:scale-95 transition-transform`}
+              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 text-2xl font-bold num ${theme.fg} active:scale-95 transition-transform duration-100`}
             >
               0
             </button>
             <button
               onClick={backspace}
-              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 flex items-center justify-center ${theme.fgMuted} active:scale-95 transition-transform`}
+              className={`${theme.panel} border ${theme.panelBorder} rounded-xl py-4 flex items-center justify-center ${theme.fgMuted} active:scale-95 transition-transform duration-100`}
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
             <button
               onClick={useNow}
-              className={`${theme.panel} border ${theme.accentBorder} rounded-xl py-4 text-sm font-bold ${theme.accent} flex items-center justify-center gap-1 active:scale-95 transition-transform`}
+              className={`${theme.panel} border ${theme.accentBorder} rounded-xl py-4 text-sm font-bold ${theme.accent} flex items-center justify-center gap-1 active:scale-95 transition-transform duration-100`}
             >
               <Clock className="w-4 h-4" /> Agora
             </button>
@@ -7262,7 +7281,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           <button
             disabled={!valid}
             onClick={() => onSave(digitsToHHMMSS(digits))}
-            className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-lg active:scale-95 transition-transform`}
+            className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-lg active:scale-95 transition-transform duration-100`}
           >
             {confirmLabel ?? "Confirmar passagem"}
           </button>
@@ -7271,7 +7290,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           {checkpoint.ata && (
             <button
               onClick={onClear}
-              className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+              className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform duration-100"
             >
               <X className="w-4 h-4" /> {clearLabel ?? "Limpar passagem registrada"}
             </button>
@@ -7280,7 +7299,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           {/* Cancelar — sempre visível, discreto */}
           <button
             onClick={onClose}
-            className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold active:scale-95 transition-transform`}
+            className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold active:scale-95 transition-transform duration-100`}
           >
             Cancelar
           </button>
@@ -7297,7 +7316,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
 // Render first page of a PDF file → { dataUrl, width, height }
 async function renderPdfToImage(file, scale) {
-  scale = scale || 3;
+  scale = scale || 4;
   if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
   window.pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -7515,7 +7534,7 @@ async function rewarpOverlayFromHandle(overlayId, pdfPts, mapPts, mapLeaflet, op
     if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
     if (perm !== 'granted') return null;
     var file = await handle.getFile();
-    var scale = (opts && opts.scale) || 3;
+    var scale = (opts && opts.scale) || 4;
     var imgData = await renderPdfToImage(file, scale);
     var warped = await computeWarpedImage(imgData, { pdfPts: pdfPts, mapPts: mapPts }, mapLeaflet);
     if (!warped) return null;
@@ -7535,7 +7554,7 @@ async function rewarpOverlayFromFile(file, pdfPts, mapPts, mapLeaflet, opts) {
   if (!file || !pdfPts || !mapPts || !mapLeaflet || !window.pdfjsLib) return null;
   if (pdfPts.length < 3 || mapPts.length < 3) return null;
   try {
-    var scale = (opts && opts.scale) || 3;
+    var scale = (opts && opts.scale) || 4;
     var imgData = await renderPdfToImage(file, scale);
     var warped = await computeWarpedImage(imgData, { pdfPts: pdfPts, mapPts: mapPts }, mapLeaflet);
     if (!warped) return null;
@@ -7650,7 +7669,7 @@ async function renderPdfFromHandle(handle) {
     if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
     if (perm !== 'granted') return null;
     var file = await handle.getFile();
-    return await renderPdfToImage(file, 3);
+    return await renderPdfToImage(file, 4);
   } catch(e) { return null; }
 }
 
@@ -7758,7 +7777,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     setFileHandle(handle);
     setPhase('loading');
     try {
-      var result = await renderPdfToImage(file, 3);
+      var result = await renderPdfToImage(file, 4);
       setImgData(result);
       setPhase('pdf');
     } catch(err) {
@@ -7774,7 +7793,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     setFileHandle(null);
     setPhase('loading');
     try {
-      var result = await renderPdfToImage(file, 3);
+      var result = await renderPdfToImage(file, 4);
       setImgData(result);
       setPhase('pdf');
     } catch(err) {
@@ -7828,7 +7847,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
           Selecione um PDF para georreferenciar e sobrepor ao mapa
         </div>
         <button onClick={handlePickFile}
-          className="px-6 py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+          className="px-6 py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
           Selecionar PDF
         </button>
         <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFile} />
@@ -7905,7 +7924,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
           )}
           <button onClick={() => { setMapPts([]); setPhase('map'); }}
             disabled={pdfPts.length < 3}
-            className={`flex-1 h-12 rounded-xl text-sm font-bold active:scale-95 transition-transform ${
+            className={`flex-1 h-12 rounded-xl text-sm font-bold active:scale-95 transition-transform duration-100 ${
               pdfPts.length >= 3 ? 'bg-violet-600 text-white' : 'bg-zinc-800 text-zinc-600'
             }`}>
             {pdfPts.length >= 3 ? 'Próximo →' : `Faltam ${3 - pdfPts.length} pt`}
@@ -8013,7 +8032,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
       <div className={`flex items-center gap-2 px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
         <div className={`font-bold ${theme.fg} flex-1`}>🗺 Cartas PDF</div>
         <button onClick={onAddNew}
-          className="px-4 py-2 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+          className="px-4 py-2 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
           + Adicionar
         </button>
         <button onClick={onClose} className="text-zinc-400 text-xl px-2 leading-none">✕</button>
@@ -8024,7 +8043,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
           <div className="flex flex-col items-center gap-4 py-12">
             <div className="text-sm text-zinc-400 text-center">Nenhuma carta adicionada.</div>
             <button onClick={onAddNew}
-              className="px-8 py-4 bg-violet-600 text-white rounded-2xl font-bold text-base active:scale-95 transition-transform shadow-lg">
+              className="px-8 py-4 bg-violet-600 text-white rounded-2xl font-bold text-base active:scale-95 transition-transform duration-100 shadow-lg">
               + Adicionar carta PDF
             </button>
           </div>
@@ -8126,7 +8145,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Updater for leg-label visibility (recomputed on zoom)
   const legLabelUpdaterRef = useRef(function() {});
   // Threshold above which we want the hi-res rasterization
-  const HIRES_ZOOM = 14;
+  const HIRES_ZOOM = 12;
 
   // Calibration: replace one of the existing 3 control points by clicking on
   // the chart (where the user sees the feature) and then on the map (where the
@@ -8180,7 +8199,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       newMapPts[bestIdx] = [mapLL[0], mapLL[1]];
       // Re-warp: try the saved file handle first, then fall back to asking the
       // user to re-select the PDF.
-      var rew = await rewarpOverlayFromHandle(ov.id, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 3 });
+      var rew = await rewarpOverlayFromHandle(ov.id, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 4 });
       var newHandle = null;
       if (!rew) {
         var picked = await pickPdfFile();
@@ -8188,7 +8207,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           // user cancelled → just abort, keep old warp
           cancelCalibration(); return;
         }
-        rew = await rewarpOverlayFromFile(picked.file, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 3 });
+        rew = await rewarpOverlayFromFile(picked.file, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 4 });
         newHandle = picked.handle || null;
       }
       if (!rew) {
@@ -8240,7 +8259,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Init Leaflet map once
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
+    const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
 
     // Custom pane for route — sits above overlayPane (z:400) where imageOverlays live
     map.createPane('routePane');
@@ -8281,14 +8300,28 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       onInsertWaypointRef.current(bestIdx, lat, lon);
     });
 
+    // Debounce zoomend so rapid pinch / wheel gestures only kick the heavy
+    // pipeline (label visibility + hi-res scheduler + overlay re-sync) once
+    // after the user settles.
+    var zoomDebounce = null;
     map.on('zoomend', function() {
-      legLabelUpdaterRef.current();
-      try { setMapZoom(map.getZoom()); } catch (_) {}
+      if (zoomDebounce) clearTimeout(zoomDebounce);
+      zoomDebounce = setTimeout(function() {
+        try {
+          legLabelUpdaterRef.current();
+          setMapZoom(map.getZoom());
+        } catch (_) {}
+        zoomDebounce = null;
+      }, 80);
     });
 
     mapRef.current = map;
     try { setMapZoom(map.getZoom()); } catch (_) {}
-    return () => { map.remove(); mapRef.current = null; };
+    return () => {
+      if (zoomDebounce) clearTimeout(zoomDebounce);
+      map.remove();
+      mapRef.current = null;
+    };
   }, []);
 
   // Stable ref so the Leaflet click handler always calls the current callback
@@ -8308,7 +8341,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
       : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
     const attr = tileMode === 'sat' ? '© Esri' : '© OpenStreetMap';
-    const layer = window.L.tileLayer(url, { attribution: attr, maxZoom: 18 }).addTo(map);
+    const layer = window.L.tileLayer(url, { attribution: attr, maxZoom: 18, keepBuffer: 4 }).addTo(map);
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
 
