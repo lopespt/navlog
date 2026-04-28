@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0156";
+const APP_VERSION = "20260428.0157";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5390,25 +5390,30 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     const map = mapRef.current;
     if (!map || !window.L) return;
 
-    // Build a CSS matrix transform from 2 reference points
+    // Build a CSS matrix transform from 2 reference points.
+    // The div is appended directly to the map container (not overlayPane)
+    // so we use latLngToContainerPoint — coordinates relative to the map div.
     function makeLayer(ov) {
+      if (!ov.dataUrl) return { div: null, update: function(){}, remove: function(){} };
+      var container = map.getContainer();
       var div = document.createElement('div');
       div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:450;';
       var img = document.createElement('img');
       img.src = ov.dataUrl;
       img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
       div.appendChild(img);
-      map.getPanes().overlayPane.appendChild(div);
+      container.appendChild(div);
 
       function update() {
-        if (!ov.visible) { div.style.display = 'none'; return; }
+        if (!ov.visible || !ov.dataUrl) { div.style.display = 'none'; return; }
         div.style.display = '';
         div.style.opacity = String(ov.opacity);
         var pts = ov.pdfPts, mpts = ov.mapPts;
         if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return;
         var u1 = pts[0][0], v1 = pts[0][1], u2 = pts[1][0], v2 = pts[1][1];
-        var p1 = map.latLngToLayerPoint([mpts[0][0], mpts[0][1]]);
-        var p2 = map.latLngToLayerPoint([mpts[1][0], mpts[1][1]]);
+        // Use containerPoint — same coordinate system as the div position
+        var p1 = map.latLngToContainerPoint([mpts[0][0], mpts[0][1]]);
+        var p2 = map.latLngToContainerPoint([mpts[1][0], mpts[1][1]]);
         var du = u2 - u1, dv = v2 - v1;
         var den = du*du + dv*dv;
         if (den === 0) return;
@@ -5419,10 +5424,10 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         div.style.transform = 'matrix(' + a + ',' + b + ',' + (-b) + ',' + a + ',' + tx + ',' + ty + ')';
       }
 
-      map.on('zoom move zoomend moveend', update);
+      map.on('zoom move zoomend moveend viewreset', update);
       update();
       return { div, update, remove: function() {
-        map.off('zoom move zoomend moveend', update);
+        map.off('zoom move zoomend moveend viewreset', update);
         if (div.parentNode) div.parentNode.removeChild(div);
       }};
     }
@@ -5439,8 +5444,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     // Add/update remaining
     pdfOverlays.forEach(function(ov) {
       if (pdfLayerRefs.current[ov.id]) {
-        // Update existing — re-run update to reflect opacity/visibility changes
-        pdfLayerRefs.current[ov.id].update();
+        // Remove and re-create to pick up dataUrl/opacity/visibility changes
+        pdfLayerRefs.current[ov.id].remove();
+        pdfLayerRefs.current[ov.id] = makeLayer(ov);
       } else {
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
