@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1002";
+const APP_VERSION = "20260428.1007";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5692,6 +5692,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const [georefActive, setGeorefActive] = useState(false);
   // Leaflet layers for PDF overlays — keyed by overlay id
   const pdfLayerRefs = useRef({});
+  // Updater for leg-label visibility (recomputed on zoom)
+  const legLabelUpdaterRef = useRef(function() {});
 
   // Re-render simulated position every second
   useEffect(() => {
@@ -5732,6 +5734,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       if (bestIdx == null) return;
       onInsertWaypointRef.current(bestIdx, lat, lon);
     });
+
+    map.on('zoomend', function() { legLabelUpdaterRef.current(); });
 
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -5837,6 +5841,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     });
 
     // Per-leg MC + distance labels (Jeppesen-style) at midpoint of each leg
+    const LABEL_W = 110;
+    const legLabels = []; // { marker, a, b, width }
     for (let i = 1; i < userWps.length; i++) {
       const a = userWps[i - 1], b = userWps[i];
       if (a.lat == null || b.lat == null) continue;
@@ -5871,10 +5877,27 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         'pointer-events: none;' +
         'text-align: center;' +
         '">' + text + '</div>';
-      const icon = window.L.divIcon({ html, className: '', iconSize: [110, 18], iconAnchor: [55, 9] });
+      const icon = window.L.divIcon({ html, className: '', iconSize: [LABEL_W, 18], iconAnchor: [LABEL_W / 2, 9] });
       const lbl = window.L.marker([mlat, mlon], { icon, pane: 'routePane', interactive: false, keyboard: false }).addTo(map);
       ov.markers.push(lbl);
+      legLabels.push({ marker: lbl, a: a, b: b, width: LABEL_W });
     }
+
+    // Hide any leg label whose leg is shorter on screen than the label.
+    // Re-runs on zoom (see legLabelUpdaterRef wired in init effect).
+    function updateLegLabelVisibility() {
+      const PAD = 12; // minimum slack so the label does not touch the endpoints
+      legLabels.forEach(({ marker, a, b, width }) => {
+        const pa = map.latLngToLayerPoint([a.lat, a.lon]);
+        const pb = map.latLngToLayerPoint([b.lat, b.lon]);
+        const legPx = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+        const fits = legPx >= width + PAD;
+        const el = marker.getElement();
+        if (el) el.style.display = fits ? '' : 'none';
+      });
+    }
+    updateLegLabelVisibility();
+    legLabelUpdaterRef.current = updateLegLabelVisibility;
 
     // Virtual waypoint markers (TOC/TOD/BOD) — small dots on the route
     virtWps.forEach(cp => {
