@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0009";
+const APP_VERSION = "20260428.0028";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -386,7 +386,102 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
   return { portions, avgTas };
 }
 
+// resolveAltitudeProfile — assigns an effective altitude to every checkpoint.
+// Waypoints with cp.alt == null && !cp.useCruiseAlt inherit altitude from the
+// previous anchor; multi-leg climbs/descents distribute intermediate altitudes
+// proportionally so computeLegPhases sees a smooth profile.
+// Returns { profile: number[], altWarnings: (string|null)[] }
+function resolveAltitudeProfile(cps, ac, flight) {
+  var n = cps.length;
+  var profile = new Array(n).fill(0);
+  var altWarnings = new Array(n).fill(null);
+  var cruiseAlt = flight.cruiseAlt ?? 7000;
+  var variation = flight.variation ?? 0;
 
+  // Anchor altitude: explicit value or useCruiseAlt; null means "inherit"
+  var anchorAlt = new Array(n).fill(null);
+  for (var ai = 0; ai < n; ai++) {
+    var cpA = cps[ai];
+    if (cpA.isOrigin) {
+      anchorAlt[ai] = cpA.useCruiseAlt ? cruiseAlt : (cpA.alt ?? 0);
+    } else if (cpA.useCruiseAlt) {
+      anchorAlt[ai] = cruiseAlt;
+    } else if (cpA.alt != null) {
+      anchorAlt[ai] = cpA.alt;
+    }
+    // else anchorAlt[ai] stays null → inherit
+  }
+
+  // First anchor must exist (origin); fall back to 0
+  profile[0] = anchorAlt[0] ?? 0;
+  var lastAnchorIdx = 0;
+  var lastAnchorAlt = profile[0];
+
+  for (var si = 1; si < n; si++) {
+    if (anchorAlt[si] == null) continue; // skip non-anchors; will fill after loop
+
+    var segFromAlt = lastAnchorAlt;
+    var segToAlt   = anchorAlt[si];
+    profile[si]    = segToAlt;
+
+    if (segFromAlt !== segToAlt) {
+      // Compute total segment distance
+      var totalSegDist = 0;
+      for (var di = lastAnchorIdx + 1; di <= si; di++) totalSegDist += (cps[di].dist ?? 0);
+
+      if (totalSegDist > 0) {
+        var altDiff   = Math.abs(segToAlt - segFromAlt);
+        var isClimb   = segToAlt > segFromAlt;
+        // Use the destination WP to pick TAS / ROC for the segment
+        var cpTo = cps[si];
+        var wDir2 = cpTo.windMode === "none"   ? 0 :
+                    cpTo.windMode === "custom"  ? (cpTo.windDir ?? 0) :
+                    (flight.windDir ?? 0);
+        var wVel2 = cpTo.windMode === "none"   ? 0 :
+                    cpTo.windMode === "custom"  ? (cpTo.windVel ?? 0) :
+                    (flight.windVel ?? 0);
+        var acTas2 = isClimb
+          ? (cpTo.tasClimbOvr   ?? ac.vy        ?? 100)
+          : (cpTo.tasDescentOvr ?? ac.vDescent   ?? 90);
+        var acRoc2 = isClimb ? (ac.rocClimb ?? 500) : (ac.rodDescent ?? 500);
+        var legRes2 = calcLeg(cpTo.tc ?? 0, 1, acTas2, wDir2, wVel2, variation, 0);
+        var gsPhase2 = Math.max(1, legRes2.gs);
+        var climbDistNM2 = gsPhase2 * (altDiff / acRoc2) / 60;
+
+        if (climbDistNM2 > totalSegDist) {
+          altWarnings[si] = (isClimb ? 'Subida' : 'Descida') + ' para ' + segToAlt +
+            ' ft impossível: precisa ' + climbDistNM2.toFixed(0) +
+            ' NM mas disponível ' + totalSegDist.toFixed(0) + ' NM';
+        }
+
+        // Assign intermediate altitudes proportionally
+        if (si > lastAnchorIdx + 1) {
+          var distFromSeg = 0;
+          for (var ij = lastAnchorIdx + 1; ij < si; ij++) {
+            distFromSeg += (cps[ij].dist ?? 0);
+            profile[ij] = (climbDistNM2 > 0 && distFromSeg < climbDistNM2)
+              ? Math.round(segFromAlt + (distFromSeg / climbDistNM2) * (segToAlt - segFromAlt))
+              : segToAlt;
+          }
+        }
+      } else {
+        // Zero-distance segment — just fill at previous altitude
+        for (var fj = lastAnchorIdx + 1; fj < si; fj++) profile[fj] = segFromAlt;
+      }
+    } else {
+      // Level segment — fill intermediates at same altitude
+      for (var lj = lastAnchorIdx + 1; lj < si; lj++) profile[lj] = segFromAlt;
+    }
+
+    lastAnchorIdx = si;
+    lastAnchorAlt = segToAlt;
+  }
+
+  // Trailing waypoints after the last anchor inherit its altitude
+  for (var ri = lastAnchorIdx + 1; ri < n; ri++) profile[ri] = lastAnchorAlt;
+
+  return { profile: profile, altWarnings: altWarnings };
+}
 
 // Derive TOC/TOD annotation string from a computed checkpoint's portions
 // Returns null if single-phase, e.g. "TOC +23nm" or "TOD +40nm" or "TOC +5nm · TOD +80nm"
@@ -618,6 +713,11 @@ function NavlogApp() {
       return cp;
     });
 
+    // Resolve altitude profile — handles inherited altitudes and multi-leg climbs
+    var _altRes = resolveAltitudeProfile(resolvedCps, ac, flight);
+    var altProfile     = _altRes.profile;
+    var altProfileWarn = _altRes.altWarnings;
+
     const eobtMin = parseHHMM(flight.eobt) ?? 0;
     const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
     let etaPlanned = eobtMin;
@@ -626,7 +726,7 @@ function NavlogApp() {
     let cumTime = 0;
     var _res = resolvedCps.map((cp, i) => {
       if (cp.isOrigin) {
-        const originAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? 0);
+        const originAlt = altProfile[i];
         return {
           ...cp,
           alt: originAlt,
@@ -644,10 +744,9 @@ function NavlogApp() {
         };
       }
 
-      // Altitude-per-fix: get prev fix altitude (resolve useCruiseAlt)
-      const prevCp = resolvedCps[i - 1];
-      const prevAlt = prevCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (prevCp?.alt ?? 0);
-      const thisAlt = cp.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (cp.alt ?? flight.cruiseAlt ?? 7000);
+      // Altitude-per-fix: use pre-resolved profile (handles inherited / multi-leg climbs)
+      const prevAlt = altProfile[i - 1];
+      const thisAlt = altProfile[i];
 
       // Vento: windMode = null/undefined → padrão da rota
       //                   "none"          → sem vento (vel=0)
@@ -711,7 +810,7 @@ function NavlogApp() {
         windDirUsed: wDir,
         windVelUsed: wVel,
         windOverride: cp.windMode === "none" || cp.windMode === "custom",
-        warnings: validateLeg(cp, { gs: totalGS }),
+        warnings: [...validateLeg(cp, { gs: totalGS }), ...(altProfileWarn[i] ? [altProfileWarn[i]] : [])],
         notes: cp.notes || "",
       };
     });
@@ -1946,6 +2045,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
         var _proj = projectDest(_editPrev.lat, _editPrev.lon, _editCp.tc, _editCp.dist);
         cps[_editIdx] = Object.assign({}, cps[_editIdx], { lat: _proj[0], lon: _proj[1] });
       }
+      // Pass 1b — if edited WP now has a position, project the NEXT WP if it has no position but has TC+dist.
+      var _editCpAfter = cps[_editIdx];
+      var _nextIdx = _editIdx + 1;
+      if (_nextIdx < cps.length && _editCpAfter.lat != null && _editCpAfter.lon != null) {
+        var _nextCp = cps[_nextIdx];
+        if (_nextCp.lat == null && _nextCp.tc != null && (_nextCp.dist ?? 0) > 0) {
+          var _projNext = projectDest(_editCpAfter.lat, _editCpAfter.lon, _nextCp.tc, _nextCp.dist);
+          cps[_nextIdx] = Object.assign({}, cps[_nextIdx], { lat: _projNext[0], lon: _projNext[1] });
+        }
+      }
       // Pass 2 — recompute TC and dist for every consecutive pair with known coords.
       // Now covers all waypoints since Pass 1 filled in projected positions.
       for (var _i = 1; _i < cps.length; _i++) {
@@ -2035,7 +2144,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
               ? (flight.cruiseAlt ?? 7000)
               : (prevCpForAlt?.alt ?? null);
             return (
-              <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} prevAlt={prevAltForStep} theme={theme} onNext={next} />
+              <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} prevAlt={prevAltForStep} isOrigin={isOrigin} theme={theme} onNext={next} />
             );
           })()}
           {step === "tcdist" && (
@@ -2265,9 +2374,9 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme }) {
     const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
     if (wps.length > 0) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.8, dashArray: '5,5' }).addTo(map);
+      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.8, dashArray: '5,5' }).addTo(map);
       wps.forEach(cp => {
-        const html = `<div style="background:#f59e0b;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
+        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
         const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
         window.L.marker([cp.lat, cp.lon], { icon }).addTo(map).bindPopup(cp.name || '');
       });
@@ -2407,16 +2516,38 @@ function StepNome({ cp, setCp, theme, onNext }) {
 }
 
 // -------- PASSO: ALTITUDE --------
-function StepAlt({ cp, setCp, cruiseAlt, prevAlt, theme, onNext }) {
+function StepAlt({ cp, setCp, cruiseAlt, prevAlt, isOrigin, theme, onNext }) {
   const useCruise = cp.useCruiseAlt ?? false;
+  // "inherit" = no explicit altitude, no cruise flag → use previous anchor
+  const useInherit = !useCruise && cp.alt == null && !isOrigin;
 
   function toggleCruise() {
     const next = !useCruise;
     setCp((p) => ({ ...p, useCruiseAlt: next, alt: next ? cruiseAlt : p.alt }));
   }
+  function setInherit() {
+    setCp((p) => ({ ...p, alt: null, useCruiseAlt: false }));
+    onNext();
+  }
 
   return (
     <div className="space-y-3">
+      {/* Herdar altitude — only for non-origin waypoints */}
+      {!isOrigin && (
+        <button onClick={setInherit}
+          className={`w-full flex items-center justify-between px-4 py-3 border-2 rounded-xl transition-colors ${
+            useInherit ? `${theme.accentBorder} bg-violet-500/10` : `${theme.panelBorder} ${theme.panel}`
+          }`}>
+          <div className="text-left">
+            <div className={`text-sm font-bold ${useInherit ? theme.accent : theme.fgMuted}`}>Herdar altitude</div>
+            <div className={`text-[10px] ${theme.fgFaint}`}>Usa a altitude do segmento anterior</div>
+          </div>
+          <div className={`text-2xl font-black num cockpit-glow ${useInherit ? theme.accent : theme.fgFaint}`}>
+            {prevAlt != null ? `${prevAlt} ft` : "—"}
+          </div>
+        </button>
+      )}
+
       {/* Toggle: usar altitude de cruzeiro */}
       <button onClick={toggleCruise}
         className={`w-full flex items-center justify-between px-4 py-3 border-2 rounded-xl transition-colors ${
@@ -3044,7 +3175,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
   const rows = [
     { label: "Nome", value: cp.name || "—", step: "nome" },
     { label: isOrigin ? "Alt. de partida" : "Altitude Alvo", value: (() => {
-        const altStr = cp.useCruiseAlt ? `CRZ (${cruiseAlt} ft)` : (cp.alt != null ? `${cp.alt} ft` : "—");
+        const altStr = cp.useCruiseAlt ? `CRZ (${cruiseAlt} ft)` : (cp.alt != null ? `${cp.alt} ft` : (!isOrigin ? "Herdar" : "—"));
         const modeStr = cp.arrivalMode === "asap" ? " · ASAP"
           : cp.arrivalMode === "at_fix" ? " · no fix"
           : cp.arrivalMode === "before_nm" ? ` · −${cp.arrivalValue ?? 5} NM`
@@ -4662,12 +4793,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
 
     // Route polyline through user waypoints
     const coords = userWps.map(cp => [cp.lat, cp.lon]);
-    ov.route = window.L.polyline(coords, { color: '#f59e0b', weight: 2.5, opacity: 0.9 }).addTo(map);
+    ov.route = window.L.polyline(coords, { color: '#a855f7', weight: 2.5, opacity: 0.9 }).addTo(map);
     map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
-      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#f59e0b';
+      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#a855f7';
       const label = cp.name?.slice(0,4) ?? String(i);
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
       const etaStr = liveETAs[cp.userIdx] != null
