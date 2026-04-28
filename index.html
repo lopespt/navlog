@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1659";
+const APP_VERSION = "20260428.1710";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -727,6 +727,22 @@ async function airacAirport(icao) {
     const d = _normalizeCoords(j.data);
     _airacCacheSet("ap_" + code, d, 14 * 86_400_000);
     return d;
+  } catch (_) { return null; }
+}
+
+async function airacProcedures(icao) {
+  if (!icao) return null;
+  const code = String(icao).toUpperCase().trim();
+  if (!/^[A-Z0-9]{3,4}$/.test(code)) return null;
+  const cached = _airacCacheGet("proc_" + code);
+  if (cached) return cached;
+  try {
+    const r = await fetch(AIRAC_BASE + "/airports/" + code + "/procedures", { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.status !== "success" || !j.data) return null;
+    _airacCacheSet("proc_" + code, j.data, 14 * 86_400_000);
+    return j.data;
   } catch (_) { return null; }
 }
 
@@ -3405,8 +3421,9 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
 }
 
 // --------- SEÇÃO DE FREQUÊNCIAS ---------
-function FreqsSection({ flight, setFlight, theme }) {
+function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
   const [open, setOpen] = useState(false);
+  const [proceduresIcao, setProceduresIcao] = useState(null);
   const setFreq = (which, key, val) => {
     const freqs = { ...(flight.freqs || {}), [which]: { ...(flight.freqs?.[which] || {}), [key]: val } };
     setFlight({ ...flight, freqs });
@@ -3426,28 +3443,176 @@ function FreqsSection({ flight, setFlight, theme }) {
             ["origin", flight.origin || "Origem"],
             ["destination", flight.destination || "Destino"],
             ["alternate", flight.alternate || "Alternado"],
-          ].map(([which, label]) => (
-            <div key={which} className={`${theme.panel} border ${theme.panelBorder} rounded p-2`}>
-              <div className={`text-xs font-bold ${theme.accent} mb-1.5`}>{label}</div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  ["atis", "ATIS"], ["ground", "Ground"], ["tower", "Tower"],
-                  ["approach", "App/Dep"], ["ctaf", "CTAF"], ["unicom", "UNICOM"],
-                  ["elev", "Elev (ft)"],
-                ].map(([k, l]) => (
-                  <div key={k}>
-                    <label className={`text-[9px] uppercase ${theme.fgFaint} block`}>{l}</label>
-                    <input className={fieldClass}
-                      value={flight.freqs?.[which]?.[k] || ""}
-                      onChange={(e) => setFreq(which, k, e.target.value)} />
-                  </div>
-                ))}
+          ].map(([which, label]) => {
+            const icao = flight[which];
+            const isIcao = icao && /^[A-Z0-9]{4}$/.test(String(icao).toUpperCase());
+            return (
+              <div key={which} className={`${theme.panel} border ${theme.panelBorder} rounded p-2`}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className={`text-xs font-bold ${theme.accent}`}>{label}</div>
+                  {isIcao && (
+                    <div className="flex items-center gap-1">
+                      <button type="button"
+                        onClick={() => onRefreshFreqs && onRefreshFreqs(which, true)}
+                        title="Buscar do AIRAC (sobrescreve)"
+                        className={`text-[9px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+                        ↻ AIRAC
+                      </button>
+                      <button type="button"
+                        onClick={() => setProceduresIcao(String(icao).toUpperCase())}
+                        title="Ver SID / STAR / Approach"
+                        className={`text-[9px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+                        📋 Procs
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    ["atis", "ATIS"], ["ground", "Ground"], ["tower", "Tower"],
+                    ["approach", "App/Dep"], ["ctaf", "CTAF"], ["unicom", "UNICOM"],
+                    ["elev", "Elev (ft)"],
+                  ].map(([k, l]) => (
+                    <div key={k}>
+                      <label className={`text-[9px] uppercase ${theme.fgFaint} block`}>{l}</label>
+                      <input className={fieldClass}
+                        value={flight.freqs?.[which]?.[k] || ""}
+                        onChange={(e) => setFreq(which, k, e.target.value)} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+      {proceduresIcao && (
+        <ProceduresPanel icao={proceduresIcao} theme={theme} onClose={() => setProceduresIcao(null)} />
+      )}
     </section>
+  );
+}
+
+function ProceduresPanel({ icao, theme, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all"); // all | sid | star | approach
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setErr(null); setData(null);
+    airacProcedures(icao).then(d => {
+      if (cancelled) return;
+      if (!d) { setErr("Sem dados ou falha na API"); setLoading(false); return; }
+      setData(d); setLoading(false);
+    }).catch(e => { if (!cancelled) { setErr(e.message || String(e)); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [icao]);
+
+  // Defensive normalization: try common shapes that AIRAC.net might use.
+  const groups = (function() {
+    if (!data) return null;
+    var sids, stars, apps;
+    if (Array.isArray(data)) {
+      var arr = data;
+      sids  = arr.filter(p => /sid/i.test(p.type || p.kind || p.category || ""));
+      stars = arr.filter(p => /star/i.test(p.type || p.kind || p.category || ""));
+      apps  = arr.filter(p => /(app|approach|iap)/i.test(p.type || p.kind || p.category || ""));
+      var rest = arr.filter(p => !sids.includes(p) && !stars.includes(p) && !apps.includes(p));
+      return { sids: sids, stars: stars, approaches: apps, other: rest };
+    }
+    if (typeof data === "object") {
+      sids = data.sids || data.SIDs || data.departures || [];
+      stars = data.stars || data.STARs || data.arrivals || [];
+      apps = data.approaches || data.iaps || data.approach || [];
+      return { sids: sids, stars: stars, approaches: apps, other: [] };
+    }
+    return null;
+  })();
+
+  function renderList(list, kind) {
+    if (!list || !list.length) return <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} px-2 py-1`}>—</div>;
+    return (
+      <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden divide-y ${theme.panelBorder}`}>
+        {list.map((p, i) => {
+          const name = p.name || p.identifier || p.ident || p.id || ("Item " + (i + 1));
+          const rwy  = p.runway || p.runway_identifier || p.rwy || "";
+          const trans = p.transition || p.transition_identifier || "";
+          const sub = [rwy && ("RWY " + rwy), trans && ("TRANS " + trans)].filter(Boolean).join(" · ");
+          return (
+            <div key={i} className="px-3 py-2 flex items-center gap-2">
+              <span className={`text-[10px] font-bold w-12 shrink-0 ${theme.cyan}`}>{kind}</span>
+              <div className="flex-1 min-w-0">
+                <div className={`font-bold truncate ${theme.fg}`}>{name}</div>
+                {sub && <div className={`text-[10px] truncate ${theme.fgFaint}`}>{sub}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", isolation: "isolate" }}
+      className={theme.bg}>
+      <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
+        <button onClick={onClose}
+          className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
+          Fechar
+        </button>
+        <div className="flex-1 text-center">
+          <div className={`text-sm font-bold ${theme.cyan}`}>Procedures · {icao}</div>
+        </div>
+        <div style={{ width: 80 }} />
+      </div>
+      <div className={`flex shrink-0 border-b ${theme.panelBorder} overflow-x-auto`}>
+        {[["all", "Todos"], ["sid", "SIDs"], ["star", "STARs"], ["approach", "Approaches"]].map(([key, label]) => (
+          <button key={key} onClick={() => setFilter(key)}
+            className={`flex-1 min-w-[64px] py-3 text-[10px] font-bold uppercase tracking-wider ${filter === key ? theme.accent + " border-b-2 border-current" : theme.fgFaint}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {loading && <div className={`text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>A carregar…</div>}
+        {err && <div className={`text-center text-xs text-red-400`}>⚠ {err}</div>}
+        {groups && (filter === "all" || filter === "sid") && groups.sids.length > 0 && (
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>SID — saídas instrumentais ({groups.sids.length})</div>
+            {renderList(groups.sids, "SID")}
+          </div>
+        )}
+        {groups && (filter === "all" || filter === "star") && groups.stars.length > 0 && (
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>STAR — chegadas ({groups.stars.length})</div>
+            {renderList(groups.stars, "STAR")}
+          </div>
+        )}
+        {groups && (filter === "all" || filter === "approach") && groups.approaches.length > 0 && (
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>Approach ({groups.approaches.length})</div>
+            {renderList(groups.approaches, "APP")}
+          </div>
+        )}
+        {groups && filter === "all" && groups.other.length > 0 && (
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>Outros ({groups.other.length})</div>
+            {renderList(groups.other, "?")}
+          </div>
+        )}
+        {data && groups && groups.sids.length + groups.stars.length + groups.approaches.length + groups.other.length === 0 && (
+          <div className={`text-center text-[11px] ${theme.fgFaint}`}>Sem procedimentos publicados para {icao}.</div>
+        )}
+        {data && (
+          <details className={`${theme.panel} border ${theme.panelBorder} rounded p-2`}>
+            <summary className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} cursor-pointer`}>JSON bruto da API</summary>
+            <pre className={`text-[10px] num ${theme.fgFaint} mt-2 overflow-x-auto`} style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(data, null, 2)}</pre>
+          </details>
+        )}
+      </div>
+    </div>
   );
 }
 
