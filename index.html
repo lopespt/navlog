@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1113";
+const APP_VERSION = "20260428.1131";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -333,24 +333,19 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
       ];
     } else {
       // before_nm / before_min: cruise → climb → cruise(buffer)
-      const beforeNm = mode === "before_nm"
+      const wantBefore = mode === "before_nm"
         ? (cp.arrivalValue ?? 5)
         : (cp.arrivalValue ?? 5) * gsCruise / 60;
-      const cruiseFirst = dist - climbDist - beforeNm;
-      if (cruiseFirst <= 0.1) {
-        const cruiseDist = dist - climbDist;
-        const cruiseTime = cruiseDist / gsCruise * 60;
-        portions = [
-          { phase: "SUBIDA",   dist: climbDist,  tas: tasClimb,  gph: gphC, timeMin: climbTimeMin },
-          { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise, gph: gphR, timeMin: cruiseTime   },
-        ];
-      } else {
-        portions = [
-          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise, gph: gphR, timeMin: cruiseFirst / gsCruise * 60 },
-          { phase: "SUBIDA",   dist: climbDist,   tas: tasClimb,  gph: gphC, timeMin: climbTimeMin               },
-          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruise, gph: gphR, timeMin: beforeNm / gsCruise * 60   },
-        ];
-      }
+      // Best-effort: shrink the buffer if the leg can't fit the full request.
+      const safeBefore = Math.max(0, Math.min(wantBefore, dist - climbDist));
+      const cruiseFirst = Math.max(0, dist - climbDist - safeBefore);
+      // Always emit the 3-portion structure so BOC is recorded; either side may
+      // collapse to dist=0 / time=0 when the leg is too short to honour the full intent.
+      portions = [
+        { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise, gph: gphR, timeMin: cruiseFirst > 0 ? cruiseFirst / gsCruise * 60 : 0 },
+        { phase: "SUBIDA",   dist: climbDist,   tas: tasClimb,  gph: gphC, timeMin: climbTimeMin },
+        { phase: "CRUZEIRO", dist: safeBefore,  tas: tasCruise, gph: gphR, timeMin: safeBefore > 0 ? safeBefore / gsCruise * 60 : 0 },
+      ];
     }
   } else if (altDiff < -50) { // descending
     // Descent time fixed by physics: altitude loss / descent rate
@@ -379,24 +374,16 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
       ];
     } else {
       // before_nm / before_min: cruise → descent → cruise(buffer)
-      const beforeNm = mode === "before_nm"
+      const wantBefore = mode === "before_nm"
         ? (cp.arrivalValue ?? 5)
         : (cp.arrivalValue ?? 5) * gsCruiseLow / 60;
-      const cruiseFirst = dist - descDist - beforeNm;
-      if (cruiseFirst <= 0.1) {
-        const cruiseDist = dist - descDist;
-        const cruiseTime = cruiseDist / gsCruise * 60;
-        portions = [
-          { phase: "CRUZEIRO", dist: cruiseDist, tas: tasCruise,  gph: gphR, timeMin: cruiseTime    },
-          { phase: "DESCIDA",  dist: descDist,   tas: tasDescent, gph: gphD, timeMin: descentTimeMin },
-        ];
-      } else {
-        portions = [
-          { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise,    gph: gphR, timeMin: cruiseFirst / gsCruise * 60    },
-          { phase: "DESCIDA",  dist: descDist,    tas: tasDescent,   gph: gphD, timeMin: descentTimeMin                 },
-          { phase: "CRUZEIRO", dist: beforeNm,    tas: tasCruiseLow, gph: gphR, timeMin: beforeNm / gsCruiseLow * 60   },
-        ];
-      }
+      const safeBefore = Math.max(0, Math.min(wantBefore, dist - descDist));
+      const cruiseFirst = Math.max(0, dist - descDist - safeBefore);
+      portions = [
+        { phase: "CRUZEIRO", dist: cruiseFirst, tas: tasCruise,    gph: gphR, timeMin: cruiseFirst > 0 ? cruiseFirst / gsCruise * 60    : 0 },
+        { phase: "DESCIDA",  dist: descDist,    tas: tasDescent,   gph: gphD, timeMin: descentTimeMin                 },
+        { phase: "CRUZEIRO", dist: safeBefore,  tas: tasCruiseLow, gph: gphR, timeMin: safeBefore > 0 ? safeBefore / gsCruiseLow * 60 : 0 },
+      ];
     }
   } else { // level
     const t = gsCruise > 0 ? dist / gsCruise * 60 : 0;
@@ -2479,6 +2466,41 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                       className={`w-12 h-12 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
                   </div>
                 )}
+                {(function() {
+                  // Plan preview: shows actual phase distribution given the leg length and aircraft.
+                  var distLeg = Number(cp.dist);
+                  if (!distLeg || distLeg <= 0) return null;
+                  var altDiff = Math.abs((currentAlt ?? 0) - (prevAlt ?? 0));
+                  if (altDiff <= 50) return null;
+                  var roc = (ac && ac.rocClimb) || 500;
+                  var rod = (ac && ac.rodDescent) || 500;
+                  var vy  = (ac && ac.vy) || 80;
+                  var vd  = (ac && ac.vDescent) || 120;
+                  var tasCr = (ac && ac.tasCruise) || 120;
+                  var phaseTime = altDiff / (isClimbing ? roc : rod);
+                  var phaseDist = (isClimbing ? vy : vd) * phaseTime / 60;
+                  var effMode = arrivalMode || contextDefault;
+                  var wantBefore;
+                  if (effMode === "before_nm") wantBefore = arrivalValue;
+                  else if (effMode === "before_min") wantBefore = arrivalValue * tasCr / 60;
+                  else if (effMode === "at_fix") wantBefore = 0;
+                  else wantBefore = Math.max(0, distLeg - phaseDist); // asap = level after climb, buffer = leftover
+                  var safeBefore = Math.max(0, Math.min(wantBefore, distLeg - phaseDist));
+                  var cruiseFirst = Math.max(0, distLeg - phaseDist - safeBefore);
+                  var feasible = safeBefore >= wantBefore - 0.1;
+                  var fmt = function(n) { return n < 10 ? n.toFixed(1) : Math.round(n).toString(); };
+                  var phaseLbl = isClimbing ? "subida" : "descida";
+                  return (
+                    <div className={`mt-2 text-[10px] leading-snug ${feasible || effMode === "asap" || effMode === "at_fix" ? theme.fgFaint : "text-red-400"}`}>
+                      {!feasible && (effMode === "before_nm" || effMode === "before_min") && (
+                        <div className="font-bold mb-0.5">⚠ Perna curta: buffer reduzido para {fmt(safeBefore)} NM</div>
+                      )}
+                      <div className="num">
+                        Plano: {fmt(cruiseFirst)} NM cruzeiro · {fmt(phaseDist)} NM {phaseLbl} · {fmt(safeBefore)} NM cruzeiro
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
