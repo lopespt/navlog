@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260427.2357";
+const APP_VERSION = "20260428.0005";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1883,7 +1883,7 @@ function Stat({ label, value, theme }) {
 // WAYPOINT EDITOR — wizard em passos com teclados especializados
 // =========================================================================
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
-const WP_STEPS = ["nome", "coord", "alt", "tc", "dist", "vento", "override", "resumo"];
+const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
 function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
   const isNew = editingIdx == null;
@@ -1914,7 +1914,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     ? ["nome", "coord", "alt", "resumo"]
     : bothEndsHaveCoords
       ? ["nome", "coord", "alt", "vento", "override", "resumo"]
-      : WP_STEPS;
+      : WP_STEPS; // includes "tcdist"
   // Keep step valid if it disappears from the list after coord entry
   const steps = stepsBase;
   React.useEffect(() => {
@@ -1946,16 +1946,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
       } else {
         cps[editingIdx] = { ...saved };
       }
-      // Pass 1 — project lat/lon from TC+dist for waypoints without coords.
-      // Runs first so that projected positions are available for the TC recompute below.
-      // Cascades naturally: each projected position enables the next.
-      for (var _j = 1; _j < cps.length; _j++) {
-        var _pj = cps[_j - 1], _cj = cps[_j];
-        if (_cj.lat == null && _pj.lat != null && _pj.lon != null
-            && _cj.tc != null && (_cj.dist ?? 0) > 0) {
-          var _proj = projectDest(_pj.lat, _pj.lon, _cj.tc, _cj.dist);
-          cps[_j] = Object.assign({}, cps[_j], { lat: _proj[0], lon: _proj[1], coordFromTC: true });
-        }
+      // Pass 1 — project lat/lon from TC+dist for the edited waypoint only.
+      // Source of truth is always the stored position; following waypoints are never touched.
+      var _editIdx = isNew ? cps.length - 1 : editingIdx;
+      var _editCp = cps[_editIdx];
+      var _editPrev = _editIdx > 0 ? cps[_editIdx - 1] : null;
+      if (_editCp != null && _editCp.lat == null
+          && _editPrev != null && _editPrev.lat != null && _editPrev.lon != null
+          && _editCp.tc != null && (_editCp.dist ?? 0) > 0) {
+        var _proj = projectDest(_editPrev.lat, _editPrev.lon, _editCp.tc, _editCp.dist);
+        cps[_editIdx] = Object.assign({}, cps[_editIdx], { lat: _proj[0], lon: _proj[1] });
       }
       // Pass 2 — recompute TC and dist for every consecutive pair with known coords.
       // Now covers all waypoints since Pass 1 filled in projected positions.
@@ -2000,7 +2000,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
                     ? `${theme.accent} border-b-2 border-current`
                     : `${theme.fgFaint} hover:${theme.fgMuted}`
                 }`}>
-                {s === "tc" ? "TC/MH" : s === "override" ? "PERF" : s}
+                {s === "tcdist" ? "TC/DIST" : s === "override" ? "PERF" : s}
               </button>
             ))}
             <div className="flex-1" />
@@ -2049,25 +2049,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
               <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} prevAlt={prevAltForStep} theme={theme} onNext={next} />
             );
           })()}
-          {step === "tc" && (
-            <StepTC
+          {step === "tcdist" && (
+            <StepTCDist
               theme={theme}
               variation={flight.variation ?? 0}
-              initial={cp.tc}
-              onConfirm={(v) => { setCp({ ...cp, tc: v }); next(); }}
-            />
-          )}
-          {step === "dist" && (
-            <StepNumerico
-              theme={theme}
-              label="Distância"
-              unit="NM"
-              hint="0 – 999"
-              maxDigits={5}
-              allowDecimal={true}
-              validate={(v) => v >= 0 && v < 10000}
-              initial={cp.dist != null ? String(cp.dist) : ""}
-              onConfirm={(v) => { setCp({ ...cp, dist: Number(v) }); next(); }}
+              cp={cp}
+              setCp={setCp}
+              onNext={next}
             />
           )}
           {step === "vento" && (
@@ -2204,8 +2192,7 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext, allWps }) {
 
   function confirm() {
     if (!isValid) return;
-    // Explicit coord entry clears coordFromTC — user-placed position takes over
-    const updates = { lat: latVal, lon: lonVal, coordFromTC: false };
+    const updates = { lat: latVal, lon: lonVal };
     if (prevCp?.lat != null && prevCp?.lon != null) {
       updates.tc   = Math.round(gcTC(prevCp.lat, prevCp.lon, latVal, lonVal));
       updates.dist = Math.round(gcDist(prevCp.lat, prevCp.lon, latVal, lonVal) * 10) / 10;
@@ -2474,6 +2461,143 @@ function StepAlt({ cp, setCp, cruiseAlt, prevAlt, theme, onNext }) {
           onConfirm={(v) => { setCp((p) => ({ ...p, alt: Number(v), useCruiseAlt: false })); onNext(); }}
         />
       )}
+    </div>
+  );
+}
+
+// -------- PASSO: TC/MC + DISTÂNCIA (combinado) --------
+function StepTCDist({ theme, variation, cp, setCp, onNext }) {
+  const mod360 = (x) => ((x % 360) + 360) % 360;
+  const [field, setField] = useState("tc"); // "tc" | "dist"
+  const [tcMode, setTcMode] = useState("mh"); // "tc" | "mh"
+
+  const initialTCDisplay = cp.tc != null
+    ? String(Math.round(mod360(cp.tc - (variation ?? 0))))
+    : "";
+  const [tcDigits, setTcDigits] = useState(initialTCDisplay);
+  const [distDigits, setDistDigits] = useState(cp.dist != null ? String(cp.dist) : "");
+
+  const tcNum = parseFloat(tcDigits);
+  const tcInputValid = tcDigits !== "" && !isNaN(tcNum) && tcNum >= 0 && tcNum <= 359;
+  const tcVal = tcInputValid ? (tcMode === "mh" ? mod360(tcNum + (variation ?? 0)) : tcNum) : null;
+
+  const distNum = parseFloat(distDigits);
+  const distValid = distDigits !== "" && !isNaN(distNum) && distNum > 0 && distNum < 10000;
+  const distVal = distValid ? distNum : null;
+
+  function press(ch) {
+    if (field === "tc") {
+      if (ch === ".") return;
+      setTcDigits(p => p.length < 3 ? p + ch : p);
+    } else {
+      if (ch === "." && distDigits.includes(".")) return;
+      const next = distDigits + ch;
+      if (next.replace(".", "").length <= 5) setDistDigits(next);
+    }
+  }
+  function del() {
+    if (field === "tc") setTcDigits(p => p.slice(0, -1));
+    else setDistDigits(p => p.slice(0, -1));
+  }
+  function clear() {
+    if (field === "tc") setTcDigits("");
+    else setDistDigits("");
+  }
+
+  function confirm() {
+    const updates = {};
+    if (tcVal != null) updates.tc = Math.round(tcVal);
+    if (distVal != null) updates.dist = distVal;
+    setCp(p => ({ ...p, ...updates }));
+    onNext();
+  }
+
+  const canConfirm = tcVal != null || distVal != null;
+  const keyBase = `${theme.panel} border ${theme.panelBorder} rounded-xl flex items-center justify-center font-bold text-xl active:scale-95 transition-transform select-none`;
+  const numRows = [["7","8","9"],["4","5","6"],["1","2","3"]];
+
+  return (
+    <div className="space-y-3">
+      {/* TC/MC mode toggle */}
+      <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder}`}>
+        {[["mh","MC (Mag. Course)"],["tc","TC (True Course)"]].map(([m, label]) => (
+          <button key={m} onClick={() => {
+              setTcMode(m);
+              setTcDigits(prev => {
+                const v = parseFloat(prev);
+                if (isNaN(v)) return "";
+                if (m === "mh" && tcMode === "tc") return String(Math.round(mod360(v - (variation ?? 0))));
+                if (m === "tc" && tcMode === "mh") return String(Math.round(mod360(v + (variation ?? 0))));
+                return prev;
+              });
+            }}
+            className={`flex-1 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+              tcMode === m ? `${theme.accentBg} text-black` : theme.fgFaint
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Two fields */}
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => setField("tc")}
+          className={`${theme.panel} border-2 ${field === "tc" ? theme.accentBorder : theme.panelBorder} rounded-xl px-3 py-3 flex flex-col items-center gap-0.5`}>
+          <div className={`text-[9px] uppercase tracking-widest ${field === "tc" ? theme.accent : theme.fgFaint}`}>
+            {tcMode === "mh" ? "MC" : "TC"}
+          </div>
+          <div className={`text-3xl font-black num ${field === "tc" ? (tcInputValid ? theme.accent : "text-red-400") : (tcInputValid ? theme.fg : theme.fgFaint)}`}>
+            {tcDigits || "—"}°
+          </div>
+          {tcMode === "mh" && tcVal != null && (
+            <div className={`text-[10px] ${theme.fgFaint}`}>TC {String(Math.round(tcVal)).padStart(3,"0")}°</div>
+          )}
+        </button>
+
+        <button onClick={() => setField("dist")}
+          className={`${theme.panel} border-2 ${field === "dist" ? theme.accentBorder : theme.panelBorder} rounded-xl px-3 py-3 flex flex-col items-center gap-0.5`}>
+          <div className={`text-[9px] uppercase tracking-widest ${field === "dist" ? theme.accent : theme.fgFaint}`}>
+            DIST
+          </div>
+          <div className={`text-3xl font-black num ${field === "dist" ? (distValid ? theme.accent : "text-red-400") : (distValid ? theme.fg : theme.fgFaint)}`}>
+            {distDigits || "—"}
+          </div>
+          <div className={`text-[10px] ${theme.fgFaint}`}>NM</div>
+        </button>
+      </div>
+
+      {/* Numpad */}
+      <div className="space-y-1.5">
+        {numRows.map((row, ri) => (
+          <div key={ri} className="grid grid-cols-3 gap-1.5">
+            {row.map(n => (
+              <button key={n} onClick={() => press(n)} className={`${keyBase} py-3.5 ${theme.fg}`}>{n}</button>
+            ))}
+          </div>
+        ))}
+        <div className="grid grid-cols-4 gap-1.5">
+          <button onClick={clear} className={`${keyBase} py-3.5 text-sm ${theme.fgMuted}`}>CLR</button>
+          <button onClick={() => press("0")} className={`${keyBase} py-3.5 ${theme.fg}`}>0</button>
+          <button onClick={() => press(".")}
+            className={`${keyBase} py-3.5 ${field === "dist" ? theme.fg : `${theme.fgFaint} opacity-30`}`}>.</button>
+          <button onClick={del} className={`${keyBase} py-3.5 ${theme.fgMuted}`}>
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={onNext}
+          className={`py-3 rounded-xl border ${theme.panelBorder} ${theme.fgFaint} font-bold text-sm`}>
+          Pular →
+        </button>
+        <button onClick={confirm} disabled={!canConfirm}
+          className={`py-3 rounded-xl font-bold text-sm ${
+            canConfirm ? `${theme.accentBg} text-black` : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Confirmar →
+        </button>
+      </div>
     </div>
   );
 }
@@ -2942,12 +3066,15 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
       })(), step: "alt" },
     ...(!isOrigin ? [
       cp.lat != null ? { label: "Coordenadas", value: formatCoord(cp.lat, cp.lon) ?? "—", step: "coord" } : null,
-      { label: "TC / MH", value: cp.tc != null ? (() => {
-          const tc = Math.round(cp.tc);
-          const mh = Math.round(((cp.tc - (variation ?? 0)) % 360 + 360) % 360);
-          return `TC ${String(tc).padStart(3,"0")}° · MH ${String(mh).padStart(3,"0")}°`;
-        })() : "—", step: "tc", derived: coordDerived },
-      { label: "Distância", value: cp.dist != null ? `${cp.dist} NM` : "—", step: "dist", derived: coordDerived },
+      { label: "TC / MC · Distância", value: (() => {
+          const tcStr = cp.tc != null ? (() => {
+            const tc = Math.round(cp.tc);
+            const mc = Math.round(((cp.tc - (variation ?? 0)) % 360 + 360) % 360);
+            return `TC ${String(tc).padStart(3,"0")}° MC ${String(mc).padStart(3,"0")}°`;
+          })() : "TC —";
+          const distStr = cp.dist != null ? `${cp.dist} NM` : "— NM";
+          return `${tcStr} · ${distStr}`;
+        })(), step: "tcdist", derived: coordDerived },
       { label: "Vento",         value: windLabel,                                                 step: "vento"},
       { label: "Performance",   value: overrideValue,                                             step: "override" },
     ] : []),
@@ -4552,7 +4679,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
-      const color = cp.isOrigin ? '#22c55e' : (cp.coordProjected || cp.coordFromTC) ? '#a78bfa' : '#f59e0b';
+      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#f59e0b';
       const label = cp.name?.slice(0,4) ?? String(i);
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
       const etaStr = liveETAs[cp.userIdx] != null
@@ -4637,7 +4764,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
         <div className={`ml-auto text-[10px] ${theme.fgFaint} flex items-center`}>
           {(() => {
           const total = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length;
-          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected&&!cp.coordFromTC).length;
+          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected).length;
           const proj = total - explicit;
           return total === 0 ? 'Adicione coordenadas nos waypoints'
             : proj > 0 ? `${explicit} coord · ${proj} projetado${proj>1?'s':''}`
