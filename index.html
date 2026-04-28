@@ -97,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0048";
+const APP_VERSION = "20260428.0054";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4829,29 +4829,38 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const flightRef = useRef(flight);
   useEffect(() => { flightRef.current = flight; }, [flight]);
 
+  // Stable ref to setMapClickMenu so touch handler doesn't close over stale state
+  const setMenuRef = useRef(null);
+  setMenuRef.current = setMapClickMenu;
+
   // Init Leaflet map once
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
+    const map = window.L.map(mapDivRef.current, {
+      zoomControl: true, attributionControl: true, tap: true, tapTolerance: 15
+    });
 
-    map.on('click', (e) => {
-      const lat = e.latlng.lat, lon = e.latlng.lng;
-      const cps = flightRef.current.checkpoints;
-      // Find the closest leg (consecutive pair with coords) to the clicked point
-      let bestIdx = null, bestDist = Infinity;
+    function handleMapTap(e) {
+      if (!e.latlng) return;
+      var lat = e.latlng.lat, lon = e.latlng.lng;
+      var cps = flightRef.current.checkpoints;
+      var bestIdx = null, bestDist = Infinity;
       for (var ci = 0; ci + 1 < cps.length; ci++) {
         var a = cps[ci], b = cps[ci + 1];
         if (a.lat == null || b.lat == null) continue;
         var d = ptSegDist(lat, lon, a.lat, a.lon, b.lat, b.lon);
         if (d < bestDist) { bestDist = d; bestIdx = ci; }
       }
-      // If only one WP exists (origin only) or no legs yet, insert after last
       if (bestIdx == null && cps.length > 0) bestIdx = cps.length - 1;
       if (bestIdx == null) return;
-      const afterName = cps[bestIdx]?.name || String(bestIdx);
-      const beforeName = cps[bestIdx + 1]?.name || null;
-      setMapClickMenu({ lat, lon, afterIdx: bestIdx, afterName, beforeName });
-    });
+      var afterName = cps[bestIdx]?.name || String(bestIdx);
+      var beforeName = cps[bestIdx + 1]?.name || null;
+      setMenuRef.current({ lat, lon, afterIdx: bestIdx, afterName, beforeName });
+    }
+
+    // Listen to both 'click' (desktop) and 'tap' (Leaflet's mobile touch emulation)
+    map.on('click', handleMapTap);
+    map.on('tap', handleMapTap);
 
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -5018,7 +5027,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       {/* Map click menu — add waypoint */}
       {mapClickMenu && (
         <div className={`absolute bottom-0 left-0 right-0 ${theme.panel} border-t ${theme.panelBorder} p-4 z-50`}
-          style={{ isolation: 'isolate' }}>
+          style={{ isolation: 'isolate' }}
+          onClick={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}>
           <div className={`text-[10px] ${theme.fgFaint} mb-1`}>
             {mapClickMenu.beforeName
               ? `Inserir entre ${mapClickMenu.afterName} → ${mapClickMenu.beforeName}`
