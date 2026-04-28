@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0530";
+const APP_VERSION = "20260428.0341";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2269,45 +2269,54 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               </button>
             </div>
             {altMode === "custom" && (function() {
-              function clamp(v) { return Math.max(0, Math.min(60000, v)); }
-              function snap100(v) { return Math.round(v / 100) * 100; }
+              function clamp(v) { return Math.max(0, Math.min(60000, Math.round(v))); }
               function setAlt(v) {
-                var n = clamp(snap100(v));
+                var n = clamp(v);
                 setCp(function(p) { return Object.assign({}, p, { alt: n, useCruiseAlt: false }); });
               }
-              function bump(d) {
-                var cur = cp.alt != null ? cp.alt : (cruiseAlt || 7000);
-                setAlt(cur + d);
-              }
-              function onPD(e) {
-                altDragRef.current = { active: true, startY: e.clientY, startVal: cp.alt != null ? cp.alt : (cruiseAlt || 7000) };
+              function onPD(e, step, pxPer) {
+                altDragRef.current = {
+                  active: true,
+                  startY: e.clientY,
+                  startVal: cp.alt != null ? cp.alt : (cruiseAlt || 7000),
+                  step: step,
+                  pxPer: pxPer
+                };
                 try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
               }
               function onPM(e) {
-                if (!altDragRef.current.active) return;
-                var dy = altDragRef.current.startY - e.clientY; // up = positive
-                setAlt(altDragRef.current.startVal + dy * 10);
+                var s = altDragRef.current;
+                if (!s.active) return;
+                var dy = s.startY - e.clientY; // up = positive
+                var inc = Math.round(dy / s.pxPer);
+                setAlt(s.startVal + inc * s.step);
               }
               function onPU() { altDragRef.current.active = false; }
-              var displayVal = cp.alt != null ? cp.alt : (cruiseAlt || 7000);
-              var stepBtn = "py-2.5 rounded-lg border text-xs font-bold active:scale-95 num";
+              var handleCls = "w-11 flex flex-col items-center justify-center select-none text-[10px] font-black uppercase tracking-wider active:scale-95 transition-transform";
               return (
-                <div className="space-y-2 mt-2">
-                  <div onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
-                    className={`flex items-baseline justify-center gap-2 py-5 rounded-xl border-2 ${theme.accentBorder} ${theme.panel} select-none cursor-ns-resize`}
-                    style={{ touchAction: "none" }}>
-                    <span className={`text-4xl font-black num cockpit-glow ${theme.accent}`}>{displayVal}</span>
-                    <span className={`text-sm ${theme.fgMuted}`}>ft</span>
-                  </div>
-                  <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} text-center`}>
-                    Arraste ↕ ou use os passos
-                  </div>
-                  <div className="grid grid-cols-4 gap-1">
-                    <button onClick={function() { bump(-1000); }} className={`${stepBtn} ${theme.panelBorder} ${theme.fg}`}>−1000</button>
-                    <button onClick={function() { bump(-100); }}  className={`${stepBtn} ${theme.panelBorder} ${theme.fg}`}>−100</button>
-                    <button onClick={function() { bump(100); }}   className={`${stepBtn} ${theme.panelBorder} ${theme.fg}`}>+100</button>
-                    <button onClick={function() { bump(1000); }}  className={`${stepBtn} ${theme.panelBorder} ${theme.fg}`}>+1000</button>
-                  </div>
+                <div className={`flex items-stretch ${theme.inputBg} border ${theme.inputBorder} rounded-xl overflow-hidden mt-2`}>
+                  <input type="number" inputMode="numeric" placeholder="7000" min="0" max="60000" step="100"
+                    value={cp.alt != null ? cp.alt : ""}
+                    onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { alt: e.target.value === "" ? null : Number(e.target.value), useCruiseAlt: false }); }); }}
+                    className={`flex-1 min-w-0 bg-transparent ${theme.fg} px-3 py-2.5 text-base num focus:outline-none`}
+                  />
+                  <span className={`self-center text-xs ${theme.fgFaint} px-1`}>ft</span>
+                  <button
+                    onPointerDown={function(e) { onPD(e, 1000, 25); }}
+                    onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
+                    style={{ touchAction: "none" }}
+                    className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
+                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="leading-tight mt-0.5">1k</span>
+                  </button>
+                  <button
+                    onPointerDown={function(e) { onPD(e, 100, 12); }}
+                    onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
+                    style={{ touchAction: "none" }}
+                    className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
+                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="leading-tight mt-0.5">100</span>
+                  </button>
                 </div>
               );
             })()}
