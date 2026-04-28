@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0118";
+const APP_VERSION = "20260428.0120";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5386,9 +5386,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           <button
             onClick={() => setLayersOpen(true)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-              pdfOverlays.length > 0 ? `border-violet-500 text-violet-400` : `${theme.panelBorder} ${theme.fgFaint}`
+              pdfOverlays.length > 0 ? `border-violet-500 text-violet-400 bg-violet-500/20` : `border-sky-600 text-sky-400`
             }`}>
-            Cartas{pdfOverlays.length > 0 ? ` (${pdfOverlays.length})` : ''}
+            🗺 Cartas{pdfOverlays.length > 0 ? ` (${pdfOverlays.length})` : ''}
           </button>
         </div>
       </div>
