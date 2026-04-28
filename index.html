@@ -86,7 +86,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0005";
+const APP_VERSION = "20260428.0009";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1903,23 +1903,12 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     : "route" // padrão
   );
 
-  // If both this WP and the previous WP have explicit coords, TC and dist are
-  // derived automatically — no need to ask the user for them.
   const prevCpForSteps = isNew
     ? flight.checkpoints[flight.checkpoints.length - 1]
     : flight.checkpoints[editingIdx - 1];
   const bothEndsHaveCoords = cp.lat != null && cp.lon != null
     && prevCpForSteps?.lat != null && prevCpForSteps?.lon != null;
-  const stepsBase = isOrigin
-    ? ["nome", "coord", "alt", "resumo"]
-    : bothEndsHaveCoords
-      ? ["nome", "coord", "alt", "vento", "override", "resumo"]
-      : WP_STEPS; // includes "tcdist"
-  // Keep step valid if it disappears from the list after coord entry
-  const steps = stepsBase;
-  React.useEffect(() => {
-    if (!stepsBase.includes(step)) setStep("resumo");
-  }, [bothEndsHaveCoords]);
+  const steps = isOrigin ? ["nome", "coord", "alt", "resumo"] : WP_STEPS;
 
   const stepIdx = steps.indexOf(step);
   const isFirst = stepIdx === 0;
@@ -2085,7 +2074,6 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
                 cruiseAlt={flight.cruiseAlt ?? 7000}
                 prevAlt={prevAltForResumo}
                 variation={flight.variation ?? 0}
-                coordDerived={bothEndsHaveCoords}
                 onEdit={(s) => setStep(s)}
                 onSave={save}
                 onRemove={!isNew && !isOrigin ? remove : null}
@@ -3040,7 +3028,7 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
 }
 
 // -------- PASSO FINAL: RESUMO --------
-function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, prevAlt, variation, coordDerived, onEdit, onSave, onRemove }) {
+function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, prevAlt, variation, onEdit, onSave, onRemove }) {
   const windLabel =
     windMode === "none"   ? "Sem vento (GS = TAS)" :
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
@@ -3074,7 +3062,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
           })() : "TC —";
           const distStr = cp.dist != null ? `${cp.dist} NM` : "— NM";
           return `${tcStr} · ${distStr}`;
-        })(), step: "tcdist", derived: coordDerived },
+        })(), step: "tcdist" },
       { label: "Vento",         value: windLabel,                                                 step: "vento"},
       { label: "Performance",   value: overrideValue,                                             step: "override" },
     ] : []),
