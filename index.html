@@ -97,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0057";
+const APP_VERSION = "20260428.0102";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4817,7 +4817,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const overlayRef = useRef({ route: null, markers: [], simMarker: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
   const [tick, setTick] = useState(0);
-  const [mapClickMenu, setMapClickMenu] = useState(null); // { lat, lon, afterIdx, afterName, beforeName }
+  const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
 
   // Re-render simulated position every second
   useEffect(() => {
@@ -4825,20 +4825,22 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     return () => clearInterval(id);
   }, []);
 
-  // Keep a ref to current flight checkpoints for the click handler (avoids stale closure)
   const flightRef = useRef(flight);
   useEffect(() => { flightRef.current = flight; }, [flight]);
 
-  // Stable ref to setMapClickMenu so touch handler doesn't close over stale state
-  const setMenuRef = useRef(null);
-  setMenuRef.current = setMapClickMenu;
+  // When pickMode is active, the next Leaflet click places the waypoint
+  const pickModeRef = useRef(false);
+  pickModeRef.current = pickMode;
 
   // Init Leaflet map once
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
     const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
 
-    function triggerWpMenu(lat, lon) {
+    map.on('click', function(e) {
+      if (!pickModeRef.current) return;
+      setPickMode(false);
+      var lat = e.latlng.lat, lon = e.latlng.lng;
       var cps = flightRef.current.checkpoints;
       var bestIdx = null, bestDist = Infinity;
       for (var ci = 0; ci + 1 < cps.length; ci++) {
@@ -4849,57 +4851,16 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       }
       if (bestIdx == null && cps.length > 0) bestIdx = cps.length - 1;
       if (bestIdx == null) return;
-      setMenuRef.current({
-        lat, lon,
-        afterIdx: bestIdx,
-        afterName: cps[bestIdx]?.name || String(bestIdx),
-        beforeName: cps[bestIdx + 1]?.name || null,
-      });
-    }
-
-    // Desktop: standard Leaflet click
-    map.on('click', function(e) { triggerWpMenu(e.latlng.lat, e.latlng.lng); });
-
-    // Mobile: native touch events for both short tap and long press
-    var _touch = null, _longTimer = null;
-    var el = mapDivRef.current;
-
-    function getLatLng(cx, cy) {
-      var rect = el.getBoundingClientRect();
-      return map.containerPointToLatLng(window.L.point(cx - rect.left, cy - rect.top));
-    }
-
-    el.addEventListener('touchstart', function(e) {
-      if (e.touches.length !== 1) { clearTimeout(_longTimer); _touch = null; return; }
-      _touch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      _longTimer = setTimeout(function() {
-        if (!_touch) return;
-        var ll = getLatLng(_touch.x, _touch.y);
-        _touch = null;
-        triggerWpMenu(ll.lat, ll.lng);
-      }, 600);
-    }, { passive: true });
-
-    el.addEventListener('touchmove', function(e) {
-      if (!_touch) return;
-      var dx = e.touches[0].clientX - _touch.x, dy = e.touches[0].clientY - _touch.y;
-      if (Math.sqrt(dx*dx + dy*dy) > 10) { clearTimeout(_longTimer); _touch = null; }
-    }, { passive: true });
-
-    el.addEventListener('touchend', function(e) {
-      clearTimeout(_longTimer);
-      if (!_touch || e.changedTouches.length !== 1) { _touch = null; return; }
-      var dx = e.changedTouches[0].clientX - _touch.x, dy = e.changedTouches[0].clientY - _touch.y;
-      var cx = e.changedTouches[0].clientX, cy = e.changedTouches[0].clientY;
-      _touch = null;
-      if (Math.sqrt(dx*dx + dy*dy) > 10) return;
-      var ll = getLatLng(cx, cy);
-      triggerWpMenu(ll.lat, ll.lng);
-    }, { passive: true });
+      onInsertWaypointRef.current(bestIdx, lat, lon);
+    });
 
     mapRef.current = map;
-    return () => { clearTimeout(_longTimer); map.remove(); mapRef.current = null; };
+    return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  // Stable ref so the Leaflet click handler always calls the current callback
+  const onInsertWaypointRef = useRef(onInsertWaypoint);
+  useEffect(() => { onInsertWaypointRef.current = onInsertWaypoint; }, [onInsertWaypoint]);
 
   // Swap tile layer when tileMode changes
   useEffect(() => {
@@ -5021,7 +4982,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ position: "relative", isolation: "isolate", height: "calc(100dvh - 8rem)" }}>
-      {/* Tile switcher */}
+      {/* Tile switcher + add WP button */}
       <div className={`flex gap-1 p-2 ${theme.panel} border-b ${theme.panelBorder} shrink-0`}>
         {[['osm','OSM'],['sat','Satélite']].map(([key, label]) => (
           <button key={key} onClick={() => setTileMode(key)}
@@ -5031,17 +4992,23 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             {label}
           </button>
         ))}
-        <div className={`ml-auto text-[10px] ${theme.fgFaint} flex items-center`}>
-          {(() => {
-          const total = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual).length;
-          const explicit = liveRoute.filter(cp=>cp.lat!=null&&!cp.isVirtual&&!cp.coordProjected).length;
-          const proj = total - explicit;
-          return total === 0 ? 'Adicione coordenadas nos waypoints'
-            : proj > 0 ? `${explicit} coord · ${proj} projetado${proj>1?'s':''}`
-            : `${total} pontos`;
-        })()}
-        </div>
+        <button
+          onClick={() => setPickMode(p => !p)}
+          className={`ml-auto px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+            pickMode ? `border-violet-500 text-violet-400 bg-violet-500/20` : `${theme.panelBorder} ${theme.fgFaint}`
+          }`}>
+          {pickMode ? '✕ Cancelar' : '+ WP'}
+        </button>
       </div>
+
+      {/* Pick mode instruction banner */}
+      {pickMode && (
+        <div className="absolute top-12 left-0 right-0 z-50 flex justify-center pointer-events-none">
+          <div className="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg mt-1">
+            Toque no mapa para adicionar waypoint
+          </div>
+        </div>
+      )}
 
       {/* Map container */}
       <div ref={mapDivRef} className="flex-1" />
@@ -5059,37 +5026,6 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         </div>
       )}
 
-      {/* Map click menu — add waypoint */}
-      {mapClickMenu && (
-        <div className={`absolute bottom-0 left-0 right-0 ${theme.panel} border-t ${theme.panelBorder} p-4 z-50`}
-          style={{ isolation: 'isolate' }}
-          onClick={(e) => e.stopPropagation()}
-          onTouchEnd={(e) => e.stopPropagation()}>
-          <div className={`text-[10px] ${theme.fgFaint} mb-1`}>
-            {mapClickMenu.beforeName
-              ? `Inserir entre ${mapClickMenu.afterName} → ${mapClickMenu.beforeName}`
-              : `Adicionar após ${mapClickMenu.afterName}`}
-          </div>
-          <div className={`font-mono text-xs ${theme.fgMuted} mb-3`}>
-            {mapClickMenu.lat.toFixed(4)}° {mapClickMenu.lon.toFixed(4)}°
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                onInsertWaypoint(mapClickMenu.afterIdx, mapClickMenu.lat, mapClickMenu.lon);
-                setMapClickMenu(null);
-              }}
-              className={`flex-1 ${theme.accentBg} ${theme.accentBgFg ?? 'text-black'} rounded-xl py-3 font-bold text-sm active:scale-95 transition-transform`}>
-              Adicionar waypoint
-            </button>
-            <button
-              onClick={() => setMapClickMenu(null)}
-              className={`px-4 rounded-xl border ${theme.panelBorder} ${theme.fgMuted} py-3 text-sm active:scale-95 transition-transform`}>
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
