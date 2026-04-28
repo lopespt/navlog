@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1147";
+const APP_VERSION = "20260428.1155";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -678,6 +678,7 @@ function NavlogApp() {
   const [insertAfterIdx, setInsertAfterIdx] = useState(null);
   const [insertCoords, setInsertCoords] = useState(null); // [lat, lon] from map click
   const [pdfOverlays, setPdfOverlays] = useState([]); // PDF map overlays
+  const [pdfLoaded, setPdfLoaded] = useState(false);    // gates IDB cleanup until initial load is done
   const [routesOpen, setRoutesOpen] = useState(false);
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [ataEditOpen, setAtaEditOpen] = useState(false);
@@ -1470,6 +1471,8 @@ function NavlogApp() {
           setPdfOverlays(idbOverlays.filter(function(r) { return r.dataUrl && r.bounds; }));
         }
       } catch {}
+      // Mark the initial load as complete so the cleanup effect can run safely.
+      setPdfLoaded(true);
     })();
   }, []);
 
@@ -1482,7 +1485,10 @@ function NavlogApp() {
   }, [savedRoutes]);
 
   useEffect(() => {
-    // Save each overlay (with dataUrl) to IndexedDB
+    // Don't sync to IDB until the initial load has populated pdfOverlays —
+    // otherwise the empty initial state would mark every stored overlay as
+    // an orphan and delete them all on app start (losing all charts).
+    if (!pdfLoaded) return;
     pdfOverlays.forEach(function(o) {
       savePdfOverlayIdb(o, null); // handle was saved separately on creation
     });
@@ -1491,7 +1497,7 @@ function NavlogApp() {
     getAllPdfOverlaysIdb().then(function(all) {
       all.forEach(function(rec) { if (!ids.has(rec.id)) deletePdfHandle(rec.id); });
     }).catch(function() {});
-  }, [pdfOverlays]);
+  }, [pdfOverlays, pdfLoaded]);
 
   useEffect(() => {
     try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch {}
