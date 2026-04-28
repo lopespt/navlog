@@ -50,7 +50,7 @@
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
-      TrendingUp, TrendingDown, Minus, Map: MapIcon
+      TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation
     } = LucideReact;
 
 function haptic(pattern) {
@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1242";
+const APP_VERSION = "20260428.1318";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -777,6 +777,7 @@ function NavlogApp() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesIdx, setNotesIdx] = useState(null);
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
+  const [deviationOpen, setDeviationOpen] = useState(false);
   const wakeLockRef = useRef(null);
   const [fleet, setFleet] = useState(() => {
     try {
@@ -1012,6 +1013,26 @@ function NavlogApp() {
       const legStartMin = cumMin;
       let legETE = cp.etePlanned;
 
+      // Active deviation override: if this leg is the deviation target, replace
+      // the planned ETE with one computed from the pilot's current position +
+      // current TAS (wind-corrected). Cascades downstream legs naturally.
+      const dev = flight.activeDeviation;
+      if (dev && dev.targetIdx === i && dev.fromLat != null && dev.fromLon != null
+          && cp.lat != null && cp.lon != null) {
+        const devDist = gcDist(dev.fromLat, dev.fromLon, cp.lat, cp.lon);
+        const devTas  = Number(dev.currentTas) || (ac && ac.tasCruise) || 100;
+        const devTC   = gcTC(dev.fromLat, dev.fromLon, cp.lat, cp.lon);
+        const r = calcLeg(devTC, devDist, devTas, flight.windDir, flight.windVel, flight.variation, 0);
+        legETE = r.ete;
+        const devStartMin = parseHHMM(dev.startedAt);
+        if (devStartMin != null) {
+          cumMin = devStartMin + legETE;
+          etas[i] = cumMin;
+          continue;
+        }
+        // Fall through: cumMin += legETE below
+      }
+
       // Adjust ETE based on the latest marked virtual (TOC/TOD/BOD) on this leg.
       // Model: actual_GS in the climb/descent phase equals planned_GS, so reaching
       // TOC X minutes off plan means we covered planned_dist * (X / planned_time).
@@ -1042,7 +1063,7 @@ function NavlogApp() {
       etas[i] = cumMin;
     }
     return etas;
-  }, [computed, flight.atd, flight.autoWpATAs, legVirtualsMap]);
+  }, [computed, flight.atd, flight.autoWpATAs, flight.activeDeviation, flight.windDir, flight.windVel, flight.variation, ac, legVirtualsMap]);
 
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
@@ -1221,7 +1242,22 @@ function NavlogApp() {
         if (elapsed > 0) gsActual = (cps[i].dist / elapsed) * 60;
       }
       cps[i] = { ...cps[i], ata: ataStr, gsActual };
-      return { ...f, checkpoints: cps };
+      // Auto-clear an active deviation when its target gets a real ATA — the
+      // adjustment leg has been consumed and the original plan resumes.
+      var nextDev = f.activeDeviation;
+      if (ataStr != null && nextDev && nextDev.targetIdx === i) nextDev = null;
+      return { ...f, checkpoints: cps, activeDeviation: nextDev };
+    });
+  }
+
+  function setDeviation(dev) {
+    setFlight(function(f) { return Object.assign({}, f, { activeDeviation: dev }); });
+  }
+  function clearDeviation() {
+    setFlight(function(f) {
+      var c = Object.assign({}, f);
+      delete c.activeDeviation;
+      return c;
     });
   }
 
@@ -1685,6 +1721,8 @@ function NavlogApp() {
             onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
             onEditAtd={() => setAtdEditOpen(true)}
             onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
+            onOpenDeviation={() => setDeviationOpen(true)}
+            onClearDeviation={clearDeviation}
             prefs={prefs}
           />
         )}
@@ -1820,6 +1858,25 @@ function NavlogApp() {
         />
       )}
 
+      {/* DEVIAÇÃO / REPOSICIONAMENTO */}
+      {deviationOpen && (
+        <DeviationPanel
+          flight={flight} ac={ac} theme={theme}
+          pdfOverlays={pdfOverlays}
+          defaultTargetIdx={(function() {
+            // Resolve default to the next user waypoint not yet crossed.
+            for (let i = 1; i < flight.checkpoints.length; i++) {
+              const c = flight.checkpoints[i];
+              if (c && !c.isOrigin && c.lat != null && c.ata == null) return i;
+            }
+            return null;
+          })()}
+          onApply={setDeviation}
+          onClear={clearDeviation}
+          onClose={() => setDeviationOpen(false)}
+        />
+      )}
+
       {/* NOTAS DE WAYPOINT */}
       {notesOpen && notesIdx != null && (
         <NotesEditor
@@ -1899,6 +1956,207 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
+function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
+  const dev = flight.activeDeviation || null;
+  const mapDivRef = useRef(null);
+  const mapRef = useRef(null);
+  const posMarkerRef = useRef(null);
+  const previewLineRef = useRef(null);
+  const targetMarkerRef = useRef(null);
+  const pdfLayerRefs = useRef({});
+
+  const [pos, setPos] = useState(dev ? [dev.fromLat, dev.fromLon] : null);
+  const [alt, setAlt] = useState(dev != null && dev.currentAlt != null ? dev.currentAlt : (flight.cruiseAlt ?? 7000));
+  const [tas, setTas] = useState(dev != null && dev.currentTas != null ? dev.currentTas : (ac && ac.tasCruise ? ac.tasCruise : 100));
+  const [targetIdx, setTargetIdx] = useState(dev && dev.targetIdx != null ? dev.targetIdx : (defaultTargetIdx != null ? defaultTargetIdx : null));
+
+  const targetOptions = (flight.checkpoints || [])
+    .map((cp, i) => ({ cp, i }))
+    .filter(x => x.cp && !x.cp.isOrigin && x.cp.lat != null && x.cp.lon != null && (x.cp.ata == null || (dev && dev.targetIdx === x.i)));
+
+  // Init map
+  useEffect(() => {
+    if (!window.L || !mapDivRef.current || mapRef.current) return;
+    const map = window.L.map(mapDivRef.current, { zoomControl: true });
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 18,
+    }).addTo(map);
+    map.createPane('devRoute');
+    map.getPane('devRoute').style.zIndex = 500;
+    map.getPane('devRoute').style.pointerEvents = 'none';
+
+    const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
+    if (wps.length >= 2) {
+      const coords = wps.map(cp => [cp.lat, cp.lon]);
+      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.65, dashArray: '4,4', pane: 'devRoute' }).addTo(map);
+      wps.forEach(cp => {
+        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
+        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
+        window.L.marker([cp.lat, cp.lon], { icon, pane: 'devRoute' }).addTo(map).bindPopup(cp.name || '');
+      });
+      map.fitBounds(window.L.latLngBounds(coords), { padding: [60,60] });
+    } else if (wps.length === 1) {
+      map.setView([wps[0].lat, wps[0].lon], 9);
+    } else {
+      map.setView([39.5, -8.0], 6);
+    }
+
+    map.on('click', (e) => setPos([e.latlng.lat, e.latlng.lng]));
+
+    mapRef.current = map;
+    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
+    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
+  }, []);
+
+  // Render PDF overlays
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L || !pdfOverlays) return;
+    Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
+    pdfLayerRefs.current = {};
+    pdfOverlays.forEach(ov => {
+      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
+      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
+        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450,
+      }).addTo(map);
+      pdfLayerRefs.current[ov.id] = layer;
+    });
+    return () => {
+      Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
+      pdfLayerRefs.current = {};
+    };
+  }, [pdfOverlays]);
+
+  // Target waypoint marker (cyan)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    if (targetMarkerRef.current) { map.removeLayer(targetMarkerRef.current); targetMarkerRef.current = null; }
+    const target = targetIdx != null ? flight.checkpoints[targetIdx] : null;
+    if (target && target.lat != null && target.lon != null) {
+      const html = `<div style="background:#22d3ee;border-radius:50%;width:14px;height:14px;border:3px solid #fff;box-shadow:0 0 6px rgba(34,211,238,0.7)"></div>`;
+      const icon = window.L.divIcon({ html, className: '', iconSize: [14,14], iconAnchor: [7,7] });
+      targetMarkerRef.current = window.L.marker([target.lat, target.lon], { icon, pane: 'devRoute', zIndexOffset: 800 }).addTo(map);
+      targetMarkerRef.current.bindPopup('Alvo · ' + (target.name || ''));
+    }
+  }, [targetIdx]);
+
+  // Picked position marker + preview line to target
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    if (posMarkerRef.current) { map.removeLayer(posMarkerRef.current); posMarkerRef.current = null; }
+    if (previewLineRef.current) { map.removeLayer(previewLineRef.current); previewLineRef.current = null; }
+    if (!pos) return;
+    const html = `<div style="background:#22c55e;border-radius:50%;width:18px;height:18px;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.9)"></div>`;
+    const icon = window.L.divIcon({ html, className: '', iconSize: [18,18], iconAnchor: [9,9] });
+    posMarkerRef.current = window.L.marker(pos, { icon, zIndexOffset: 900 }).addTo(map);
+
+    const target = targetIdx != null ? flight.checkpoints[targetIdx] : null;
+    if (target && target.lat != null && target.lon != null) {
+      previewLineRef.current = window.L.polyline([pos, [target.lat, target.lon]], {
+        color: '#22d3ee', weight: 3, opacity: 0.95, dashArray: '8,6', pane: 'devRoute',
+      }).addTo(map);
+    }
+  }, [pos, targetIdx]);
+
+  // Compute preview metrics
+  const target = targetIdx != null ? flight.checkpoints[targetIdx] : null;
+  let pDist = null, pMC = null, pETE = null, pETA = null;
+  if (pos && target && target.lat != null && target.lon != null) {
+    pDist = gcDist(pos[0], pos[1], target.lat, target.lon);
+    const tc = gcTC(pos[0], pos[1], target.lat, target.lon);
+    const variation = flight.variation ?? 0;
+    pMC = Math.round(((tc - variation) % 360 + 360) % 360);
+    const tasN = Number(tas) || 100;
+    const r = calcLeg(tc, pDist, tasN, flight.windDir, flight.windVel, variation, 0);
+    pETE = r.ete;
+    const startMin = nowHHMM();
+    pETA = startMin + (r.ete || 0);
+  }
+
+  function handleApply() {
+    if (pos == null || targetIdx == null) return;
+    onApply({
+      fromLat: Math.round(pos[0] * 1e6) / 1e6,
+      fromLon: Math.round(pos[1] * 1e6) / 1e6,
+      targetIdx: Number(targetIdx),
+      currentAlt: Number(alt) || 0,
+      currentTas: Number(tas) || 0,
+      startedAt: formatHHMMSS(nowHHMM()),
+    });
+    onClose();
+  }
+  function handleClear() {
+    onClear();
+    onClose();
+  }
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', isolation: 'isolate' }}
+      className={theme.bg}>
+      <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
+        <button onClick={onClose}
+          className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
+          Cancelar
+        </button>
+        <span className={`flex-1 text-center text-sm font-bold ${theme.cyan}`}>
+          {dev ? "Editar desvio" : "Reposicionar — toque na sua posição"}
+        </span>
+        {dev && (
+          <button onClick={handleClear}
+            className="px-3 py-1.5 rounded-lg border border-red-500 text-red-400 text-sm font-bold">
+            Voltar à rota
+          </button>
+        )}
+      </div>
+      <div ref={mapDivRef} style={{ flex: 1, minHeight: 0 }} />
+      <div className={`p-3 shrink-0 ${theme.panel} border-t ${theme.panelBorder} space-y-2`}>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="space-y-0.5 block">
+            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Altitude (ft)</span>
+            <input type="number" inputMode="numeric" value={alt}
+              onChange={(e) => setAlt(e.target.value === '' ? '' : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
+          </label>
+          <label className="space-y-0.5 block">
+            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>TAS (kt)</span>
+            <input type="number" inputMode="numeric" value={tas}
+              onChange={(e) => setTas(e.target.value === '' ? '' : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
+          </label>
+          <label className="space-y-0.5 block">
+            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Alvo</span>
+            <select value={targetIdx ?? ''}
+              onChange={(e) => setTargetIdx(e.target.value === '' ? null : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none`}>
+              {targetIdx == null && <option value="">—</option>}
+              {targetOptions.map(({ cp, i }) => (
+                <option key={i} value={i}>{cp.name || ('WP ' + i)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {pDist != null && (
+          <div className={`text-center text-xs num ${theme.cyan}`}>
+            {String(pMC).padStart(3, '0')}°M · {pDist.toFixed(1)} NM · {pETE.toFixed(1)} min · ETA {formatHHMM(pETA)}
+          </div>
+        )}
+        <button onClick={handleApply}
+          disabled={pos == null || targetIdx == null}
+          className={`w-full py-3 rounded-xl font-bold text-base ${
+            pos != null && targetIdx != null
+              ? `${theme.accentBg} ${theme.accentBgFg ?? 'text-black'}`
+              : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          {dev ? "Atualizar desvio" : "Aplicar desvio"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AiracBadge({ theme }) {
   const [info, setInfo] = useState(null);
   useEffect(() => { airacGetCurrent().then(setInfo); }, []);
@@ -4109,9 +4367,40 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
+    onOpenDeviation, onClearDeviation,
     liveFuel, ac, prefs }) {
 
-  const next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
+  const dev = flight.activeDeviation || null;
+  // Recalculate deviation geometry on each render so the banner stays live with TAS edits etc.
+  const devTarget = dev && dev.targetIdx != null ? flight.checkpoints[dev.targetIdx] : null;
+  let devGeom = null;
+  if (dev && devTarget && devTarget.lat != null && devTarget.lon != null && dev.fromLat != null && dev.fromLon != null) {
+    const d = gcDist(dev.fromLat, dev.fromLon, devTarget.lat, devTarget.lon);
+    const tc = gcTC(dev.fromLat, dev.fromLon, devTarget.lat, devTarget.lon);
+    const variation = flight.variation ?? 0;
+    const mc = Math.round(((tc - variation) % 360 + 360) % 360);
+    const tasN = Number(dev.currentTas) || (ac && ac.tasCruise) || 100;
+    const r = calcLeg(tc, d, tasN, flight.windDir, flight.windVel, variation, 0);
+    const startMin = parseHHMM(dev.startedAt) ?? nowHHMM();
+    devGeom = { dist: d, mc, ete: r.ete, tc, eta: startMin + r.ete, targetIdx: dev.targetIdx, target: devTarget };
+  }
+
+  let next = nextLiveIdx < liveRoute.length ? liveRoute[nextLiveIdx] : null;
+  // When the active deviation targets the same fix as `next`, swap in the
+  // deviation's geometry so the banner shows the *correction* heading,
+  // distance, and ETE — not the planned ones.
+  if (next && devGeom && next.userIdx === devGeom.targetIdx) {
+    next = Object.assign({}, next, {
+      tc: devGeom.tc,
+      mc: devGeom.mc,
+      mh: devGeom.mc,
+      dist: devGeom.dist,
+      distLeg: devGeom.dist,
+      etePlanned: devGeom.ete,
+      eteLeg: devGeom.ete,
+      _isDeviation: true,
+    });
+  }
   const planNext = next ? next.etaPlanned : null;
 
   // ETA live do próximo ponto — para virtuais, interpola entre o ETA do wp anterior e do próximo
@@ -4270,23 +4559,60 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
       )}
 
+      {/* Strip de Reposicionamento (Desvio) */}
+      {flight.atd && (
+        <div className={`flex items-center gap-2 ${dev ? "border-cyan-500/60 bg-cyan-500/10 border" : ""} rounded-lg ${dev ? "p-2" : ""}`}>
+          {dev ? (
+            <>
+              <span className={`text-[10px] uppercase tracking-widest font-bold ${theme.cyan}`}>DESVIO ATIVO</span>
+              {devGeom && (
+                <span className={`text-[10px] num ${theme.fgFaint}`}>
+                  → {devGeom.target?.name} · {String(devGeom.mc).padStart(3,"0")}°M · {devGeom.dist.toFixed(1)} NM
+                </span>
+              )}
+              <button onClick={onOpenDeviation}
+                className={`ml-auto text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+                Editar
+              </button>
+              <button onClick={onClearDeviation}
+                className="text-[10px] px-2 py-1 rounded border border-red-500 text-red-400 font-bold">
+                Voltar à rota
+              </button>
+            </>
+          ) : (
+            <button onClick={onOpenDeviation}
+              className={`w-full text-[11px] uppercase tracking-widest font-bold py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-[0.99] flex items-center justify-center gap-1.5`}>
+              <Navigation className="w-3.5 h-3.5" /> Reposicionar (desvio)
+            </button>
+          )}
+        </div>
+      )}
+
       {next ? (
         /* ---- Card de próximo waypoint (regular ou virtual TOC/TOD/BOD) ---- */
         (() => {
-          const accentColor = next.isVirtual ? theme.cyan : isAlert ? theme.danger : theme.accent;
-          const borderClass = next.isVirtual
-            ? (isAlert ? "border-red-500/80 bg-red-500/10" : "border-cyan-500/60 bg-cyan-500/5")
-            : (isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`);
+          const isDev = next._isDeviation === true;
+          const accentColor = isDev ? theme.cyan : next.isVirtual ? theme.cyan : isAlert ? theme.danger : theme.accent;
+          const borderClass = isDev
+            ? "border-cyan-500/80 bg-cyan-500/10"
+            : next.isVirtual
+              ? (isAlert ? "border-red-500/80 bg-red-500/10" : "border-cyan-500/60 bg-cyan-500/5")
+              : (isAlert ? "border-red-500/80 bg-red-500/10" : `${theme.accentBorder} bg-amber-500/5`);
           const virtLabel = next.name === "BOC" ? "Início da Subida"
             : next.name === "TOC" ? "Topo de Subida"
             : next.name === "TOD" ? "Início de Descida"
             : "Fim de Descida";
+          const topLabel = isDev
+            ? "Correção · Próximo"
+            : next.isVirtual
+              ? virtLabel
+              : isAlert ? "DESVIO DE ETA" : "Próximo Waypoint";
           return (
         <div className={`border-2 rounded-lg p-4 transition-all ${borderClass}`}>
           {/* Linha topo: label + alt */}
           <div className="flex items-center justify-between mb-1">
             <span className={`text-[10px] uppercase tracking-widest ${accentColor}`}>
-              {next.isVirtual ? virtLabel : isAlert ? "DESVIO DE ETA" : "Próximo Waypoint"}
+              {topLabel}
             </span>
             <span className={`text-[10px] ${theme.fgFaint} num`}>
               {next.alt != null ? `${next.alt} ft` : ""}
@@ -6145,7 +6471,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
 function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
-  const overlayRef = useRef({ route: null, markers: [], simMarker: null });
+  const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
   const [tick, setTick] = useState(0);
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
@@ -6378,6 +6704,22 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     });
   }, [liveRoute]);
 
+  // Active deviation overlay (cyan dashed line from current position to target)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    const ov = overlayRef.current;
+    if (ov.deviation) { map.removeLayer(ov.deviation); ov.deviation = null; }
+    const dev = flight.activeDeviation;
+    if (!dev || dev.fromLat == null || dev.fromLon == null || dev.targetIdx == null) return;
+    const target = (flight.checkpoints || [])[dev.targetIdx];
+    if (!target || target.lat == null || target.lon == null) return;
+    ov.deviation = window.L.polyline(
+      [[dev.fromLat, dev.fromLon], [target.lat, target.lon]],
+      { color: '#22d3ee', weight: 4, opacity: 0.95, dashArray: '10,8', pane: 'routePane' }
+    ).addTo(map);
+  }, [flight.activeDeviation, flight.checkpoints]);
+
   // Simulated aircraft position
   useEffect(() => {
     const map = mapRef.current;
@@ -6389,6 +6731,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     const eobtMin = parseHHMM(flight.eobt) ?? 0;
     const origin = liveRoute.find(cp => cp.isOrigin && cp.lat != null);
     const atdMin = flight.atd ? parseHHMM(flight.atd) : null;
+    const dev = flight.activeDeviation;
 
     // Find prev (last crossed, or origin at ATD) and next (first uncrossed) WP with coords
     let prevWp = null, prevTime = null, nextWp = null;
@@ -6405,26 +6748,46 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       }
     }
 
+    // If a deviation is active and targets the same fix as nextWp, replace
+    // prevWp with the deviation's start position so the simulated aircraft
+    // moves along the cyan correction leg, not the (now-bypassed) original.
+    let devActiveForLeg = false;
+    if (dev && dev.fromLat != null && dev.fromLon != null && dev.targetIdx != null
+        && nextWp && nextWp.userIdx === dev.targetIdx) {
+      const startMin = parseHHMM(dev.startedAt);
+      if (startMin != null) {
+        prevWp = { lat: dev.fromLat, lon: dev.fromLon, tc: 0, isOrigin: false, etaPlanned: startMin };
+        prevTime = startMin;
+        devActiveForLeg = true;
+      }
+    }
+
     let simLat, simLon, simTC;
     if (!nextWp) {
       // All crossed or no next — park at prevWp
       if (prevWp && !prevWp.isOrigin) { simLat = prevWp.lat; simLon = prevWp.lon; simTC = prevWp.tc ?? 0; }
     } else if (prevWp && prevTime != null) {
-      // Planned leg duration: diff between nextWp and prevWp planned ETAs
+      // Planned leg duration: diff between nextWp ETA (adjusted for any deviation
+      // already encoded in liveETAs) and prevWp's planned ETA / deviation start.
       const prevPlanned = prevWp.isOrigin ? eobtMin : (prevWp.etaPlanned ?? eobtMin);
-      const legDuration = (nextWp.etaPlanned ?? 0) - prevPlanned;
+      const targetEta = devActiveForLeg
+        ? (liveETAs[nextWp.userIdx] ?? prevPlanned)
+        : (nextWp.etaPlanned ?? 0);
+      const legDuration = targetEta - prevPlanned;
       if (legDuration > 0) {
         const frac = Math.min(1, Math.max(0, (nowMin - prevTime) / legDuration));
         [simLat, simLon] = gcInterpolate(prevWp.lat, prevWp.lon, nextWp.lat, nextWp.lon, frac);
-        simTC = nextWp.tc ?? 0;
+        simTC = devActiveForLeg
+          ? gcTC(prevWp.lat, prevWp.lon, nextWp.lat, nextWp.lon)
+          : (nextWp.tc ?? 0);
       }
     }
 
     if (simLat != null) {
       ov.simMarker = window.L.marker([simLat, simLon], { icon: planeIcon(simTC), zIndexOffset: 1000 }).addTo(map);
-      ov.simMarker.bindPopup('Posição estimada');
+      ov.simMarker.bindPopup(devActiveForLeg ? 'Posição estimada (desvio)' : 'Posição estimada');
     }
-  }, [tick, liveRoute, flight.atd, liveETAs]);
+  }, [tick, liveRoute, flight.atd, flight.activeDeviation, liveETAs]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
