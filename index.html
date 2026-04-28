@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0304";
+const APP_VERSION = "20260428.0311";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1778,22 +1778,6 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
     `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:${theme.accentBorder} focus:outline-none`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
-  // Quick-add: inline waypoint by name only
-  const [quickName, setQuickName] = useState('');
-  const quickInputRef = useRef(null);
-  function handleQuickAdd() {
-    var n = quickName.trim().toUpperCase().slice(0, 10);
-    if (!n) return;
-    setFlight(function(f) {
-      return Object.assign({}, f, { checkpoints: f.checkpoints.concat([{
-        name: n, useCruiseAlt: true, windMode: 'route',
-        lat: null, lon: null, alt: null, tc: null, dist: null, notes: ''
-      }]) });
-    });
-    setQuickName('');
-    setTimeout(function() { quickInputRef.current && quickInputRef.current.focus(); }, 50);
-  }
-
   return (
     <div className="px-3 py-3 space-y-4">
       {/* AERONAVE */}
@@ -1993,28 +1977,10 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
             </div>
             );
           })}
-          {/* Quick-add: type name → tap + → waypoint adicionado com defaults */}
-          <div className={`flex gap-2 items-center ${theme.panel} border border-dashed ${theme.inputBorder} rounded px-2 py-1.5`}>
-            <input
-              ref={quickInputRef}
-              value={quickName}
-              onChange={function(e) { setQuickName(e.target.value.toUpperCase().slice(0,10)); }}
-              onKeyDown={function(e) { if (e.key === 'Enter') handleQuickAdd(); }}
-              placeholder="FIXO"
-              maxLength={10}
-              autoCapitalize="characters"
-              className={`flex-1 bg-transparent ${theme.fg} text-sm font-bold uppercase placeholder-zinc-600 outline-none min-w-0 tracking-wider`}
-            />
-            <button onClick={handleQuickAdd} disabled={!quickName.trim()}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${quickName.trim() ? 'bg-violet-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-600'}`}>
-              +
-            </button>
-            <button onClick={onAddCp}
-              title="Editor completo"
-              className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border ${theme.panelBorder} ${theme.fgFaint} active:scale-95`}>
-              ···
-            </button>
-          </div>
+          <button onClick={onAddCp}
+            className={`w-full border border-dashed ${theme.inputBorder} rounded px-3 py-2 ${theme.fgFaint} flex items-center justify-center gap-2 text-sm transition-colors`}>
+            <Plus className="w-4 h-4" /> Adicionar waypoint
+          </button>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button onClick={onImportFPL}
@@ -2105,43 +2071,42 @@ function Stat({ label, value, theme }) {
 const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
 function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac }) {
-  const isNew = editingIdx == null;
+  const isNew    = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
+  const cruiseAlt = flight.cruiseAlt ?? 7000;
   const initial = isNew
-    ? { name: "", alt: null, useCruiseAlt: false, tc: null, dist: null, windDir: null, windVel: null,
-        lat: initLat ?? null, lon: initLon ?? null }
+    ? { name: "", alt: null, useCruiseAlt: true, tc: null, dist: null, windDir: null, windVel: null,
+        lat: initLat ?? null, lon: initLon ?? null, notes: "" }
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
-  const [step, setStep] = useState(isNew ? "nome" : "resumo");
   const [windMode, setWindMode] = useState(
-    initial.windMode === "none"   ? "none"
+    initial.windMode === "none"    ? "none"
     : initial.windMode === "custom" ? "custom"
-    : isNew ? "none" : "route" // new WPs default to no-wind
+    : "route"
   );
+  const [tcMode, setTcMode] = useState("mh"); // "mh" | "tc"
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [showPerf, setShowPerf] = useState(false);
 
-  // When inserting at a specific position, prevCp is the WP we're inserting after
-  const prevCpForSteps = isNew
+  const prevCp = isNew
     ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
     : flight.checkpoints[editingIdx - 1];
-  const bothEndsHaveCoords = cp.lat != null && cp.lon != null
-    && prevCpForSteps?.lat != null && prevCpForSteps?.lon != null;
-  const steps = isOrigin ? ["nome", "coord", "alt", "resumo"] : WP_STEPS;
+  const prevAlt = prevCp?.useCruiseAlt ? cruiseAlt : (prevCp?.alt ?? null);
+  const variation = getDecl(cp.lat ?? prevCp?.lat, cp.lon ?? prevCp?.lon, cp.alt ?? cruiseAlt) ?? (flight.variation ?? 0);
+  const mod360 = function(x) { return ((x % 360) + 360) % 360; };
 
-  const stepIdx = steps.indexOf(step);
-  const isFirst = stepIdx === 0;
-  const isLast = step === "resumo";
+  const altMode = cp.useCruiseAlt ? "cruise" : (cp.alt == null && !isOrigin ? "inherit" : "custom");
 
-  function prev() {
-    if (!isFirst) setStep(steps[stepIdx - 1]);
+  function applyCoords(lat, lon) {
+    var updates = { lat: lat, lon: lon };
+    if (prevCp != null && prevCp.lat != null && prevCp.lon != null && lat != null && lon != null) {
+      updates.tc   = Math.round(gcTC(prevCp.lat, prevCp.lon, lat, lon));
+      updates.dist = Math.round(gcDist(prevCp.lat, prevCp.lon, lat, lon) * 10) / 10;
+    }
+    setCp(function(p) { return Object.assign({}, p, updates); });
+    setShowMapPicker(false);
   }
-  function next() {
-    if (isLast) return;
-    // When editing existing waypoint, always return to summary after any step
-    if (!isNew) setStep("resumo");
-    else setStep(steps[stepIdx + 1]);
-  }
-  function skipToResumo() { setStep("resumo"); }
 
   function save() {
     setFlight((f) => {
@@ -2206,32 +2171,19 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
     onClose();
   }
 
+  const fld  = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded-xl num focus:outline-none`;
+  const lbl  = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
+  const sect = `space-y-2`;
+
   return (
     <div className="fixed inset-0 z-30 bg-black/85 flex flex-col" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
+      <div onClick={function(e) { e.stopPropagation(); }}
         className={`mt-auto w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl flex flex-col`}
-        style={{ maxHeight: "92vh" }}
-      >
-        {/* Tab bar */}
-        <div className={`border-b ${theme.panelBorder} shrink-0`}>
-          <div className="flex items-center px-3 pt-2 gap-1 overflow-x-auto">
-            {steps.map((s) => (
-              <button key={s} onClick={() => setStep(s)}
-                className={`shrink-0 px-3 py-2 text-[10px] uppercase tracking-widest font-bold rounded-t-lg transition-colors ${
-                  step === s
-                    ? `${theme.accent} border-b-2 border-current`
-                    : `${theme.fgFaint} hover:${theme.fgMuted}`
-                }`}>
-                {s === "tcdist" ? "TC/DIST" : s === "override" ? "PERF" : s}
-              </button>
-            ))}
-            <div className="flex-1" />
-            <button onClick={onClose} className={`p-1.5 ${theme.fgFaint} shrink-0`}>
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="px-3 pb-1.5 flex items-baseline gap-2">
+        style={{ maxHeight: "92vh" }}>
+
+        {/* Header */}
+        <div className={`flex items-center px-4 pt-3 pb-2 border-b ${theme.panelBorder} shrink-0`}>
+          <div className="flex-1 flex items-baseline gap-2">
             <span className={`text-base font-black tracking-widest ${theme.accent} cockpit-glow`}>
               {isNew ? "NOVO" : (cp.name || "—")}
             </span>
@@ -2239,91 +2191,218 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               {isNew ? "waypoint" : "editar waypoint"}
             </span>
           </div>
+          <button onClick={onClose} className={`p-1.5 ${theme.fgFaint}`}><X className="w-4 h-4" /></button>
         </div>
 
-        {/* Conteúdo do passo */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          {step === "nome" && (
-            <StepNome cp={cp} setCp={setCp} theme={theme} onNext={next} />
-          )}
-          {step === "coord" && (() => {
-            const prevCpIdx = isNew
-              ? flight.checkpoints.length - 1
-              : (editingIdx ?? 0) - 1;
-            const prevCpCoord = prevCpIdx >= 0 ? flight.checkpoints[prevCpIdx] : null;
-            return (
-              <StepCoord
-                cp={cp} setCp={setCp}
-                prevCp={prevCpCoord}
-                theme={theme}
-                onNext={next}
-                allWps={flight.checkpoints}
-              />
-            );
-          })()}
-          {step === "alt" && (() => {
-            const prevCpForAlt = isNew
-              ? flight.checkpoints[flight.checkpoints.length - 1]
-              : flight.checkpoints[editingIdx - 1];
-            const prevAltForStep = prevCpForAlt?.useCruiseAlt
-              ? (flight.cruiseAlt ?? 7000)
-              : (prevCpForAlt?.alt ?? null);
-            return (
-              <StepAlt cp={cp} setCp={setCp} cruiseAlt={flight.cruiseAlt ?? 7000} prevAlt={prevAltForStep} isOrigin={isOrigin} theme={theme} onNext={next} />
-            );
-          })()}
-          {step === "tcdist" && (
-            <StepTCDist
-              theme={theme}
-              variation={(() => {
-                // Use WMM at waypoint coords if available, else at prev WP, else fallback
-                const prevForVar = isNew
-                  ? flight.checkpoints[flight.checkpoints.length - 1]
-                  : flight.checkpoints[editingIdx - 1];
-                return getDecl(cp.lat ?? prevForVar?.lat, cp.lon ?? prevForVar?.lon, cp.alt ?? flight.cruiseAlt ?? 7000)
-                  ?? (flight.variation ?? 0);
-              })()}
-              cp={cp}
-              setCp={setCp}
-              onNext={next}
+        {/* Formulário único rolável */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
+
+          {/* NOME */}
+          <div className={sect}>
+            <label className={lbl}>Nome (max 10)</label>
+            <input type="text" autoCapitalize="characters" maxLength={10}
+              value={cp.name || ""}
+              onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { name: e.target.value.toUpperCase().slice(0,10) }); }); }}
+              placeholder="LPPT"
+              className={`w-full ${theme.inputBg} border-2 ${cp.name ? theme.accentBorder : theme.inputBorder} ${theme.fg} px-4 py-3 text-2xl font-black tracking-widest rounded-xl num focus:outline-none`}
             />
-          )}
-          {step === "vento" && (
-            <StepVento
-              theme={theme}
-              cp={cp} setCp={setCp}
-              windMode={windMode} setWindMode={setWindMode}
-              defaultDir={flight.windDir} defaultVel={flight.windVel}
-              onNext={next}
-            />
-          )}
-          {step === "override" && (
-            <StepOverride cp={cp} setCp={setCp} theme={theme} onNext={next} />
-          )}
-          {step === "resumo" && (() => {
-            const prevCpForResumo = isNew
-              ? flight.checkpoints[flight.checkpoints.length - 1]
-              : flight.checkpoints[(editingIdx ?? flight.checkpoints.length) - 1];
-            const prevAltForResumo = prevCpForResumo?.useCruiseAlt
-              ? (flight.cruiseAlt ?? 7000)
-              : (prevCpForResumo?.alt ?? null);
-            return (
-              <StepResumo
-                theme={theme}
-                cp={cp} setCp={setCp} isNew={isNew} isOrigin={isOrigin}
-                windMode={windMode}
-                cruiseAlt={flight.cruiseAlt ?? 7000}
-                prevAlt={prevAltForResumo}
-                variation={getDecl(cp.lat, cp.lon, cp.alt ?? flight.cruiseAlt ?? 7000) ?? (flight.variation ?? 0)}
-                onEdit={(s) => setStep(s)}
-                onSave={save}
-                onRemove={!isNew && !isOrigin ? remove : null}
+          </div>
+
+          {/* POSIÇÃO */}
+          <div className={sect}>
+            <label className={lbl}>Posição (graus decimais)</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LAT (ex: 38.7169)</span>
+                <input type="number" step="0.0001" placeholder="38.7169"
+                  value={cp.lat != null ? cp.lat : ""}
+                  onChange={function(e) {
+                    var v = e.target.value === "" ? null : parseFloat(e.target.value);
+                    applyCoords(isNaN(v) ? null : v, cp.lon);
+                  }}
+                  className={fld}
+                />
+              </div>
+              <div>
+                <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LON (ex: -9.1395)</span>
+                <input type="number" step="0.0001" placeholder="-9.1395"
+                  value={cp.lon != null ? cp.lon : ""}
+                  onChange={function(e) {
+                    var v = e.target.value === "" ? null : parseFloat(e.target.value);
+                    applyCoords(cp.lat, isNaN(v) ? null : v);
+                  }}
+                  className={fld}
+                />
+              </div>
+            </div>
+            <button onClick={function() { setShowMapPicker(true); }}
+              className={`w-full py-2.5 rounded-xl border flex items-center justify-center gap-2 text-sm font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+              <MapIcon className="w-4 h-4" /> Selecionar no mapa
+            </button>
+            {prevCp != null && prevCp.lat != null && cp.lat != null && cp.lon != null && (
+              <div className={`text-[10px] ${theme.cyan} text-center`}>
+                TC {cp.tc ?? "—"}° · {cp.dist ?? "—"} NM (calculado)
+              </div>
+            )}
+          </div>
+
+          {/* ALTITUDE */}
+          <div className={sect}>
+            <label className={lbl}>Altitude</label>
+            <div className={`grid gap-2 ${isOrigin ? "grid-cols-2" : "grid-cols-3"}`}>
+              {!isOrigin && (
+                <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { alt: null, useCruiseAlt: false }); }); }}
+                  className={`py-2.5 rounded-xl border-2 text-xs font-bold flex flex-col items-center gap-0.5 ${altMode === "inherit" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
+                  Herdar
+                  <span className="text-[9px] font-normal opacity-70">{prevAlt != null ? prevAlt + " ft" : "—"}</span>
+                </button>
+              )}
+              <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { useCruiseAlt: true, alt: cruiseAlt }); }); }}
+                className={`py-2.5 rounded-xl border-2 text-xs font-bold flex flex-col items-center gap-0.5 ${altMode === "cruise" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
+                CRZ
+                <span className="text-[9px] font-normal opacity-70">{cruiseAlt} ft</span>
+              </button>
+              <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { useCruiseAlt: false, alt: p.alt != null ? p.alt : cruiseAlt }); }); }}
+                className={`py-2.5 rounded-xl border-2 text-xs font-bold ${altMode === "custom" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
+                Valor
+              </button>
+            </div>
+            {altMode === "custom" && (
+              <input type="number" inputMode="numeric" placeholder="7000"
+                value={cp.alt != null ? cp.alt : ""}
+                onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { alt: e.target.value === "" ? null : Number(e.target.value), useCruiseAlt: false }); }); }}
+                className={fld}
               />
-            );
-          })()}
+            )}
+          </div>
+
+          {/* TC / DIST (não origem) */}
+          {!isOrigin && (
+            <div className={sect}>
+              <label className={lbl}>Rumo / Distância</label>
+              <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder} mb-2`}>
+                {[["mh","MC (Magnético)"],["tc","TC (Verdadeiro)"]].map(function(pair) {
+                  var m = pair[0], label = pair[1];
+                  return (
+                    <button key={m} onClick={function() { setTcMode(m); }}
+                      className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider ${tcMode === m ? theme.accentBg + " text-black" : theme.fgFaint}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>{tcMode === "mh" ? "MC (°)" : "TC (°)"} 0–359</span>
+                  <input type="number" inputMode="numeric" placeholder="270" min="0" max="359"
+                    value={cp.tc != null ? (tcMode === "mh" ? String(Math.round(mod360(cp.tc - variation))) : String(cp.tc)) : ""}
+                    onChange={function(e) {
+                      var v = e.target.value === "" ? null : Number(e.target.value);
+                      var tc = v == null ? null : Math.round(tcMode === "mh" ? mod360(v + variation) : mod360(v));
+                      setCp(function(p) { return Object.assign({}, p, { tc: tc, _tcDistEdited: true }); });
+                    }}
+                    className={fld}
+                  />
+                </div>
+                <div>
+                  <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Distância (NM)</span>
+                  <input type="number" inputMode="decimal" placeholder="50" min="0"
+                    value={cp.dist != null ? cp.dist : ""}
+                    onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { dist: e.target.value === "" ? null : parseFloat(e.target.value), _tcDistEdited: true }); }); }}
+                    className={fld}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VENTO (não origem) */}
+          {!isOrigin && (
+            <div className={sect}>
+              <label className={lbl}>Vento nesta perna</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[["route","Rota"],["none","Sem vento"],["custom","Custom"]].map(function(pair) {
+                  var m = pair[0], label = pair[1];
+                  return (
+                    <button key={m} onClick={function() { setWindMode(m); }}
+                      className={`py-2.5 rounded-xl border-2 text-xs font-bold ${windMode === m ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {windMode === "custom" && (
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <div>
+                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Direção (°)</span>
+                    <input type="number" inputMode="numeric" placeholder="270" min="0" max="359"
+                      value={cp.windDir != null ? cp.windDir : ""}
+                      onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { windDir: e.target.value === "" ? null : Number(e.target.value) }); }); }}
+                      className={fld}
+                    />
+                  </div>
+                  <div>
+                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Velocidade (kt)</span>
+                    <input type="number" inputMode="numeric" placeholder="15"
+                      value={cp.windVel != null ? cp.windVel : ""}
+                      onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { windVel: e.target.value === "" ? null : Number(e.target.value) }); }); }}
+                      className={fld}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PERFORMANCE override (colapsável, não origem) */}
+          {!isOrigin && (
+            <div className={sect}>
+              <button onClick={function() { setShowPerf(function(p) { return !p; }); }}
+                className={`w-full flex items-center justify-between py-1 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                <span>Override de performance</span>
+                <span>{showPerf ? "▲" : "▼"}</span>
+              </button>
+              {showPerf && <StepOverride cp={cp} setCp={setCp} theme={theme} onNext={function(){}} />}
+            </div>
+          )}
+
+          {/* NOTAS */}
+          <div className={sect}>
+            <label className={lbl}>Notas</label>
+            <textarea rows={2} placeholder="Freq. TWR, QNH, instruções ATC…"
+              value={cp.notes || ""}
+              onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { notes: e.target.value }); }); }}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none resize-none`}
+            />
+          </div>
+
+          <div className="h-2" />
         </div>
 
+        {/* Rodapé com acções */}
+        <div className={`px-4 py-3 flex gap-2 border-t ${theme.panelBorder} shrink-0`}>
+          {!isNew && !isOrigin && (
+            <button onClick={remove}
+              className="px-4 py-3 rounded-xl border border-red-500/40 text-red-400 text-sm font-bold active:scale-95">
+              Remover
+            </button>
+          )}
+          <button onClick={save} disabled={!cp.name || !cp.name.trim()}
+            className={`flex-1 py-3 rounded-xl font-bold text-base active:scale-95 transition-transform ${cp.name && cp.name.trim() ? "bg-violet-600 text-white" : theme.panel + " " + theme.fgFaint + " opacity-40"}`}>
+            {isNew ? "Adicionar waypoint" : "Guardar alterações"}
+          </button>
+        </div>
       </div>
+
+      {showMapPicker && (
+        <MapPicker
+          allWps={flight.checkpoints}
+          initialPos={cp.lat != null ? [cp.lat, cp.lon] : null}
+          onConfirm={applyCoords}
+          onCancel={function() { setShowMapPicker(false); }}
+          theme={theme}
+        />
+      )}
     </div>
   );
 }
