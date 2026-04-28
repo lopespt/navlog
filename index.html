@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0215";
+const APP_VERSION = "20260428.0223";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1396,19 +1396,11 @@ function NavlogApp() {
         if (rr) setSavedRoutes(JSON.parse(rr));
         const pp = await store.get("prefs");
         if (pp) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(pp) });
-        // Load PDF overlays from IndexedDB (stores full data including dataUrl)
+        // Load PDF overlays from IndexedDB (stores warped dataUrl + bounds)
         var idbOverlays = await getAllPdfOverlaysIdb();
         if (idbOverlays.length > 0) {
-          var loaded = await Promise.all(idbOverlays.map(async function(rec) {
-            // Try to refresh from file handle for latest version
-            if (rec.handle) {
-              var imgData = await renderPdfFromHandle(rec.handle);
-              if (imgData) return Object.assign({}, rec, imgData);
-            }
-            // Fall back to stored dataUrl
-            return rec;
-          }));
-          setPdfOverlays(loaded);
+          // Use stored data directly — warped image and bounds are already in IndexedDB
+          setPdfOverlays(idbOverlays.filter(function(r) { return r.dataUrl && r.bounds; }));
         }
       } catch {}
     })();
@@ -4846,6 +4838,63 @@ async function renderPdfToImage(file, scale) {
   return { dataUrl: canvas.toDataURL('image/png'), width: vp.width, height: vp.height };
 }
 
+// Warp PDF image to Mercator-aligned canvas using 3-point affine transform.
+// Returns { dataUrl, width, height, bounds } ready for L.imageOverlay.
+async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
+  var REF_ZOOM = 12;
+  var ppts = pdfPts.pdfPts, mpts = pdfPts.mapPts;
+
+  // Convert LatLng reference points to Mercator pixels at REF_ZOOM
+  var mp = mpts.map(function(m) { return mapLeaflet.project(window.L.latLng(m[0], m[1]), REF_ZOOM); });
+
+  // Solve affine: PDF pixel (u,v) → Mercator pixel (mx, my)
+  var u1=ppts[0][0],v1=ppts[0][1], u2=ppts[1][0],v2=ppts[1][1], u3=ppts[2][0],v3=ppts[2][1];
+  var det = u1*(v2-v3) - v1*(u2-u3) + (u2*v3-u3*v2);
+  if (Math.abs(det) < 0.5) return null;
+  function sol(x1,x2,x3) {
+    return [
+      (x1*(v2-v3) - v1*(x2-x3) + (x2*v3-x3*v2)) / det,
+      (u1*(x2-x3) - x1*(u2-u3) + (u2*x3-u3*x2)) / det,
+      (u1*(v2*x3-v3*x2) - v1*(u2*x3-u3*x2) + x1*(u2*v3-u3*v2)) / det
+    ];
+  }
+  var rx=sol(mp[0].x,mp[1].x,mp[2].x); // [a,c,tx] for x
+  var ry=sol(mp[0].y,mp[1].y,mp[2].y); // [b,d,ty] for y
+  var a=rx[0],c=rx[1],tx=rx[2], b=ry[0],d=ry[1],ty=ry[2];
+
+  // Bounding box of the 4 image corners in Mercator space
+  var W=imgData.width, H=imgData.height;
+  var xs=[a*0+c*0+tx, a*W+c*0+tx, a*0+c*H+tx, a*W+c*H+tx];
+  var ys=[b*0+d*0+ty, b*W+d*0+ty, b*0+d*H+ty, b*W+d*H+ty];
+  var minX=Math.min.apply(null,xs),maxX=Math.max.apply(null,xs);
+  var minY=Math.min.apply(null,ys),maxY=Math.max.apply(null,ys);
+
+  // Canvas size — cap at 2048px on longest side
+  var cw=maxX-minX, ch=maxY-minY;
+  var sc=Math.min(1, 2048/Math.max(cw,ch));
+  cw=Math.max(1,Math.round(cw*sc)); ch=Math.max(1,Math.round(ch*sc));
+
+  // Load image element then draw warped
+  var img = await new Promise(function(res,rej){
+    var i=new Image(); i.onload=function(){res(i);}; i.onerror=rej; i.src=imgData.dataUrl;
+  });
+  var cvs=document.createElement('canvas'); cvs.width=cw; cvs.height=ch;
+  var ctx=cvs.getContext('2d');
+  // setTransform(a,b,c,d,e,f): maps drawing (u,v) → canvas (a*u+c*v+e, b*u+d*v+f)
+  ctx.setTransform(a*sc, b*sc, c*sc, d*sc, (tx-minX)*sc, (ty-minY)*sc);
+  ctx.drawImage(img, 0, 0);
+
+  // Leaflet Mercator: Y increases downward; higher lat = smaller Y pixel
+  var sw=mapLeaflet.unproject(window.L.point(minX,maxY),REF_ZOOM);
+  var ne=mapLeaflet.unproject(window.L.point(maxX,minY),REF_ZOOM);
+
+  return {
+    dataUrl: cvs.toDataURL('image/png'),
+    width: cw, height: ch,
+    bounds: [[sw.lat, sw.lng], [ne.lat, ne.lng]]
+  };
+}
+
 // ── IndexedDB helpers for PDF file handles ────────────────────────────────────
 function _pdfHandleDb() {
   return new Promise(function(resolve, reject) {
@@ -4866,6 +4915,7 @@ async function savePdfOverlayIdb(ov, handle) {
       id: ov.id, handle: handle || null,
       dataUrl: ov.dataUrl || null,
       width: ov.width, height: ov.height,
+      bounds: ov.bounds || null,
       pdfPts: ov.pdfPts, mapPts: ov.mapPts,
       opacity: ov.opacity, visible: ov.visible
     });
@@ -5042,18 +5092,27 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
     setPdfPts(p => p.concat([[Math.round(u), Math.round(v)]]));
   }
 
-  function finish() {
+  async function finish() {
     if (pdfPts.length < 3 || mapPts.length < 3) return;
-    onDone({
-      id: Date.now(),
-      dataUrl: imgData.dataUrl,
-      width: imgData.width,
-      height: imgData.height,
-      pdfPts: pdfPts,
-      mapPts: mapPts,
-      opacity: opacity,
-      visible: true,
-    }, fileHandle);
+    setPhase('loading');
+    try {
+      var warped = await computeWarpedImage(imgData, { pdfPts, mapPts }, mapRef.current);
+      if (!warped) { alert('Pontos colineares — escolhe pontos não alinhados'); setPhase('map'); return; }
+      onDone({
+        id: Date.now(),
+        dataUrl: warped.dataUrl,
+        width: warped.width,
+        height: warped.height,
+        bounds: warped.bounds,
+        pdfPts: pdfPts,
+        mapPts: mapPts,
+        opacity: opacity,
+        visible: true,
+      }, fileHandle);
+    } catch(e) {
+      alert('Erro ao georreferenciar: ' + e.message);
+      setPhase('map');
+    }
   }
 
   // ── Render ──
@@ -5388,70 +5447,22 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
 
-  // Sync PDF overlay layers with Leaflet map — 3-point affine transform
+  // Sync PDF overlay layers — warped image pre-computed at creation, L.imageOverlay for display
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
 
-    // Solve affine transform: 3 PDF pixels → container pixels
-    // Returns CSS matrix(a,b,c,d,tx,ty) coefficients
-    // where screen_x = a*u + c*v + tx,  screen_y = b*u + d*v + ty
-    function solveAffine(pts, mpts) {
-      var p = mpts.map(function(m) { return map.latLngToContainerPoint([m[0], m[1]]); });
-      var u1=pts[0][0], v1=pts[0][1];
-      var u2=pts[1][0], v2=pts[1][1];
-      var u3=pts[2][0], v3=pts[2][1];
-      // det of the 3x3 system matrix [[u1,v1,1],[u2,v2,1],[u3,v3,1]]
-      var det = u1*(v2-v3) - v1*(u2-u3) + (u2*v3 - u3*v2);
-      if (Math.abs(det) < 0.5) return null; // collinear points
-      function solve3(x1, x2, x3) {
-        var a  = (x1*(v2-v3) - v1*(x2-x3) + (x2*v3 - x3*v2)) / det;
-        var c  = (u1*(x2-x3) - x1*(u2-u3) + (u2*x3 - u3*x2)) / det;
-        var tx = (u1*(v2*x3-v3*x2) - v1*(u2*x3-u3*x2) + x1*(u2*v3-u3*v2)) / det;
-        return [a, c, tx];
-      }
-      var rx = solve3(p[0].x, p[1].x, p[2].x);
-      var ry = solve3(p[0].y, p[1].y, p[2].y);
-      // CSS matrix(a,b,c,d,tx,ty): a=rx[0], b=ry[0], c=rx[1], d=ry[1]
-      return { a:rx[0], b:ry[0], c:rx[1], d:ry[1], tx:rx[2], ty:ry[2] };
-    }
-
     function makeLayer(ov) {
-      if (!ov.dataUrl) return { remove: function(){}, setOverlay: function(){} };
-      var pts = ov.pdfPts, mpts = ov.mapPts;
-      if (!pts || pts.length < 3 || !mpts || mpts.length < 3) return { remove: function(){}, setOverlay: function(){} };
-
-      var ovRef = ov; // mutable ref updated by setOverlay
-      var container = map.getContainer();
-      var div = document.createElement('div');
-      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:450;';
-      var img = document.createElement('img');
-      img.src = ov.dataUrl;
-      img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
-      div.appendChild(img);
-      container.appendChild(div);
-
-      function update() {
-        if (!ovRef.visible || !ovRef.dataUrl) { div.style.display = 'none'; return; }
-        div.style.display = '';
-        div.style.opacity = String(ovRef.opacity);
-        var m = solveAffine(ovRef.pdfPts, ovRef.mapPts);
-        if (!m) return;
-        div.style.transform = 'matrix('+m.a+','+m.b+','+m.c+','+m.d+','+m.tx+','+m.ty+')';
-      }
-
-      map.on('zoom move zoomend moveend viewreset', update);
-      update();
-
+      if (!ov.dataUrl || !ov.bounds) return { remove: function(){}, setOverlay: function(){} };
+      var layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
+        opacity: ov.opacity, interactive: false, zIndex: 450
+      });
+      if (ov.visible) layer.addTo(map);
       return {
-        remove: function() {
-          map.off('zoom move zoomend moveend viewreset', update);
-          if (div.parentNode) div.parentNode.removeChild(div);
-        },
+        remove: function() { layer.remove(); },
         setOverlay: function(newOv) {
-          ovRef = newOv;
-          if (newOv.dataUrl) img.src = newOv.dataUrl;
-          update();
+          layer.setOpacity(newOv.opacity);
+          if (newOv.visible) layer.addTo(map); else layer.remove();
         }
       };
     }
