@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1155";
+const APP_VERSION = "20260428.1242";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -566,6 +566,91 @@ function displayTime(str) {
 function nowHHMM() {
   const d = new Date();
   return d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60;
+}
+
+// ================= AIRAC.NET CLIENT =================
+// Public AIRAC navigation database. CORS open, no auth, BunnyCDN in front.
+// All responses include AIRAC cycle headers; the data is immutable per cycle
+// (28 days), so we cache aggressively in localStorage.
+const AIRAC_BASE = "https://airac.net/api/v1";
+const AIRAC_LS_PREFIX = "airac_v1_";
+
+function _airacCacheGet(key) {
+  try {
+    const raw = localStorage.getItem(AIRAC_LS_PREFIX + key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (obj.expiresAt && obj.expiresAt < Date.now()) return null;
+    return obj.data;
+  } catch (_) { return null; }
+}
+function _airacCacheSet(key, data, ttlMs) {
+  try {
+    localStorage.setItem(AIRAC_LS_PREFIX + key, JSON.stringify({
+      data,
+      expiresAt: Date.now() + (ttlMs != null ? ttlMs : 14 * 86_400_000),
+    }));
+  } catch (_) {}
+}
+
+async function airacGetCurrent() {
+  const cached = _airacCacheGet("current");
+  if (cached) return cached;
+  try {
+    const r = await fetch(AIRAC_BASE + "/airac/current", { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.status !== "success" || !j.data) return null;
+    const d = j.data;
+    // Re-check at most once a day even if days_remaining is much larger.
+    const ttl = Math.min(86_400_000, Math.max(60_000, ((d.days_remaining || 0) + 0.5) * 86_400_000));
+    _airacCacheSet("current", d, ttl);
+    return d;
+  } catch (_) { return null; }
+}
+
+async function airacSearch(q, signal) {
+  if (!q || q.length < 2) return null;
+  try {
+    const r = await fetch(AIRAC_BASE + "/search?q=" + encodeURIComponent(q), {
+      headers: { Accept: "application/json" }, signal,
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j.status === "success" ? j.data : null;
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    return null;
+  }
+}
+
+function _normalizeCoords(d) {
+  // PHP-style float serialization leaves long binary tails on lat/lon — round to 6 dp.
+  if (!d) return d;
+  if (d.latitude  != null) d.latitude  = Math.round(Number(d.latitude)  * 1e6) / 1e6;
+  if (d.longitude != null) d.longitude = Math.round(Number(d.longitude) * 1e6) / 1e6;
+  if (d.coordinates) {
+    if (d.coordinates.lat != null) d.coordinates.lat = Math.round(Number(d.coordinates.lat) * 1e6) / 1e6;
+    if (d.coordinates.lon != null) d.coordinates.lon = Math.round(Number(d.coordinates.lon) * 1e6) / 1e6;
+  }
+  return d;
+}
+
+async function airacAirport(icao) {
+  if (!icao) return null;
+  const code = String(icao).toUpperCase().trim();
+  if (!/^[A-Z0-9]{3,4}$/.test(code)) return null;
+  const cached = _airacCacheGet("ap_" + code);
+  if (cached) return cached;
+  try {
+    const r = await fetch(AIRAC_BASE + "/airports/" + code, { headers: { Accept: "application/json" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.status !== "success" || !j.data) return null;
+    const d = _normalizeCoords(j.data);
+    _airacCacheSet("ap_" + code, d, 14 * 86_400_000);
+    return d;
+  } catch (_) { return null; }
 }
 
 // ================= STATE INICIAL =================
@@ -1814,6 +1899,29 @@ function TabButton({ active, onClick, icon, label, theme }) {
 }
 
 // --------- SETUP ---------
+function AiracBadge({ theme }) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => { airacGetCurrent().then(setInfo); }, []);
+  if (!info) return null;
+  const days = info.days_remaining;
+  const expired = typeof days === "number" && days < 0;
+  const warn    = typeof days === "number" && days >= 0 && days <= 3;
+  const cls = expired
+    ? "border-red-500 text-red-300 bg-red-500/10"
+    : warn
+      ? "border-amber-500 text-amber-300 bg-amber-500/10"
+      : (theme.panelBorder + " " + (theme.fgMuted || "text-zinc-400"));
+  const tip = `Efetivo ${(info.effective_date || "").slice(0,10)} → expira ${(info.expiration_date || "").slice(0,10)}`;
+  return (
+    <div title={tip}
+      className={`text-[10px] uppercase tracking-widest border rounded-md px-2 py-1 inline-flex items-center gap-1.5 num ${cls}`}>
+      <span className="font-bold">AIRAC {info.cycle}</span>
+      <span>·</span>
+      <span>{expired ? "expirado" : (days == null ? "—" : `${days} dia${days !== 1 ? "s" : ""}`)}</span>
+    </div>
+  );
+}
+
 function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
@@ -1854,6 +1962,10 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
 
   return (
     <div className="px-3 py-3 space-y-4">
+      <div className="flex items-center justify-end -mb-2">
+        <AiracBadge theme={theme} />
+      </div>
+
       {/* AERONAVE */}
       <Section theme={theme} icon={<Plane className="w-4 h-4" />} title="Aeronave">
         <select
@@ -2164,6 +2276,48 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const [showPerf, setShowPerf] = useState(false);
   const altDragRef = useRef({ active: false, startY: 0, startVal: 0 });
 
+  // AIRAC.net autocomplete for the name field.
+  const [airacSugs, setAiracSugs] = useState(null);
+  const [airacSearching, setAiracSearching] = useState(false);
+  const airacAbortRef = useRef(null);
+  const airacDebounceRef = useRef(null);
+  function triggerAiracSearch(q) {
+    if (airacDebounceRef.current) clearTimeout(airacDebounceRef.current);
+    if (airacAbortRef.current) { try { airacAbortRef.current.abort(); } catch (_) {} airacAbortRef.current = null; }
+    if (!q || q.length < 2) { setAiracSugs(null); setAiracSearching(false); return; }
+    setAiracSearching(true);
+    airacDebounceRef.current = setTimeout(async () => {
+      const ctrl = new AbortController();
+      airacAbortRef.current = ctrl;
+      try {
+        const data = await airacSearch(q, ctrl.signal);
+        if (ctrl === airacAbortRef.current) {
+          setAiracSugs(data || { airports: [], navaids: [], waypoints: [] });
+          setAiracSearching(false);
+        }
+      } catch (_) { /* aborted */ }
+    }, 300);
+  }
+  useEffect(() => {
+    return () => {
+      if (airacDebounceRef.current) clearTimeout(airacDebounceRef.current);
+      if (airacAbortRef.current) { try { airacAbortRef.current.abort(); } catch (_) {} }
+    };
+  }, []);
+  function applyAiracSuggestion(item, kind) {
+    const name = (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "";
+    const lat = item.latitude != null ? Number(item.latitude) : (item.coordinates?.lat != null ? Number(item.coordinates.lat) : null);
+    const lon = item.longitude != null ? Number(item.longitude) : (item.coordinates?.lon != null ? Number(item.coordinates.lon) : null);
+    setCp(p => {
+      const n = Object.assign({}, p, { name: String(name).slice(0, 10).toUpperCase() });
+      if (lat != null && lon != null) { n.lat = Math.round(lat * 1e6) / 1e6; n.lon = Math.round(lon * 1e6) / 1e6; n._tcDistEdited = true; }
+      if (kind === "airport" && item.elevation_ft != null) { n.alt = Number(item.elevation_ft); n.useCruiseAlt = false; }
+      return n;
+    });
+    setAiracSugs(null);
+    if (lat != null && lon != null) applyCoords(Math.round(lat * 1e6) / 1e6, Math.round(lon * 1e6) / 1e6);
+  }
+
   // DDM (degrees + decimal minutes) editing state, kept in sync with cp.lat/cp.lon.
   function decToDdm(dd, isLon) {
     if (dd == null || isNaN(dd)) return { deg: "", min: "", hem: isLon ? "W" : "N" };
@@ -2337,10 +2491,73 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             <label className={lbl}>Nome (max 10)</label>
             <input type="text" autoCapitalize="characters" maxLength={10}
               value={cp.name || ""}
-              onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { name: e.target.value.toUpperCase().slice(0,10) }); }); }}
+              onChange={function(e) {
+                var v = e.target.value.toUpperCase().slice(0, 10);
+                setCp(function(p) { return Object.assign({}, p, { name: v }); });
+                triggerAiracSearch(v);
+              }}
+              onBlur={function() {
+                // Delay so a click on a suggestion is registered before we hide.
+                setTimeout(function() { setAiracSugs(null); }, 150);
+              }}
               placeholder="LPPT"
               className={`w-full ${theme.inputBg} border-2 ${cp.name ? theme.accentBorder : theme.inputBorder} ${theme.fg} px-4 py-3 text-2xl font-black tracking-widest rounded-xl num focus:outline-none`}
             />
+            {(airacSearching || airacSugs) && (function() {
+              var aps = (airacSugs && airacSugs.airports)  || [];
+              var nvs = (airacSugs && airacSugs.navaids)   || [];
+              var wps = (airacSugs && airacSugs.waypoints) || [];
+              var total = aps.length + nvs.length + wps.length;
+              if (!airacSearching && total === 0 && airacSugs != null) {
+                return (
+                  <div className={`mt-1 ${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-2 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                    Sem resultados em AIRAC {airacSugs ? "" : ""}
+                  </div>
+                );
+              }
+              var rowBase = "w-full text-left px-3 py-2 active:opacity-70";
+              function row(key, kind, item, label, sub, right) {
+                return (
+                  <button key={key} type="button"
+                    onMouseDown={function(e) { e.preventDefault(); }}
+                    onClick={function() { applyAiracSuggestion(item, kind); }}
+                    className={`${rowBase} flex items-center gap-2 border-b ${theme.panelBorder} last:border-b-0`}>
+                    <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>
+                      {kind === "airport" ? "✈ APT" : kind === "navaid" ? "⊕ NAV" : "◇ WPT"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-bold truncate ${theme.fg}`}>{label}</div>
+                      {sub && <div className={`text-[10px] truncate ${theme.fgFaint}`}>{sub}</div>}
+                    </div>
+                    {right && <span className={`text-[10px] num shrink-0 ${theme.fgFaint}`}>{right}</span>}
+                  </button>
+                );
+              }
+              return (
+                <div className={`mt-1 ${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden max-h-72 overflow-y-auto`}>
+                  {airacSearching && (
+                    <div className={`px-3 py-2 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                      Buscando…
+                    </div>
+                  )}
+                  {aps.slice(0, 5).map(function(it) {
+                    var sub = [it.name, it.city, it.country].filter(Boolean).join(" · ");
+                    var right = it.elevation_ft != null ? `${it.elevation_ft} ft` : null;
+                    return row("a-" + it.icao, "airport", it, it.icao || it.iata || "—", sub, right);
+                  })}
+                  {nvs.slice(0, 5).map(function(it, i) {
+                    var label = it.identifier || it.icao || ("NAV " + i);
+                    var sub = [it.name, it.type, it.country, it.region].filter(Boolean).join(" · ");
+                    return row("n-" + label + "-" + i, "navaid", it, label, sub, null);
+                  })}
+                  {wps.slice(0, 5).map(function(it, i) {
+                    var label = it.identifier || ("WPT " + i);
+                    var sub = [it.region, it.country].filter(Boolean).join(" · ");
+                    return row("w-" + label + "-" + i, "waypoint", it, label, sub, null);
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* POSIÇÃO */}
