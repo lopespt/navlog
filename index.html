@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1012";
+const APP_VERSION = "20260428.1042";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -885,6 +885,34 @@ function NavlogApp() {
 
   // ETA em voo: último ATA (ou ATD) + ETE das pernas seguintes
   // Se temos GS real do último ponto cruzado, recomputa ETE futuro com esse GS
+  // Map: legIdx -> [{ label, autoKey, dist (planned, NM into the leg), time (planned, min into the leg) }]
+  // Mirrors the autoKey numbering used by liveRoute below so we can look up virtual ATAs per leg.
+  const legVirtualsMap = useMemo(() => {
+    const map = {};
+    let tocN = 0, todN = 0, bodN = 0;
+    computed.forEach((cp, i) => {
+      if (cp.isOrigin || !cp.portions || cp.portions.length <= 1) return;
+      const list = [];
+      let accDist = 0, accTime = 0;
+      for (let p = 0; p < cp.portions.length - 1; p++) {
+        accDist += cp.portions[p].dist || 0;
+        accTime += cp.portions[p].timeMin || 0;
+        const from = cp.portions[p].phase, to = cp.portions[p + 1].phase;
+        const label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
+          : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
+          : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
+          : null;
+        if (!label) continue;
+        const autoKey = label === "TOC" ? `toc_${tocN++}`
+          : label === "TOD" ? `tod_${todN++}`
+          : `bod_${bodN++}`;
+        list.push({ label, autoKey, dist: accDist, time: accTime });
+      }
+      if (list.length > 0) map[i] = list;
+    });
+    return map;
+  }, [computed]);
+
   const liveETAs = useMemo(() => {
     const etas = computed.map(() => null);
     let lastCrossed = null;
@@ -904,11 +932,41 @@ function NavlogApp() {
     }
     let cumMin = baseMin;
     for (let i = baseIdx + 1; i < computed.length; i++) {
-      cumMin += computed[i].etePlanned;
+      const cp = computed[i];
+      const legStartMin = cumMin;
+      let legETE = cp.etePlanned;
+
+      // Adjust ETE based on the latest marked virtual (TOC/TOD/BOD) on this leg.
+      // Model: actual_GS in the climb/descent phase equals planned_GS, so reaching
+      // TOC X minutes off plan means we covered planned_dist * (X / planned_time).
+      // The remaining distance after the virtual runs at the planned post-virtual GS.
+      const virtuals = legVirtualsMap[i];
+      if (virtuals && virtuals.length > 0 && (cp.dist || 0) > 0 && (cp.etePlanned || 0) > 0) {
+        const marked = [];
+        for (const v of virtuals) {
+          const ata = parseHHMM(flight.autoWpATAs?.[v.autoKey]);
+          if (ata != null) marked.push({ ...v, ata });
+        }
+        if (marked.length > 0) {
+          const last = marked[marked.length - 1];
+          const actualTimeToVirtual = last.ata - legStartMin;
+          if (actualTimeToVirtual > 0 && last.time > 0) {
+            const actualDistToVirtual = last.dist * (actualTimeToVirtual / last.time);
+            const remPlannedDist = cp.dist - last.dist;
+            const remPlannedTime = cp.etePlanned - last.time;
+            const remDist = cp.dist - actualDistToVirtual;
+            const remGS = remPlannedDist > 0 && remPlannedTime > 0 ? remPlannedDist / remPlannedTime : null;
+            const remTime = (remGS && remDist > 0) ? remDist / remGS : remPlannedTime;
+            legETE = actualTimeToVirtual + Math.max(0, remTime);
+          }
+        }
+      }
+
+      cumMin = legStartMin + legETE;
       etas[i] = cumMin;
     }
     return etas;
-  }, [computed, flight.atd]);
+  }, [computed, flight.atd, flight.autoWpATAs, legVirtualsMap]);
 
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
