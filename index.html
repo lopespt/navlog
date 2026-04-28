@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0500";
+const APP_VERSION = "20260428.0341";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2088,6 +2088,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const [tcMode, setTcMode] = useState("mh"); // "mh" | "tc"
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
+  const altDragRef = useRef({ active: false, startY: 0, startVal: 0 });
 
   const prevCp = isNew
     ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
@@ -2267,71 +2268,116 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 Valor
               </button>
             </div>
-            {altMode === "custom" && (
-              <input type="number" inputMode="numeric" placeholder="7000"
-                value={cp.alt != null ? cp.alt : ""}
-                onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { alt: e.target.value === "" ? null : Number(e.target.value), useCruiseAlt: false }); }); }}
-                className={fld}
-              />
-            )}
-
-            {/* Quando nivelar — só para pernas com variação de altitude */}
-            {!isOrigin && (function() {
-              var currentAlt = cp.useCruiseAlt ? cruiseAlt : cp.alt;
-              var isClimbing   = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
-              var isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
-              if (!isClimbing && !isDescending) return null;
-              var contextDefault = isDescending ? "at_fix" : "asap";
-              var arrivalMode  = cp.arrivalMode ?? null;
-              var arrivalValue = cp.arrivalValue ?? 5;
-              var modeOpts = [
-                { key: "asap",       label: "ASAP" },
-                { key: "at_fix",     label: "No fix" },
-                { key: "before_nm",  label: "−NM" },
-                { key: "before_min", label: "−min" },
-              ];
-              function setMode(key) {
-                setCp(function(p) { return Object.assign({}, p, { arrivalMode: p.arrivalMode === key ? null : key }); });
+            {altMode === "custom" && (function() {
+              function clamp(v) { return Math.max(0, Math.min(60000, Math.round(v))); }
+              function setAlt(v) {
+                var n = clamp(v);
+                setCp(function(p) { return Object.assign({}, p, { alt: n, useCruiseAlt: false }); });
               }
-              function adjustValue(delta) {
-                setCp(function(p) { return Object.assign({}, p, { arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }); });
+              function onPD(e, step, pxPer) {
+                altDragRef.current = {
+                  active: true,
+                  startY: e.clientY,
+                  startVal: cp.alt != null ? cp.alt : (cruiseAlt || 7000),
+                  step: step,
+                  pxPer: pxPer
+                };
+                try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
               }
+              function onPM(e) {
+                var s = altDragRef.current;
+                if (!s.active) return;
+                var dy = s.startY - e.clientY; // up = positive
+                var inc = Math.round(dy / s.pxPer);
+                setAlt(s.startVal + inc * s.step);
+              }
+              function onPU() { altDragRef.current.active = false; }
+              var handleCls = "w-11 flex flex-col items-center justify-center select-none text-[10px] font-black uppercase tracking-wider active:scale-95 transition-transform";
               return (
-                <div className={`mt-2 ${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
-                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-                    {isClimbing ? "↗ Subida" : "↘ Descida"} · nivelar
-                    {arrivalMode == null && <span className={`ml-1 ${theme.cyan}`}>· padrão: {contextDefault === "asap" ? "ASAP" : "no fix"}</span>}
-                  </div>
-                  <div className="flex gap-1">
-                    {modeOpts.map(function(opt) {
-                      var key = opt.key, label = opt.label;
-                      var active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
-                      return (
-                        <button key={key} onClick={function() { setMode(key); }}
-                          className={`flex-1 py-2 rounded-lg border text-[11px] font-bold transition-colors active:scale-95 ${
-                            active ? `${theme.accentBorder} bg-amber-500/10 ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`
-                          }`}>
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
-                    <div className="flex items-center gap-3">
-                      <button onClick={function() { adjustValue(-1); }}
-                        className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
-                      <div className="flex-1 text-center">
-                        <span className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
-                        <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
-                      </div>
-                      <button onClick={function() { adjustValue(1); }}
-                        className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
-                    </div>
-                  )}
+                <div className={`flex items-stretch ${theme.inputBg} border ${theme.inputBorder} rounded-xl overflow-hidden mt-2`}>
+                  <input type="number" inputMode="numeric" placeholder="7000" min="0" max="60000" step="100"
+                    value={cp.alt != null ? cp.alt : ""}
+                    onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { alt: e.target.value === "" ? null : Number(e.target.value), useCruiseAlt: false }); }); }}
+                    className={`flex-1 min-w-0 bg-transparent ${theme.fg} px-3 py-2.5 text-base num focus:outline-none`}
+                  />
+                  <span className={`self-center text-xs ${theme.fgFaint} px-1`}>ft</span>
+                  <button
+                    onPointerDown={function(e) { onPD(e, 1000, 25); }}
+                    onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
+                    style={{ touchAction: "none" }}
+                    className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
+                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="leading-tight mt-0.5">1k</span>
+                  </button>
+                  <button
+                    onPointerDown={function(e) { onPD(e, 100, 12); }}
+                    onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
+                    style={{ touchAction: "none" }}
+                    className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
+                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="leading-tight mt-0.5">100</span>
+                  </button>
                 </div>
               );
             })()}
           </div>
+
+          {/* QUANDO NIVELAR — só quando há variação de altitude */}
+          {!isOrigin && (function() {
+            var currentAlt = cp.useCruiseAlt ? cruiseAlt : cp.alt;
+            var isClimbing   = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
+            var isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
+            if (!isClimbing && !isDescending) return null;
+            var contextDefault = isDescending ? "at_fix" : "asap";
+            var arrivalMode  = cp.arrivalMode ?? null;
+            var arrivalValue = cp.arrivalValue ?? 5;
+            var modeOpts = [
+              { key: "asap",       label: "ASAP" },
+              { key: "at_fix",     label: "No fix" },
+              { key: "before_nm",  label: "−NM" },
+              { key: "before_min", label: "−min" },
+            ];
+            function setMode(key) {
+              setCp(function(p) { return Object.assign({}, p, { arrivalMode: p.arrivalMode === key ? null : key }); });
+            }
+            function adjustValue(delta) {
+              setCp(function(p) { return Object.assign({}, p, { arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }); });
+            }
+            return (
+              <div className={sect}>
+                <label className={lbl}>
+                  {isClimbing ? "↗ Subida" : "↘ Descida"} · quando nivelar
+                  {arrivalMode == null && <span className={`ml-1 ${theme.cyan} normal-case tracking-normal`}>(padrão: {contextDefault === "asap" ? "ASAP" : "no fix"})</span>}
+                </label>
+                <div className="flex gap-1">
+                  {modeOpts.map(function(opt) {
+                    var key = opt.key, label = opt.label;
+                    var active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
+                    return (
+                      <button key={key} onClick={function() { setMode(key); }}
+                        className={`flex-1 py-2.5 rounded-lg border-2 text-xs font-bold transition-colors active:scale-95 ${
+                          active ? `${theme.accentBorder} ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`
+                        }`}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
+                  <div className="flex items-center gap-3 mt-2">
+                    <button onClick={function() { adjustValue(-1); }}
+                      className={`w-12 h-12 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
+                    <div className="flex-1 text-center">
+                      <span className={`text-3xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
+                      <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
+                    </div>
+                    <button onClick={function() { adjustValue(1); }}
+                      className={`w-12 h-12 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* TC / DIST (não origem) */}
           {!isOrigin && (
