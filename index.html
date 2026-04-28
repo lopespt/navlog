@@ -97,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0037";
+const APP_VERSION = "20260428.0048";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -686,6 +686,8 @@ function NavlogApp() {
   const [flight, setFlight] = useState(DEFAULT_FLIGHT);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
+  const [insertAfterIdx, setInsertAfterIdx] = useState(null);
+  const [insertCoords, setInsertCoords] = useState(null); // [lat, lon] from map click
   const [routesOpen, setRoutesOpen] = useState(false);
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [ataEditOpen, setAtaEditOpen] = useState(false);
@@ -1468,7 +1470,7 @@ function NavlogApp() {
       </header>
 
       {/* CONTEÚDO */}
-      <main className="pb-24">
+      <main className={tab === 'map' ? 'overflow-hidden' : 'pb-24'}>
         {tab === "setup" && (
           <SetupTab
             flight={flight} setFlight={setFlight} ac={ac} theme={theme}
@@ -1518,6 +1520,12 @@ function NavlogApp() {
           <MapTab
             flight={flight} computed={computed} liveRoute={liveRoute}
             liveETAs={liveETAs} ac={ac} theme={theme}
+            onInsertWaypoint={(afterIdx, lat, lon) => {
+              setInsertAfterIdx(afterIdx);
+              setInsertCoords([lat, lon]);
+              setEditingIdx(null);
+              setEditorOpen(true);
+            }}
           />
         )}
       </main>
@@ -1543,9 +1551,12 @@ function NavlogApp() {
         <WaypointEditor
           flight={flight} setFlight={setFlight}
           editingIdx={editingIdx}
+          insertAfterIdx={insertAfterIdx}
+          initLat={insertCoords?.[0]}
+          initLon={insertCoords?.[1]}
           ac={ac}
           theme={theme}
-          onClose={() => setEditorOpen(false)}
+          onClose={() => { setEditorOpen(false); setInsertAfterIdx(null); setInsertCoords(null); }}
         />
       )}
 
@@ -2031,14 +2042,15 @@ function Stat({ label, value, theme }) {
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
 const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
-function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac }) {
   const isNew = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   // Default altitude = last user waypoint's altitude (resolve useCruiseAlt)
   const lastUserCp = [...flight.checkpoints].filter((cp) => !cp.isOrigin && !cp.isAuto).pop();
   const lastUserAlt = lastUserCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (lastUserCp?.alt ?? flight.cruiseAlt ?? 7000);
   const initial = isNew
-    ? { name: "", alt: lastUserAlt, tc: null, dist: null, windDir: null, windVel: null }
+    ? { name: "", alt: lastUserAlt, tc: null, dist: null, windDir: null, windVel: null,
+        lat: initLat ?? null, lon: initLon ?? null }
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
@@ -2049,8 +2061,9 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
     : "route" // padrão
   );
 
+  // When inserting at a specific position, prevCp is the WP we're inserting after
   const prevCpForSteps = isNew
-    ? flight.checkpoints[flight.checkpoints.length - 1]
+    ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
     : flight.checkpoints[editingIdx - 1];
   const bothEndsHaveCoords = cp.lat != null && cp.lon != null
     && prevCpForSteps?.lat != null && prevCpForSteps?.lon != null;
@@ -2077,13 +2090,18 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
       const saved = { ...cp, windMode };
       if (windMode !== "custom") { delete saved.windDir; delete saved.windVel; }
       if (isNew) {
-        cps.push({ ...saved, ata: null, gsActual: null });
+        if (insertAfterIdx != null) {
+          // Insert at a specific position (from map click)
+          cps.splice(insertAfterIdx + 1, 0, { ...saved, ata: null, gsActual: null });
+        } else {
+          cps.push({ ...saved, ata: null, gsActual: null });
+        }
       } else {
         cps[editingIdx] = { ...saved };
       }
       // Pass 1 — project lat/lon from TC+dist for the edited waypoint only.
       // Source of truth is always the stored position; following waypoints are never touched.
-      var _editIdx = isNew ? cps.length - 1 : editingIdx;
+      var _editIdx = isNew ? (insertAfterIdx != null ? insertAfterIdx + 1 : cps.length - 1) : editingIdx;
       var _editCp = cps[_editIdx];
       var _editPrev = _editIdx > 0 ? cps[_editIdx - 1] : null;
       if (_editCp != null && _editCp.lat == null
@@ -4783,12 +4801,23 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
 
 // ── Map tab ───────────────────────────────────────────────────────────────────
-function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
+// Flat-earth distance from point P to segment A→B (in degrees, approximate)
+function ptSegDist(px, py, ax, ay, bx, by) {
+  var dx = bx - ax, dy = by - ay;
+  var len2 = dx*dx + dy*dy;
+  if (len2 === 0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
+  var t = Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/len2));
+  var cx = ax+t*dx, cy = ay+t*dy;
+  return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
+}
+
+function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
   const [tick, setTick] = useState(0);
+  const [mapClickMenu, setMapClickMenu] = useState(null); // { lat, lon, afterIdx, afterName, beforeName }
 
   // Re-render simulated position every second
   useEffect(() => {
@@ -4796,10 +4825,34 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
     return () => clearInterval(id);
   }, []);
 
+  // Keep a ref to current flight checkpoints for the click handler (avoids stale closure)
+  const flightRef = useRef(flight);
+  useEffect(() => { flightRef.current = flight; }, [flight]);
+
   // Init Leaflet map once
   useEffect(() => {
     if (!window.L || !mapDivRef.current || mapRef.current) return;
     const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
+
+    map.on('click', (e) => {
+      const lat = e.latlng.lat, lon = e.latlng.lng;
+      const cps = flightRef.current.checkpoints;
+      // Find the closest leg (consecutive pair with coords) to the clicked point
+      let bestIdx = null, bestDist = Infinity;
+      for (var ci = 0; ci + 1 < cps.length; ci++) {
+        var a = cps[ci], b = cps[ci + 1];
+        if (a.lat == null || b.lat == null) continue;
+        var d = ptSegDist(lat, lon, a.lat, a.lon, b.lat, b.lon);
+        if (d < bestDist) { bestDist = d; bestIdx = ci; }
+      }
+      // If only one WP exists (origin only) or no legs yet, insert after last
+      if (bestIdx == null && cps.length > 0) bestIdx = cps.length - 1;
+      if (bestIdx == null) return;
+      const afterName = cps[bestIdx]?.name || String(bestIdx);
+      const beforeName = cps[bestIdx + 1]?.name || null;
+      setMapClickMenu({ lat, lon, afterIdx: bestIdx, afterName, beforeName });
+    });
+
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);
@@ -4827,18 +4880,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
     return window.L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
   }
   function planeIcon(heading) {
-    // SVG airplane pointing north (up) at 0° — rotate by true course
-    const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32'>"
-      + "<g transform='rotate(" + heading + ",16,16)'>"
-      // fuselage
-      + "<path d='M16 4 L19 22 L16 20 L13 22 Z' fill='#a855f7' stroke='white' stroke-width='1.5' stroke-linejoin='round'/>"
-      // wings
-      + "<path d='M16 14 L6 20 L7 17 L16 13 L25 17 L26 20 Z' fill='#a855f7' stroke='white' stroke-width='1' stroke-linejoin='round'/>"
-      // tail
-      + "<path d='M16 19 L12 24 L13 22 L19 22 L20 24 Z' fill='#a855f7' stroke='white' stroke-width='0.8' stroke-linejoin='round'/>"
-      + "</g></svg>";
-    const html = "<div style='line-height:0'>" + svg + "</div>";
-    return window.L.divIcon({ html, className: '', iconSize: [32,32], iconAnchor: [16,16] });
+    // ✈ emoji points East (90°) by default — subtract 90° to normalize to North=0°
+    const html = `<div style="transform:rotate(${heading - 90}deg);font-size:22px;filter:drop-shadow(0 1px 3px #000);line-height:1">✈</div>`;
+    return window.L.divIcon({ html, className: '', iconSize: [26,26], iconAnchor: [13,13] });
   }
 
   // Redraw route + markers when liveRoute changes
@@ -4889,38 +4933,37 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
     if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
 
     const nowMin = nowHHMM();
-
-    // Find last crossed WP and next uncrossed WP with coords
-    let lastCp = null, nextCp = null;
-    for (const wp of liveRoute) {
-      if (wp.lat == null || wp.lon == null) continue;
-      if (wp.ata != null) lastCp = wp;
-      else if (!nextCp) nextCp = wp;
-    }
-
-    // Also try ATD at origin
+    const eobtMin = parseHHMM(flight.eobt) ?? 0;
     const origin = liveRoute.find(cp => cp.isOrigin && cp.lat != null);
     const atdMin = flight.atd ? parseHHMM(flight.atd) : null;
 
-    let simLat, simLon, simTC;
-    if (!nextCp) {
-      // All crossed — show at last WP
-      if (lastCp) { simLat = lastCp.lat; simLon = lastCp.lon; simTC = lastCp.tc ?? 0; }
-    } else if (!lastCp && atdMin != null && origin) {
-      // In flight from origin, not yet crossed any WP
-      const eta = nextCp.etaPlanned;
-      if (eta != null && eta > atdMin) {
-        const frac = Math.min(1, Math.max(0, (nowMin - atdMin) / (eta - atdMin)));
-        [simLat, simLon] = gcInterpolate(origin.lat, origin.lon, nextCp.lat, nextCp.lon, frac);
-        simTC = nextCp.tc ?? 0;
+    // Find prev (last crossed, or origin at ATD) and next (first uncrossed) WP with coords
+    let prevWp = null, prevTime = null, nextWp = null;
+
+    // Seed with origin at ATD if departure logged
+    if (origin && atdMin != null) { prevWp = origin; prevTime = atdMin; }
+
+    for (const wp of liveRoute) {
+      if (wp.lat == null || wp.lon == null || wp.isOrigin) continue;
+      if (wp.ata != null) {
+        prevWp = wp; prevTime = parseHHMM(wp.ata); nextWp = null;
+      } else if (!nextWp && prevWp != null) {
+        nextWp = wp;
       }
-    } else if (lastCp && nextCp) {
-      const lastATA = parseHHMM(lastCp.ata);
-      const nextETA = nextCp.etaPlanned;
-      if (lastATA != null && nextETA != null && nextETA > lastATA) {
-        const frac = Math.min(1, Math.max(0, (nowMin - lastATA) / (nextETA - lastATA)));
-        [simLat, simLon] = gcInterpolate(lastCp.lat, lastCp.lon, nextCp.lat, nextCp.lon, frac);
-        simTC = nextCp.tc ?? 0;
+    }
+
+    let simLat, simLon, simTC;
+    if (!nextWp) {
+      // All crossed or no next — park at prevWp
+      if (prevWp && !prevWp.isOrigin) { simLat = prevWp.lat; simLon = prevWp.lon; simTC = prevWp.tc ?? 0; }
+    } else if (prevWp && prevTime != null) {
+      // Planned leg duration: diff between nextWp and prevWp planned ETAs
+      const prevPlanned = prevWp.isOrigin ? eobtMin : (prevWp.etaPlanned ?? eobtMin);
+      const legDuration = (nextWp.etaPlanned ?? 0) - prevPlanned;
+      if (legDuration > 0) {
+        const frac = Math.min(1, Math.max(0, (nowMin - prevTime) / legDuration));
+        [simLat, simLon] = gcInterpolate(prevWp.lat, prevWp.lon, nextWp.lat, nextWp.lon, frac);
+        simTC = nextWp.tc ?? 0;
       }
     }
 
@@ -4968,6 +5011,36 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
             <div className={`text-[11px] ${theme.fgFaint}`}>
               Edite os waypoints no Setup e adicione coordenadas (lat/lon) para ver a rota no mapa.
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Map click menu — add waypoint */}
+      {mapClickMenu && (
+        <div className={`absolute bottom-0 left-0 right-0 ${theme.panel} border-t ${theme.panelBorder} p-4 z-50`}
+          style={{ isolation: 'isolate' }}>
+          <div className={`text-[10px] ${theme.fgFaint} mb-1`}>
+            {mapClickMenu.beforeName
+              ? `Inserir entre ${mapClickMenu.afterName} → ${mapClickMenu.beforeName}`
+              : `Adicionar após ${mapClickMenu.afterName}`}
+          </div>
+          <div className={`font-mono text-xs ${theme.fgMuted} mb-3`}>
+            {mapClickMenu.lat.toFixed(4)}° {mapClickMenu.lon.toFixed(4)}°
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                onInsertWaypoint(mapClickMenu.afterIdx, mapClickMenu.lat, mapClickMenu.lon);
+                setMapClickMenu(null);
+              }}
+              className={`flex-1 ${theme.accentBg} ${theme.accentBgFg ?? 'text-black'} rounded-xl py-3 font-bold text-sm active:scale-95 transition-transform`}>
+              Adicionar waypoint
+            </button>
+            <button
+              onClick={() => setMapClickMenu(null)}
+              className={`px-4 rounded-xl border ${theme.panelBorder} ${theme.fgMuted} py-3 text-sm active:scale-95 transition-transform`}>
+              Cancelar
+            </button>
           </div>
         </div>
       )}
