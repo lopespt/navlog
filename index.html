@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0341";
+const APP_VERSION = "20260428.0438";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1577,6 +1577,7 @@ function NavlogApp() {
           initLon={insertCoords?.[1]}
           ac={ac}
           theme={theme}
+          pdfOverlays={pdfOverlays}
           onClose={() => { setEditorOpen(false); setInsertAfterIdx(null); setInsertCoords(null); }}
         />
       )}
@@ -2070,7 +2071,7 @@ function Stat({ label, value, theme }) {
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
 const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, pdfOverlays }) {
   const isNew    = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   const cruiseAlt = flight.cruiseAlt ?? 7000;
@@ -2504,6 +2505,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           onConfirm={applyCoords}
           onCancel={function() { setShowMapPicker(false); }}
           theme={theme}
+          pdfOverlays={pdfOverlays}
         />
       )}
     </div>
@@ -2672,10 +2674,11 @@ function StepCoord({ cp, setCp, prevCp, theme, onNext, allWps }) {
   );
 }
 
-function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme }) {
+function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays }) {
   const mapDivRef = useRef(null);
   const mapRef = useRef(null);
   const pickedMarkerRef = useRef(null);
+  const pdfLayerRefs = useRef({});
   const [picked, setPicked] = useState(initialPos ?? null);
 
   useEffect(() => {
@@ -2685,14 +2688,18 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme }) {
       attribution: '© OpenStreetMap', maxZoom: 18
     }).addTo(map);
 
+    // Pane for waypoints/route on top of PDF overlays
+    map.createPane('pickerRoute');
+    map.getPane('pickerRoute').style.zIndex = 500;
+
     const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
     if (wps.length > 0) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.8, dashArray: '5,5' }).addTo(map);
+      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.8, dashArray: '5,5', pane: 'pickerRoute' }).addTo(map);
       wps.forEach(cp => {
         const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
         const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
-        window.L.marker([cp.lat, cp.lon], { icon }).addTo(map).bindPopup(cp.name || '');
+        window.L.marker([cp.lat, cp.lon], { icon, pane: 'pickerRoute' }).addTo(map).bindPopup(cp.name || '');
       });
       map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
     } else if (initialPos) {
@@ -2706,6 +2713,31 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme }) {
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  // Render PDF overlays (cartas) on the picker map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L || !pdfOverlays) return;
+    // Remove existing
+    Object.keys(pdfLayerRefs.current).forEach(id => {
+      try { pdfLayerRefs.current[id].remove(); } catch (_) {}
+    });
+    pdfLayerRefs.current = {};
+    // Add visible overlays
+    pdfOverlays.forEach(ov => {
+      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
+      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
+        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450
+      }).addTo(map);
+      pdfLayerRefs.current[ov.id] = layer;
+    });
+    return () => {
+      Object.keys(pdfLayerRefs.current).forEach(id => {
+        try { pdfLayerRefs.current[id].remove(); } catch (_) {}
+      });
+      pdfLayerRefs.current = {};
+    };
+  }, [pdfOverlays]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -5046,19 +5078,32 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
 // Render first page of a PDF file → { dataUrl, width, height }
 async function renderPdfToImage(file, scale) {
-  scale = scale || 2;
+  scale = scale || 3;
   if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
   window.pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   var ab = await file.arrayBuffer();
   var pdf = await window.pdfjsLib.getDocument({ data: ab }).promise;
   var page = await pdf.getPage(1);
-  var vp = page.getViewport({ scale: scale });
+  // Cap longest side at 6000 px to balance quality vs memory
+  var baseVp = page.getViewport({ scale: 1 });
+  var longest = Math.max(baseVp.width, baseVp.height);
+  var maxLong = 6000;
+  var effectiveScale = Math.min(scale, maxLong / longest);
+  var vp = page.getViewport({ scale: effectiveScale });
   var canvas = document.createElement('canvas');
-  canvas.width  = vp.width;
-  canvas.height = vp.height;
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-  return { dataUrl: canvas.toDataURL('image/png'), width: vp.width, height: vp.height };
+  canvas.width  = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  var ctx = canvas.getContext('2d', { alpha: false });
+  // White background — PDFs are usually white-on-something
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({
+    canvasContext: ctx,
+    viewport: vp,
+    intent: 'print', // higher-fidelity text/vector rendering
+  }).promise;
+  return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
 }
 
 // Warp PDF image to Mercator-aligned canvas using 3-point affine transform.
@@ -5092,9 +5137,9 @@ async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
   var minX=Math.min.apply(null,xs),maxX=Math.max.apply(null,xs);
   var minY=Math.min.apply(null,ys),maxY=Math.max.apply(null,ys);
 
-  // Canvas size — cap at 4096px on longest side
+  // Canvas size — cap at 8192px on longest side for high quality
   var cw=maxX-minX, ch=maxY-minY;
-  var sc=Math.min(1, 4096/Math.max(cw,ch));
+  var sc=Math.min(1, 8192/Math.max(cw,ch));
   cw=Math.max(1,Math.round(cw*sc)); ch=Math.max(1,Math.round(ch*sc));
 
   // Load image element then draw warped
@@ -5103,6 +5148,8 @@ async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
   });
   var cvs=document.createElement('canvas'); cvs.width=cw; cvs.height=ch;
   var ctx=cvs.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   // setTransform(a,b,c,d,e,f): maps drawing (u,v) → canvas (a*u+c*v+e, b*u+d*v+f)
   ctx.setTransform(a*sc, b*sc, c*sc, d*sc, (tx-minX)*sc, (ty-minY)*sc);
   ctx.drawImage(img, 0, 0);
@@ -5182,7 +5229,7 @@ async function renderPdfFromHandle(handle) {
     if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
     if (perm !== 'granted') return null;
     var file = await handle.getFile();
-    return await renderPdfToImage(file, 2);
+    return await renderPdfToImage(file, 3);
   } catch(e) { return null; }
 }
 
@@ -5290,7 +5337,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     setFileHandle(handle);
     setPhase('loading');
     try {
-      var result = await renderPdfToImage(file, 2);
+      var result = await renderPdfToImage(file, 3);
       setImgData(result);
       setPhase('pdf');
     } catch(err) {
@@ -5306,7 +5353,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     setFileHandle(null);
     setPhase('loading');
     try {
-      var result = await renderPdfToImage(file, 2);
+      var result = await renderPdfToImage(file, 3);
       setImgData(result);
       setPhase('pdf');
     } catch(err) {
@@ -5788,6 +5835,44 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       m.bindPopup(`<b>${cp.name}</b>${cp.alt != null ? `<br/>${cp.alt} ft` : ''}${etaStr}`);
       ov.markers.push(m);
     });
+
+    // Per-leg MC + distance labels (Jeppesen-style) at midpoint of each leg
+    for (let i = 1; i < userWps.length; i++) {
+      const a = userWps[i - 1], b = userWps[i];
+      if (a.lat == null || b.lat == null) continue;
+      const tc = b.tc != null ? b.tc : 0;
+      const mc = b.mc != null ? Math.round(((b.mc % 360) + 360) % 360) : null;
+      const dist = b.dist != null ? b.dist : null;
+      if (mc == null && dist == null) continue;
+      const [mlat, mlon] = gcInterpolate(a.lat, a.lon, b.lat, b.lon, 0.5);
+      // Rotate so text aligns with direction of flight; flip if it would read upside-down
+      let rot = tc - 90;
+      if (tc > 90 && tc < 270) rot = tc + 90;
+      const mcStr = mc != null ? String(mc).padStart(3, '0') + '°M' : '';
+      const distStr = dist != null ? (dist < 10 ? dist.toFixed(1) : Math.round(dist)) + ' NM' : '';
+      const text = [mcStr, distStr].filter(Boolean).join(' · ');
+      const html =
+        '<div style="' +
+        'transform: rotate(' + rot + 'deg);' +
+        'transform-origin: 50% 50%;' +
+        'background: rgba(255,255,255,0.94);' +
+        'color: #1f2937;' +
+        'border: 1px solid #4c1d95;' +
+        'border-radius: 4px;' +
+        'padding: 1px 6px;' +
+        'font-size: 10px;' +
+        'font-weight: 700;' +
+        'font-family: ui-monospace, SFMono-Regular, Menlo, monospace;' +
+        'white-space: nowrap;' +
+        'line-height: 14px;' +
+        'box-shadow: 0 1px 3px rgba(0,0,0,.5);' +
+        'pointer-events: none;' +
+        'text-align: center;' +
+        '">' + text + '</div>';
+      const icon = window.L.divIcon({ html, className: '', iconSize: [110, 18], iconAnchor: [55, 9] });
+      const lbl = window.L.marker([mlat, mlon], { icon, pane: 'routePane', interactive: false, keyboard: false }).addTo(map);
+      ov.markers.push(lbl);
+    }
 
     // Virtual waypoint markers (TOC/TOD/BOD) — small dots on the route
     virtWps.forEach(cp => {
