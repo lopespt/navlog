@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1042";
+const APP_VERSION = "20260428.1055";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -508,8 +508,8 @@ function resolveAltitudeProfile(cps, ac, flight) {
   return { profile: profile, altWarnings: altWarnings };
 }
 
-// Derive TOC/TOD annotation string from a computed checkpoint's portions
-// Returns null if single-phase, e.g. "TOC +23nm" or "TOD +40nm" or "TOC +5nm · TOD +80nm"
+// Derive TOC/TOD/BOC/BOD annotation string from a computed checkpoint's portions
+// Returns null if single-phase, e.g. "BOC +5nm · TOC +20nm"
 function tocTodLabel(portions, dist) {
   if (!portions || portions.length <= 1) return null;
   const labels = [];
@@ -518,6 +518,7 @@ function tocTodLabel(portions, dist) {
     acc += portions[i].dist;
     const cur = portions[i].phase;
     const nxt = portions[i + 1].phase;
+    if (cur !== "SUBIDA" && nxt === "SUBIDA") labels.push(`BOC +${acc.toFixed(0)}nm`);
     if (cur === "SUBIDA" && nxt !== "SUBIDA") labels.push(`TOC +${acc.toFixed(0)}nm`);
     if (cur !== "DESCIDA" && nxt === "DESCIDA") labels.push(`TOD +${acc.toFixed(0)}nm`);
     if (cur === "DESCIDA" && nxt !== "DESCIDA") labels.push(`BOD +${acc.toFixed(0)}nm`);
@@ -889,7 +890,7 @@ function NavlogApp() {
   // Mirrors the autoKey numbering used by liveRoute below so we can look up virtual ATAs per leg.
   const legVirtualsMap = useMemo(() => {
     const map = {};
-    let tocN = 0, todN = 0, bodN = 0;
+    let tocN = 0, todN = 0, bodN = 0, bocN = 0;
     computed.forEach((cp, i) => {
       if (cp.isOrigin || !cp.portions || cp.portions.length <= 1) return;
       const list = [];
@@ -898,13 +899,15 @@ function NavlogApp() {
         accDist += cp.portions[p].dist || 0;
         accTime += cp.portions[p].timeMin || 0;
         const from = cp.portions[p].phase, to = cp.portions[p + 1].phase;
-        const label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
+        const label = from !== "SUBIDA"  && to === "SUBIDA"  ? "BOC"
+          : from === "SUBIDA"  && to !== "SUBIDA"  ? "TOC"
           : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
           : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
           : null;
         if (!label) continue;
         const autoKey = label === "TOC" ? `toc_${tocN++}`
           : label === "TOD" ? `tod_${todN++}`
+          : label === "BOC" ? `boc_${bocN++}`
           : `bod_${bodN++}`;
         list.push({ label, autoKey, dist: accDist, time: accTime });
       }
@@ -971,13 +974,16 @@ function NavlogApp() {
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
     const result = [];
-    let tocN = 0, todN = 0, bodN = 0;
+    let tocN = 0, todN = 0, bodN = 0, bocN = 0;
     computed.forEach((cp, i) => {
       if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
       const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
       const prevAlt = i > 0 ? computed[i - 1].alt : 0;
       const prevLat  = i > 0 ? computed[i - 1].lat  : null;
       const prevLon  = i > 0 ? computed[i - 1].lon  : null;
+      // Actual leg-start time: prefer the ATA of the previous fix when it has been crossed.
+      const prevAtaStr = i > 0 ? computed[i - 1].ata : null;
+      const legStartActual = prevAtaStr ? parseHHMM(prevAtaStr) : prevEta;
       if (cp.portions?.length > 1) {
         let accDist = 0, accETE = 0;
         let prevVirtETE = 0, prevVirtDist = 0;
@@ -992,31 +998,47 @@ function NavlogApp() {
           accDist += por.dist;
           accETE += timeFrac * cp.etePlanned;
           const from = por.phase, to = cp.portions[p + 1].phase;
-          let label = from === "SUBIDA" && to !== "SUBIDA" ? "TOC"
+          let label = from !== "SUBIDA"  && to === "SUBIDA"  ? "BOC"
+            : from === "SUBIDA"  && to !== "SUBIDA"  ? "TOC"
             : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
             : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
             : null;
           if (label) {
-            const autoKey = label === "TOC" ? `toc_${tocN++}` : label === "TOD" ? `tod_${todN++}` : `bod_${bodN++}`;
+            const autoKey = label === "TOC" ? `toc_${tocN++}`
+              : label === "TOD" ? `tod_${todN++}`
+              : label === "BOC" ? `boc_${bocN++}`
+              : `bod_${bodN++}`;
+            const ataStr = flight.autoWpATAs?.[autoKey] ?? null;
+            const ataMin = parseHHMM(ataStr);
             const eteLeg = accETE - prevVirtETE;
             const distLeg = accDist - prevVirtDist;
-            const vFrac = cp.dist > 0 ? accDist / cp.dist : 0;
+            // Visual position: when the virtual has been marked, shift it along the leg to the
+            // distance the user actually covered (assuming planned phase GS).
+            let displayDist = accDist;
+            if (ataMin != null && accETE > 0) {
+              const actualTime = ataMin - legStartActual;
+              if (actualTime > 0) {
+                const actualDist = accDist * (actualTime / accETE);
+                displayDist = Math.max(0, Math.min(cp.dist || actualDist, actualDist));
+              }
+            }
+            const vFrac = cp.dist > 0 ? displayDist / cp.dist : 0;
             const [vLat, vLon] = (prevLat != null && cp.lat != null)
-              ? gcInterpolate(prevLat, prevLon, cp.lat, cp.lon, vFrac) : [null, null];
+              ? gcInterpolate(prevLat, prevLon, cp.lat, cp.lon, Math.max(0, Math.min(1, vFrac))) : [null, null];
             result.push({
               name: label, isVirtual: true, autoKey, userIdx: i,
-              // TOC = leveled at dest alt; TOD = still at src alt; BOD = leveled at dest alt
+              // TOC/BOD = leveled at dest alt; BOC/TOD = still at src alt
               alt: (label === "TOC" || label === "BOD") ? cp.alt : (prevAlt ?? cp.alt),
               lat: vLat, lon: vLon,
               tc: cp.tc, mh: cp.mh, mc: cp.mc, wca: cp.wca,
               windMode: cp.windMode, windDirUsed: cp.windDirUsed, windVelUsed: cp.windVelUsed,
-              dist: Math.round(accDist * 10) / 10,
-              distToNext: Math.round((cp.dist - accDist) * 10) / 10,
+              dist: Math.round(displayDist * 10) / 10,
+              distToNext: Math.round(((cp.dist || 0) - displayDist) * 10) / 10,
               etePlanned: accETE,
               eteLeg: Math.round(eteLeg * 10) / 10,
               distLeg: Math.round(distLeg * 100) / 100,
               etaPlanned: prevEta + accETE,
-              ata: flight.autoWpATAs?.[autoKey] ?? null,
+              ata: ataStr,
               gsActual: null, portions: [], warnings: [], notes: "",
             });
             prevVirtETE = accETE;
@@ -2152,7 +2174,21 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const prevCp = isNew
     ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
     : flight.checkpoints[editingIdx - 1];
-  const prevAlt = prevCp?.useCruiseAlt ? cruiseAlt : (prevCp?.alt ?? null);
+  // Resolve prev altitude by walking back to the nearest anchor (explicit alt or useCruiseAlt).
+  // Origin without explicit alt falls back to its elevation, then 0.
+  const prevAlt = (function() {
+    const startIdx = isNew
+      ? (insertAfterIdx != null ? insertAfterIdx : flight.checkpoints.length - 1)
+      : editingIdx - 1;
+    for (let k = startIdx; k >= 0; k--) {
+      const wp = flight.checkpoints[k];
+      if (!wp) continue;
+      if (wp.useCruiseAlt) return cruiseAlt;
+      if (wp.alt != null) return wp.alt;
+      if (wp.isOrigin) return Number(flight.freqs?.origin?.elev) || 0;
+    }
+    return null;
+  })();
   const variation = getDecl(cp.lat ?? prevCp?.lat, cp.lon ?? prevCp?.lon, cp.alt ?? cruiseAlt) ?? (flight.variation ?? 0);
   const mod360 = function(x) { return ((x % 360) + 360) % 360; };
 
