@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1007";
+const APP_VERSION = "20260428.1012";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5718,6 +5718,11 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     map.getPane('routePane').style.zIndex = 500;
     map.getPane('routePane').style.pointerEvents = 'none';
 
+    // Pane for per-leg labels — above routePane so they render in front of the route line
+    map.createPane('legLabelPane');
+    map.getPane('legLabelPane').style.zIndex = 520;
+    map.getPane('legLabelPane').style.pointerEvents = 'none';
+
     map.on('click', function(e) {
       if (!pickModeRef.current) return;
       setPickMode(false);
@@ -5854,11 +5859,15 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       // Align text along the leg's TC; flip 180 deg when it would render upside-down.
       // CSS rotate is clockwise from "up". Text is upside-down when rot in (90, 270).
       const tcNorm = ((tc % 360) + 360) % 360;
-      let rot = ((tcNorm - 90) % 360 + 360) % 360;
-      if (rot > 90 && rot < 270) rot = (rot + 180) % 360;
+      const baseRot = ((tcNorm - 90) % 360 + 360) % 360;
+      const flipped = baseRot > 90 && baseRot < 270;
+      const rot = flipped ? (baseRot + 180) % 360 : baseRot;
       const mcStr = mc != null ? String(mc).padStart(3, '0') + '°M' : '';
       const distStr = dist != null ? (dist < 10 ? dist.toFixed(1) : Math.round(dist)) + ' NM' : '';
-      const text = [mcStr, distStr].filter(Boolean).join(' · ');
+      const body = [mcStr, distStr].filter(Boolean).join(' · ');
+      // Arrow on the side that matches the flight direction. When the label
+      // was flipped, "forward" along the leg points to the DOM-left side.
+      const text = flipped ? ('◀ ' + body) : (body + ' ▶');
       const html =
         '<div style="' +
         'transform: rotate(' + rot + 'deg);' +
@@ -5878,7 +5887,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         'text-align: center;' +
         '">' + text + '</div>';
       const icon = window.L.divIcon({ html, className: '', iconSize: [LABEL_W, 18], iconAnchor: [LABEL_W / 2, 9] });
-      const lbl = window.L.marker([mlat, mlon], { icon, pane: 'routePane', interactive: false, keyboard: false }).addTo(map);
+      const lbl = window.L.marker([mlat, mlon], { icon, pane: 'legLabelPane', interactive: false, keyboard: false }).addTo(map);
       ov.markers.push(lbl);
       legLabels.push({ marker: lbl, a: a, b: b, width: LABEL_W });
     }
