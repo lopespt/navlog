@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.2136";
+const APP_VERSION = "20260428.2316";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -7403,10 +7403,12 @@ async function savePdfOverlayIdb(ov, handle) {
     tx.objectStore('handles').put({
       id: ov.id, handle: handle || null,
       dataUrl: ov.dataUrl || null,
+      dataUrlHi: ov.dataUrlHi || null,
       width: ov.width, height: ov.height,
       bounds: ov.bounds || null,
       pdfPts: ov.pdfPts, mapPts: ov.mapPts,
-      opacity: ov.opacity, visible: ov.visible
+      opacity: ov.opacity, visible: ov.visible,
+      calibration: ov.calibration || null,
     });
   } catch(e) {}
 }
@@ -7441,6 +7443,50 @@ async function deletePdfHandle(id) {
 }
 // Keep old name as alias for compat
 async function savePdfHandle(id, handle) { /* no-op, use savePdfOverlayIdb */ }
+
+// Apply per-overlay translation + scale tweaks (from manual calibration) to a
+// 2-corner LatLng bounds tuple. Rotation is NOT supported here — would require
+// rewarping. Returns a new bounds array.
+function applyOverlayCalibration(bounds, calibration) {
+  if (!bounds || !calibration) return bounds;
+  var dLat = Number(calibration.dLat || 0);
+  var dLng = Number(calibration.dLng || 0);
+  var sx = Number(calibration.scaleX != null ? calibration.scaleX : 1) || 1;
+  var sy = Number(calibration.scaleY != null ? calibration.scaleY : 1) || 1;
+  var sw = bounds[0], ne = bounds[1];
+  if (!sw || !ne) return bounds;
+  var swLat = sw[0], swLng = sw[1], neLat = ne[0], neLng = ne[1];
+  var midLat = (swLat + neLat) / 2;
+  var midLng = (swLng + neLng) / 2;
+  var halfH = (neLat - swLat) / 2;
+  var halfW = (neLng - swLng) / 2;
+  return [
+    [midLat - halfH * sy + dLat, midLng - halfW * sx + dLng],
+    [midLat + halfH * sy + dLat, midLng + halfW * sx + dLng],
+  ];
+}
+
+// Re-renders the original PDF for a given overlay at a higher scale, warps with
+// the stored 3 control points, and returns the resulting hi-res dataUrl. The
+// caller pushes it into state + IDB. Returns null if the file handle is missing
+// or permission was denied.
+async function renderPdfHiRes(overlay, mapLeaflet, opts) {
+  if (!overlay || !overlay.id || !mapLeaflet || !window.pdfjsLib) return null;
+  if (!overlay.pdfPts || !overlay.mapPts) return null;
+  var rec = await getPdfOverlayIdb(overlay.id);
+  if (!rec || !rec.handle) return null;
+  var handle = rec.handle;
+  try {
+    var perm = await handle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') return null;
+    var file = await handle.getFile();
+    var scale = (opts && opts.scale) || 5;
+    var imgData = await renderPdfToImage(file, scale);
+    var warped = await computeWarpedImage(imgData, { pdfPts: overlay.pdfPts, mapPts: overlay.mapPts }, mapLeaflet);
+    return warped ? warped.dataUrl : null;
+  } catch (e) { return null; }
+}
 
 // ── IndexedDB helpers for user-managed points (custom waypoints library) ──────
 function _userPtsDb() {
@@ -7848,6 +7894,51 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
 
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
 function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
+  const [calibratingId, setCalibratingId] = useState(null);
+  const [calibStep, setCalibStep] = useState("coarse"); // coarse | fine
+
+  function patchCalibration(id, partial) {
+    setOverlays(function(os) {
+      return os.map(function(o) {
+        if (o.id !== id) return o;
+        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
+        const next = Object.assign({}, cur, partial);
+        return Object.assign({}, o, { calibration: next });
+      });
+    });
+  }
+  function nudge(id, axis, sign) {
+    // Use overlay span * step as the unit so the nudge feels consistent regardless of bbox size.
+    setOverlays(function(os) {
+      return os.map(function(o) {
+        if (o.id !== id || !o.bounds) return o;
+        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
+        const span = axis === "lat"
+          ? Math.abs(o.bounds[1][0] - o.bounds[0][0])
+          : Math.abs(o.bounds[1][1] - o.bounds[0][1]);
+        const factor = calibStep === "fine" ? 0.0015 : 0.01; // ~0.15% / 1% of span
+        const delta = span * factor * sign;
+        const key = axis === "lat" ? "dLat" : "dLng";
+        return Object.assign({}, o, { calibration: Object.assign({}, cur, { [key]: (cur[key] || 0) + delta }) });
+      });
+    });
+  }
+  function bumpScale(id, axis, sign) {
+    setOverlays(function(os) {
+      return os.map(function(o) {
+        if (o.id !== id) return o;
+        const cur = Object.assign({ dLat: 0, dLng: 0, scaleX: 1, scaleY: 1 }, o.calibration || {});
+        const factor = calibStep === "fine" ? 0.005 : 0.02; // 0.5% / 2%
+        const cur_v = cur[axis === "X" ? "scaleX" : "scaleY"] || 1;
+        const next_v = Math.max(0.5, Math.min(1.5, cur_v + sign * factor));
+        const key = axis === "X" ? "scaleX" : "scaleY";
+        return Object.assign({}, o, { calibration: Object.assign({}, cur, { [key]: next_v }) });
+      });
+    });
+  }
+  function resetCalibration(id) {
+    setOverlays(function(os) { return os.map(function(o) { return o.id === id ? Object.assign({}, o, { calibration: null }) : o; }); });
+  }
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
@@ -7914,6 +8005,12 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
                   {ov.visible ? 'ON' : 'OFF'}
                 </button>
               )}
+              {ov.dataUrl && (
+                <button onClick={() => setCalibratingId(calibratingId === ov.id ? null : ov.id)}
+                  className={`text-xs px-2 py-1 rounded border ${calibratingId === ov.id ? 'border-amber-500 text-amber-400' : 'border-zinc-600 text-zinc-500'}`}>
+                  Calibrar
+                </button>
+              )}
               <button onClick={() => setOverlays(os => os.filter(o => o.id !== ov.id))}
                 className="text-red-500 text-lg px-1">✕</button>
             </div>
@@ -7925,6 +8022,69 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
                 className="flex-1" />
               <span className={`text-[10px] ${theme.fgFaint} w-8 text-right`}>{Math.round(ov.opacity*100)}%</span>
             </div>
+            {calibratingId === ov.id && (
+              <div className={`mt-3 ${theme.panel} border ${theme.panelBorder} rounded-lg p-2 space-y-2`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] uppercase tracking-widest ${theme.fgMuted}`}>Calibrar</span>
+                  <div className={`flex rounded overflow-hidden border ${theme.panelBorder} ml-auto`}>
+                    <button onClick={() => setCalibStep("coarse")}
+                      className={`px-2 py-1 text-[10px] font-bold ${calibStep === "coarse" ? "bg-amber-500/20 text-amber-300" : "text-zinc-500"}`}>
+                      Grosso
+                    </button>
+                    <button onClick={() => setCalibStep("fine")}
+                      className={`px-2 py-1 text-[10px] font-bold ${calibStep === "fine" ? "bg-amber-500/20 text-amber-300" : "text-zinc-500"}`}>
+                      Fino
+                    </button>
+                  </div>
+                  <button onClick={() => resetCalibration(ov.id)}
+                    className="text-[10px] px-2 py-1 rounded border border-red-500/40 text-red-400">
+                    Reset
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-center">
+                  <div></div>
+                  <button onClick={() => nudge(ov.id, "lat", +1)}
+                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>↑</button>
+                  <div></div>
+                  <button onClick={() => nudge(ov.id, "lng", -1)}
+                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>←</button>
+                  <div className={`text-[9px] ${theme.fgFaint} flex items-center justify-center num`}>
+                    {(function() {
+                      const c = ov.calibration || {};
+                      return `Δ ${(c.dLat || 0).toFixed(4)}°, ${(c.dLng || 0).toFixed(4)}°`;
+                    })()}
+                  </div>
+                  <button onClick={() => nudge(ov.id, "lng", +1)}
+                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>→</button>
+                  <div></div>
+                  <button onClick={() => nudge(ov.id, "lat", -1)}
+                    className={`py-2 rounded ${theme.panel} border ${theme.panelBorder} text-[14px] font-black ${theme.fg} active:scale-95`}>↓</button>
+                  <div></div>
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <div className="flex items-center gap-1">
+                    <span className={`text-[9px] uppercase ${theme.fgFaint} w-3`}>X</span>
+                    <button onClick={() => bumpScale(ov.id, "X", -1)}
+                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>−</button>
+                    <span className={`text-[9px] num ${theme.fgFaint} w-10 text-center`}>
+                      {(((ov.calibration && ov.calibration.scaleX) || 1) * 100).toFixed(0)}%
+                    </span>
+                    <button onClick={() => bumpScale(ov.id, "X", +1)}
+                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>+</button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={`text-[9px] uppercase ${theme.fgFaint} w-3`}>Y</span>
+                    <button onClick={() => bumpScale(ov.id, "Y", -1)}
+                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>−</button>
+                    <span className={`text-[9px] num ${theme.fgFaint} w-10 text-center`}>
+                      {(((ov.calibration && ov.calibration.scaleY) || 1) * 100).toFixed(0)}%
+                    </span>
+                    <button onClick={() => bumpScale(ov.id, "Y", +1)}
+                      className={`flex-1 py-1.5 rounded ${theme.panel} border ${theme.panelBorder} text-xs font-black ${theme.fg}`}>+</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -7952,10 +8112,15 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
   const [layersOpen, setLayersOpen] = useState(false);
   const [georefActive, setGeorefActive] = useState(false);
+  const [mapZoom, setMapZoom] = useState(8);
   // Leaflet layers for PDF overlays — keyed by overlay id
   const pdfLayerRefs = useRef({});
+  // Track in-flight hi-res renders to avoid duplicates per overlay
+  const hiRenderingRef = useRef(new Set());
   // Updater for leg-label visibility (recomputed on zoom)
   const legLabelUpdaterRef = useRef(function() {});
+  // Threshold above which we want the hi-res rasterization
+  const HIRES_ZOOM = 14;
 
   // Re-render simulated position every second
   useEffect(() => {
@@ -8002,9 +8167,13 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       onInsertWaypointRef.current(bestIdx, lat, lon);
     });
 
-    map.on('zoomend', function() { legLabelUpdaterRef.current(); });
+    map.on('zoomend', function() {
+      legLabelUpdaterRef.current();
+      try { setMapZoom(map.getZoom()); } catch (_) {}
+    });
 
     mapRef.current = map;
+    try { setMapZoom(map.getZoom()); } catch (_) {}
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
@@ -8025,20 +8194,43 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
 
-  // Sync PDF overlay layers — warped image pre-computed at creation, L.imageOverlay for display
+  // Sync PDF overlay layers — warped image pre-computed at creation,
+  // L.imageOverlay for display. Re-runs on overlay state change AND on zoom
+  // change so we can swap to the hi-res image when the user is zoomed in.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
+    const useHi = mapZoom >= HIRES_ZOOM;
+
+    function chooseUrl(ov) {
+      return (useHi && ov.dataUrlHi) ? ov.dataUrlHi : ov.dataUrl;
+    }
+    function chooseBounds(ov) {
+      return applyOverlayCalibration(ov.bounds, ov.calibration);
+    }
 
     function makeLayer(ov) {
-      if (!ov.dataUrl || !ov.bounds) return { remove: function(){}, setOverlay: function(){} };
-      var layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
+      const url = chooseUrl(ov);
+      const bounds = chooseBounds(ov);
+      if (!url || !bounds) return { remove: function(){}, setOverlay: function(){} };
+      var layer = window.L.imageOverlay(url, bounds, {
         opacity: ov.opacity, interactive: false, zIndex: 450
       });
       if (ov.visible) layer.addTo(map);
+      var currentUrl = url;
+      var currentBounds = bounds;
       return {
         remove: function() { layer.remove(); },
         setOverlay: function(newOv) {
+          var nu = chooseUrl(newOv);
+          var nb = chooseBounds(newOv);
+          if (nu && nu !== currentUrl) { try { layer.setUrl(nu); } catch (_) {} currentUrl = nu; }
+          if (nb && (!currentBounds
+              || nb[0][0] !== currentBounds[0][0] || nb[0][1] !== currentBounds[0][1]
+              || nb[1][0] !== currentBounds[1][0] || nb[1][1] !== currentBounds[1][1])) {
+            try { layer.setBounds(window.L.latLngBounds(nb[0], nb[1])); } catch (_) {}
+            currentBounds = nb;
+          }
           layer.setOpacity(newOv.opacity);
           if (newOv.visible) layer.addTo(map); else layer.remove();
         }
@@ -8059,7 +8251,29 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
     });
-  }, [pdfOverlays]);
+  }, [pdfOverlays, mapZoom]);
+
+  // Lazy hi-res rendering: when the user zooms past HIRES_ZOOM, schedule a
+  // background re-render of every visible overlay that doesn't yet have
+  // dataUrlHi. Each overlay is rendered at most once at a time; the result
+  // gets pushed back into the overlay state and the layer-sync effect picks it
+  // up automatically.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (mapZoom < HIRES_ZOOM) return;
+    pdfOverlays.forEach(function(ov) {
+      if (!ov || !ov.visible || ov.dataUrlHi) return;
+      if (hiRenderingRef.current.has(ov.id)) return;
+      hiRenderingRef.current.add(ov.id);
+      renderPdfHiRes(ov, mapRef.current, { scale: 5 }).then(function(hiUrl) {
+        hiRenderingRef.current.delete(ov.id);
+        if (!hiUrl) return;
+        setPdfOverlays(function(os) {
+          return os.map(function(o) { return o.id === ov.id ? Object.assign({}, o, { dataUrlHi: hiUrl }) : o; });
+        });
+      }).catch(function() { hiRenderingRef.current.delete(ov.id); });
+    });
+  }, [mapZoom, pdfOverlays]);
 
   // Custom icon factory
   function makeIcon(color, label, small) {
