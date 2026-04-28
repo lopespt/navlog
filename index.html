@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.2336";
+const APP_VERSION = "20260428.2344";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -7528,6 +7528,57 @@ async function rewarpOverlayFromHandle(overlayId, pdfPts, mapPts, mapLeaflet, op
   } catch (_) { return null; }
 }
 
+// Same as rewarpOverlayFromHandle but takes a File object directly. Used as a
+// fallback when the saved handle is missing / permission was revoked / the
+// browser never supported the File System Access API in the first place.
+async function rewarpOverlayFromFile(file, pdfPts, mapPts, mapLeaflet, opts) {
+  if (!file || !pdfPts || !mapPts || !mapLeaflet || !window.pdfjsLib) return null;
+  if (pdfPts.length < 3 || mapPts.length < 3) return null;
+  try {
+    var scale = (opts && opts.scale) || 3;
+    var imgData = await renderPdfToImage(file, scale);
+    var warped = await computeWarpedImage(imgData, { pdfPts: pdfPts, mapPts: mapPts }, mapLeaflet);
+    if (!warped) return null;
+    return {
+      dataUrl: warped.dataUrl,
+      width: warped.width,
+      height: warped.height,
+      bounds: warped.bounds,
+    };
+  } catch (_) { return null; }
+}
+
+// Opens the OS file picker for a single PDF. Returns { file, handle? } or null
+// when the user cancels. handle is populated when the browser supports the File
+// System Access API so we can re-render later without re-prompting.
+async function pickPdfFile() {
+  if (window.showOpenFilePicker) {
+    try {
+      var picks = await window.showOpenFilePicker({
+        types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+        multiple: false,
+      });
+      var handle = picks[0];
+      var file = await handle.getFile();
+      return { file: file, handle: handle };
+    } catch (_) { return null; }
+  }
+  return new Promise(function(resolve) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/pdf,.pdf';
+    input.style.display = 'none';
+    input.onchange = function() {
+      var f = input.files && input.files[0];
+      input.remove();
+      resolve(f ? { file: f, handle: null } : null);
+    };
+    input.oncancel = function() { input.remove(); resolve(null); };
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
 // Re-renders the original PDF for a given overlay at a higher scale, warps with
 // the stored 3 control points, and returns the resulting hi-res dataUrl. The
 // caller pushes it into state + IDB. Returns null if the file handle is missing
@@ -8127,10 +8178,21 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       var newMapPts = ov.mapPts.slice();
       newPdfPts[bestIdx] = [u, v];
       newMapPts[bestIdx] = [mapLL[0], mapLL[1]];
-      // Re-warp
+      // Re-warp: try the saved file handle first, then fall back to asking the
+      // user to re-select the PDF.
       var rew = await rewarpOverlayFromHandle(ov.id, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 3 });
+      var newHandle = null;
       if (!rew) {
-        alert("Não foi possível re-warpear (PDF original indisponível ou permissão negada).");
+        var picked = await pickPdfFile();
+        if (!picked) {
+          // user cancelled → just abort, keep old warp
+          cancelCalibration(); return;
+        }
+        rew = await rewarpOverlayFromFile(picked.file, newPdfPts.slice(0, 3), newMapPts.slice(0, 3), map, { scale: 3 });
+        newHandle = picked.handle || null;
+      }
+      if (!rew) {
+        alert("Re-warp falhou — verifica que escolheste o PDF correto.");
         cancelCalibration(); return;
       }
       setPdfOverlays(function(os) {
@@ -8148,6 +8210,14 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           });
         });
       });
+      // Persist a fresh handle if the user had to re-pick the file, so future
+      // calibrations go through without prompting again.
+      if (newHandle) {
+        try {
+          var refreshed = (pdfOverlays || []).find(function(o) { return o.id === ov.id; });
+          if (refreshed) await savePdfOverlayIdb(Object.assign({}, refreshed, { dataUrl: rew.dataUrl, dataUrlHi: null, bounds: rew.bounds, width: rew.width, height: rew.height, pdfPts: newPdfPts.slice(0, 3), mapPts: newMapPts.slice(0, 3), calibration: null }), newHandle);
+        } catch (_) {}
+      }
     } catch (e) {
       alert("Calibração falhou: " + (e && e.message ? e.message : e));
     }
