@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1131";
+const APP_VERSION = "20260428.1138";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2218,14 +2218,19 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
         var _proj = projectDest(_editPrev.lat, _editPrev.lon, _editCp.tc, _editCp.dist);
         cps[_editIdx] = Object.assign({}, cps[_editIdx], { lat: _proj[0], lon: _proj[1], _tcDistEdited: undefined });
       }
-      // Pass 1b — if edited WP now has a position, project the NEXT WP if it has no position but has TC+dist.
-      var _editCpAfter = cps[_editIdx];
-      var _nextIdx = _editIdx + 1;
-      if (_nextIdx < cps.length && _editCpAfter.lat != null && _editCpAfter.lon != null) {
-        var _nextCp = cps[_nextIdx];
-        if (_nextCp.lat == null && _nextCp.tc != null && (_nextCp.dist ?? 0) > 0) {
-          var _projNext = projectDest(_editCpAfter.lat, _editCpAfter.lon, _nextCp.tc, _nextCp.dist);
-          cps[_nextIdx] = Object.assign({}, cps[_nextIdx], { lat: _projNext[0], lon: _projNext[1] });
+      // Pass 1b — project forward chain: keep projecting subsequent waypoints from the
+      // most recently positioned one, while they still have TC+dist but no coords.
+      var _projIdx = _editIdx + 1;
+      var _projAnchor = cps[_editIdx];
+      while (_projIdx < cps.length && _projAnchor != null && _projAnchor.lat != null && _projAnchor.lon != null) {
+        var _projCp = cps[_projIdx];
+        if (_projCp.lat == null && _projCp.tc != null && (_projCp.dist ?? 0) > 0) {
+          var _projOut = projectDest(_projAnchor.lat, _projAnchor.lon, _projCp.tc, _projCp.dist);
+          cps[_projIdx] = Object.assign({}, cps[_projIdx], { lat: _projOut[0], lon: _projOut[1] });
+          _projAnchor = cps[_projIdx];
+          _projIdx++;
+        } else {
+          break; // missing TC/dist or already positioned — can't project further down the chain
         }
       }
       // Pass 2 — recompute TC and dist for every consecutive pair with known coords.
@@ -2818,7 +2823,7 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
     map.getPane('pickerRoute').style.zIndex = 500;
 
     const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
-    if (wps.length > 0) {
+    if (wps.length >= 2) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
       window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.8, dashArray: '5,5', pane: 'pickerRoute' }).addTo(map);
       wps.forEach(cp => {
@@ -2827,6 +2832,14 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
         window.L.marker([cp.lat, cp.lon], { icon, pane: 'pickerRoute' }).addTo(map).bindPopup(cp.name || '');
       });
       map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
+    } else if (wps.length === 1) {
+      // Single anchor (e.g. only origin or only destination has coords) — degenerate bounds
+      // breaks fitBounds with padding; just centre and pin a marker.
+      const onlyWp = wps[0];
+      const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
+      const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
+      window.L.marker([onlyWp.lat, onlyWp.lon], { icon, pane: 'pickerRoute' }).addTo(map).bindPopup(onlyWp.name || '');
+      map.setView([onlyWp.lat, onlyWp.lon], 9);
     } else if (initialPos) {
       map.setView(initialPos, 10);
     } else {
@@ -2836,7 +2849,10 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
     map.on('click', (e) => setPicked([e.latlng.lat, e.latlng.lng]));
 
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; };
+    // The map container is inside a flex column that may not have its final
+    // size at mount; force a resize so tiles fill the viewport correctly.
+    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
+    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
   }, []);
 
   // Render PDF overlays (cartas) on the picker map
