@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0124";
+const APP_VERSION = "20260428.0126";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5076,9 +5076,12 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {overlays.length === 0 && (
-          <div className="text-sm text-zinc-400 text-center py-12">
-            Nenhuma carta adicionada.<br/>
-            <span className="text-violet-400 font-bold">Toca em "+ Adicionar" acima.</span>
+          <div className="flex flex-col items-center gap-4 py-12">
+            <div className="text-sm text-zinc-400 text-center">Nenhuma carta adicionada.</div>
+            <button onClick={onAddNew}
+              className="px-8 py-4 bg-violet-600 text-white rounded-2xl font-bold text-base active:scale-95 transition-transform shadow-lg">
+              + Adicionar carta PDF
+            </button>
           </div>
         )}
         {overlays.map(ov => (
