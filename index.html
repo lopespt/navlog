@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0438";
+const APP_VERSION = "20260428.1002";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5845,9 +5845,11 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       const dist = b.dist != null ? b.dist : null;
       if (mc == null && dist == null) continue;
       const [mlat, mlon] = gcInterpolate(a.lat, a.lon, b.lat, b.lon, 0.5);
-      // Rotate so text aligns with direction of flight; flip if it would read upside-down
-      let rot = tc - 90;
-      if (tc > 90 && tc < 270) rot = tc + 90;
+      // Align text along the leg's TC; flip 180 deg when it would render upside-down.
+      // CSS rotate is clockwise from "up". Text is upside-down when rot in (90, 270).
+      const tcNorm = ((tc % 360) + 360) % 360;
+      let rot = ((tcNorm - 90) % 360 + 360) % 360;
+      if (rot > 90 && rot < 270) rot = (rot + 180) % 360;
       const mcStr = mc != null ? String(mc).padStart(3, '0') + '°M' : '';
       const distStr = dist != null ? (dist < 10 ? dist.toFixed(1) : Math.round(dist)) + ' NM' : '';
       const text = [mcStr, distStr].filter(Boolean).join(' · ');
