@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1558";
+const APP_VERSION = "20260428.1659";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -188,6 +188,83 @@ function projectSource(lat2, lon2, tc, distNM) {
   // Reverse: given destination, course from source, distance → source
   var reverseTc = (tc + 180) % 360;
   return projectDest(lat2, lon2, reverseTc, distNM);
+}
+
+// Great-circle intersection of two true-course rays from two anchor points.
+// Returns [lat, lon] or null when the rays don't meet (parallel / divergent).
+// Aviation Formulary V1.46 — "Intersection of two radials".
+function gcIntersection(lat1, lon1, brg1, lat2, lon2, brg2) {
+  var phi1 = toRad(lat1), lam1 = toRad(lon1);
+  var phi2 = toRad(lat2), lam2 = toRad(lon2);
+  var t13 = toRad(brg1), t23 = toRad(brg2);
+  var dphi = phi2 - phi1, dlam = lam2 - lam1;
+  var d12 = 2 * Math.asin(Math.sqrt(
+    Math.sin(dphi/2) * Math.sin(dphi/2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(dlam/2) * Math.sin(dlam/2)
+  ));
+  if (Math.abs(d12) < 1e-12) return null;
+  var cosTa = (Math.sin(phi2) - Math.sin(phi1)*Math.cos(d12)) / (Math.sin(d12) * Math.cos(phi1));
+  var cosTb = (Math.sin(phi1) - Math.sin(phi2)*Math.cos(d12)) / (Math.sin(d12) * Math.cos(phi2));
+  cosTa = Math.min(Math.max(cosTa, -1), 1);
+  cosTb = Math.min(Math.max(cosTb, -1), 1);
+  var ta = Math.acos(cosTa);
+  var tb = Math.acos(cosTb);
+  var t12 = Math.sin(lam2 - lam1) > 0 ? ta : (2 * Math.PI - ta);
+  var t21 = Math.sin(lam2 - lam1) > 0 ? (2 * Math.PI - tb) : tb;
+  var a1 = t13 - t12;
+  var a2 = t21 - t23;
+  if (Math.sin(a1) === 0 && Math.sin(a2) === 0) return null; // infinite solutions
+  if (Math.sin(a1) * Math.sin(a2) < 0) return null;          // ambiguous / divergent
+  var a3 = Math.acos(-Math.cos(a1) * Math.cos(a2) + Math.sin(a1) * Math.sin(a2) * Math.cos(d12));
+  var d13 = Math.atan2(Math.sin(d12) * Math.sin(a1) * Math.sin(a2), Math.cos(a2) + Math.cos(a1) * Math.cos(a3));
+  var phi3 = Math.asin(Math.sin(phi1) * Math.cos(d13) + Math.cos(phi1) * Math.sin(d13) * Math.cos(t13));
+  var dlam13 = Math.atan2(Math.sin(t13) * Math.sin(d13) * Math.cos(phi1), Math.cos(d13) - Math.sin(phi1) * Math.sin(phi3));
+  var lam3 = lam1 + dlam13;
+  return [toDeg(phi3), ((toDeg(lam3) + 540) % 360) - 180];
+}
+
+// Best-effort coord parser. Accepts:
+//   "38.7169 -9.1395"  /  "38.7169, -9.1395"          (decimal degrees)
+//   "3843.01N 00908.37W" / "3843.01N00908.37W"         (DDMm.mm)
+//   "38°43.01'N 9°08.37'W"                              (DDM with symbols)
+//   "38°43'01\"N 9°08'22\"W"                            (DMS with symbols)
+function parseCoordsString(text) {
+  if (!text) return null;
+  var s = String(text).trim();
+  // Decimal: "lat[,/space]lon"
+  var dd = s.match(/^([+-]?\d+(?:\.\d+)?)\s*[,;\s]\s*([+-]?\d+(?:\.\d+)?)$/);
+  if (dd) {
+    var lat = parseFloat(dd[1]), lon = parseFloat(dd[2]);
+    if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return [lat, lon];
+  }
+  // DDM with symbols: "38°43.01'N 9°08.37'W" (also accepts decimal in seconds slot for DMS)
+  var ddmSym = s.match(/(\d+)\s*°\s*(\d+(?:\.\d+)?)\s*['′]?\s*([NSns])\s*[,;\s]\s*(\d+)\s*°\s*(\d+(?:\.\d+)?)\s*['′]?\s*([EWew])/);
+  if (ddmSym) {
+    var la = parseInt(ddmSym[1], 10) + parseFloat(ddmSym[2]) / 60;
+    var lo = parseInt(ddmSym[4], 10) + parseFloat(ddmSym[5]) / 60;
+    if (ddmSym[3].toUpperCase() === "S") la = -la;
+    if (ddmSym[6].toUpperCase() === "W") lo = -lo;
+    if (Math.abs(la) <= 90 && Math.abs(lo) <= 180) return [la, lo];
+  }
+  // DMS with symbols: "38°43'01\"N 9°08'22\"W"
+  var dmsSym = s.match(/(\d+)\s*°\s*(\d+)\s*['′]\s*(\d+(?:\.\d+)?)\s*["″]?\s*([NSns])\s*[,;\s]\s*(\d+)\s*°\s*(\d+)\s*['′]\s*(\d+(?:\.\d+)?)\s*["″]?\s*([EWew])/);
+  if (dmsSym) {
+    var la2 = parseInt(dmsSym[1], 10) + parseInt(dmsSym[2], 10) / 60 + parseFloat(dmsSym[3]) / 3600;
+    var lo2 = parseInt(dmsSym[5], 10) + parseInt(dmsSym[6], 10) / 60 + parseFloat(dmsSym[7]) / 3600;
+    if (dmsSym[4].toUpperCase() === "S") la2 = -la2;
+    if (dmsSym[8].toUpperCase() === "W") lo2 = -lo2;
+    if (Math.abs(la2) <= 90 && Math.abs(lo2) <= 180) return [la2, lo2];
+  }
+  // Compact DDMm.mm: "3843.01N 00908.37W"
+  var compact = s.match(/(\d{2,4})(\d\d(?:\.\d+)?)\s*([NSns])\s*[,;\s]?\s*(\d{3,5})(\d\d(?:\.\d+)?)\s*([EWew])/);
+  if (compact) {
+    var la3 = parseInt(compact[1], 10) + parseFloat(compact[2]) / 60;
+    var lo3 = parseInt(compact[4], 10) + parseFloat(compact[5]) / 60;
+    if (compact[3].toUpperCase() === "S") la3 = -la3;
+    if (compact[6].toUpperCase() === "W") lo3 = -lo3;
+    if (Math.abs(la3) <= 90 && Math.abs(lo3) <= 180) return [la3, lo3];
+  }
+  return null;
 }
 
 // Magnetic declination from NOAA WMM — returns degrees (E positive, W negative).
@@ -802,6 +879,64 @@ function NavlogApp() {
     await userPtsDelete(id);
     setUserPoints((p) => p.filter((x) => x.id !== id));
   }
+
+  // Auto-fill freqs/elev from AIRAC when an ICAO is entered for origin/destination/alternate.
+  // Only fills if the matching freqs slot is empty (never overwrites user input). Refresh
+  // button in FreqsSection lets the user re-fetch on demand.
+  function _airacFreqKey(type) {
+    var t = String(type || "").toLowerCase();
+    if (t === "atis") return "atis";
+    if (t === "ground") return "ground";
+    if (t === "tower") return "tower";
+    if (t === "approach" || t === "departure") return "approach";
+    if (t === "ctaf") return "ctaf";
+    if (t === "unicom") return "unicom";
+    return null;
+  }
+  function airportToFreqs(ap) {
+    if (!ap) return null;
+    var out = {};
+    if (ap.elevation_ft != null) out.elev = String(ap.elevation_ft);
+    (ap.frequencies || []).forEach(function(f) {
+      var k = _airacFreqKey(f.type);
+      if (!k) return;
+      if (out[k]) return; // first one wins per type
+      var v = Number(f.frequency_mhz);
+      if (isFinite(v)) out[k] = (Math.round(v * 1000) / 1000).toFixed(3);
+    });
+    return out;
+  }
+
+  async function refreshAirportFreqs(which, overwrite) {
+    var icao = flight && flight[which];
+    if (!icao || !/^[A-Z0-9]{4}$/.test(String(icao).toUpperCase())) return;
+    var ap = await airacAirport(icao);
+    if (!ap) return;
+    var derived = airportToFreqs(ap);
+    if (!derived) return;
+    setFlight(function(f) {
+      var prev = (f.freqs && f.freqs[which]) || {};
+      var merged = {};
+      Object.keys(derived).forEach(function(k) {
+        merged[k] = overwrite ? derived[k] : (prev[k] || derived[k]);
+      });
+      // preserve any user-entered fields not in derived
+      Object.keys(prev).forEach(function(k) { if (!(k in merged)) merged[k] = prev[k]; });
+      return Object.assign({}, f, { freqs: Object.assign({}, f.freqs || {}, { [which]: merged }) });
+    });
+  }
+
+  useEffect(function() {
+    ["origin", "destination", "alternate"].forEach(function(which) {
+      var icao = flight[which];
+      if (!icao || !/^[A-Z0-9]{4}$/.test(String(icao).toUpperCase())) return;
+      var current = (flight.freqs && flight.freqs[which]) || {};
+      var hasAny = Object.keys(current).some(function(k) { return current[k]; });
+      if (hasAny) return; // never auto-overwrite
+      refreshAirportFreqs(which, false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flight.origin, flight.destination, flight.alternate]);
   const [fleet, setFleet] = useState(() => {
     try {
       const saved = localStorage.getItem('navlog_fleet');
@@ -2115,11 +2250,12 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
 
 function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
   const initialTab = initialSource && initialSource.kind === "radial" ? "radial"
+    : initialSource && initialSource.kind === "intersection" ? "intersect"
     : initialSource && initialSource.kind === "map" ? "map"
     : "search";
   const [tab, setTab] = useState(initialTab);
   const [innerOpen, setInnerOpen] = useState(false);
-  const [innerSlot, setInnerSlot] = useState(null); // 'anchor'
+  const [innerSlot, setInnerSlot] = useState(null); // 'anchor' | 'iA' | 'iB'
 
   // Search tab state
   const [query, setQuery] = useState(initialQuery || "");
@@ -2169,10 +2305,22 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
   // Pre-fill from initialSource when it's a radial computation, so 'Editar fonte'
   // re-opens with anchor/bearing/distance ready to tweak.
   const _initRadial = initialSource && initialSource.kind === "radial" ? initialSource : null;
+  const _initIsect = initialSource && initialSource.kind === "intersection" ? initialSource : null;
   const [anchor, setAnchor] = useState(_initRadial && _initRadial.anchor ? _initRadial.anchor : null);
   const [bearingMode, setBearingMode] = useState(_initRadial && _initRadial.bearingMode ? _initRadial.bearingMode : "mc");
   const [bearing, setBearing] = useState(_initRadial && _initRadial.bearing != null ? String(_initRadial.bearing) : "");
   const [distance, setDistance] = useState(_initRadial && _initRadial.distance != null ? String(_initRadial.distance) : "");
+
+  // Intersection tab state
+  const [iAnchorA, setIAnchorA] = useState(_initIsect && _initIsect.anchorA ? _initIsect.anchorA : null);
+  const [iAnchorB, setIAnchorB] = useState(_initIsect && _initIsect.anchorB ? _initIsect.anchorB : null);
+  const [iBearingMode, setIBearingMode] = useState(_initIsect && _initIsect.bearingMode ? _initIsect.bearingMode : "mc");
+  const [iBearingA, setIBearingA] = useState(_initIsect && _initIsect.bearingA != null ? String(_initIsect.bearingA) : "");
+  const [iBearingB, setIBearingB] = useState(_initIsect && _initIsect.bearingB != null ? String(_initIsect.bearingB) : "");
+
+  // Coords tab state
+  const _initCoords = initialSource && initialSource.kind === "manual" ? initialSource : null;
+  const [coordsText, setCoordsText] = useState("");
 
   const radialResult = (function() {
     if (!anchor || anchor.lat == null || anchor.lon == null) return null;
@@ -2199,6 +2347,52 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         bearingMode: bearingMode,
         distance: dist,
       },
+    };
+  })();
+
+  // Intersection result: two anchors, two bearings → great-circle intersection.
+  const intersectionResult = (function() {
+    if (!iAnchorA || iAnchorA.lat == null || !iAnchorB || iAnchorB.lat == null) return null;
+    const ba = parseFloat(iBearingA), bb = parseFloat(iBearingB);
+    if (isNaN(ba) || isNaN(bb)) return null;
+    const varA = getDecl(iAnchorA.lat, iAnchorA.lon, iAnchorA.alt || 0) ?? (flight.variation ?? 0);
+    const varB = getDecl(iAnchorB.lat, iAnchorB.lon, iAnchorB.alt || 0) ?? (flight.variation ?? 0);
+    const tcA = iBearingMode === "mc" ? (((ba + varA) % 360) + 360) % 360 : ba;
+    const tcB = iBearingMode === "mc" ? (((bb + varB) % 360) + 360) % 360 : bb;
+    const out = gcIntersection(iAnchorA.lat, iAnchorA.lon, tcA, iAnchorB.lat, iAnchorB.lon, tcB);
+    if (!out) return null;
+    return {
+      name: ((iAnchorA.name || "A") + "x" + (iAnchorB.name || "B")).slice(0, 10).toUpperCase(),
+      kind: "computed",
+      lat: Math.round(out[0] * 1e6) / 1e6,
+      lon: Math.round(out[1] * 1e6) / 1e6,
+      notes: (iAnchorA.name || "?") + " R" + Math.round(ba) + "° × " + (iAnchorB.name || "?") + " R" + Math.round(bb) + "°",
+      source: {
+        kind: "intersection",
+        anchorA: { name: iAnchorA.name, kind: iAnchorA.kind || "custom",
+          lat: iAnchorA.lat, lon: iAnchorA.lon, alt: iAnchorA.alt ?? null,
+          source: iAnchorA.source || { kind: "manual" } },
+        anchorB: { name: iAnchorB.name, kind: iAnchorB.kind || "custom",
+          lat: iAnchorB.lat, lon: iAnchorB.lon, alt: iAnchorB.alt ?? null,
+          source: iAnchorB.source || { kind: "manual" } },
+        bearingMode: iBearingMode,
+        bearingA: ba,
+        bearingB: bb,
+      },
+    };
+  })();
+
+  // Coords tab parsed result (best-effort multi-format)
+  const coordsResult = (function() {
+    if (!coordsText) return null;
+    const r = parseCoordsString(coordsText);
+    if (!r) return null;
+    return {
+      name: "PT",
+      kind: "custom",
+      lat: Math.round(r[0] * 1e6) / 1e6,
+      lon: Math.round(r[1] * 1e6) / 1e6,
+      source: { kind: "manual" },
     };
   })();
 
@@ -2255,12 +2449,18 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         <div style={{ width: 80 }} />
       </div>
 
-      <div className={`flex shrink-0 border-b ${theme.panelBorder}`}>
-        {[["search", "Buscar"], ["radial", "Radial + Dist"], ["map", "Mapa"]].map(function(pair) {
+      <div className={`flex shrink-0 border-b ${theme.panelBorder} overflow-x-auto`}>
+        {[
+          ["search",    "Buscar"],
+          ["radial",    "Radial"],
+          ["intersect", "Inter."],
+          ["coords",    "Coords"],
+          ["map",       "Mapa"],
+        ].map(function(pair) {
           const key = pair[0], label = pair[1];
           return (
             <button key={key} onClick={() => setTab(key)}
-              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`flex-1 min-w-[64px] py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${
                 tab === key ? `${theme.accent} border-b-2 border-current` : theme.fgFaint
               }`}>
               {label}
@@ -2434,6 +2634,166 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
           </div>
         )}
 
+        {tab === "intersect" && (
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Âncora A</label>
+              <div className="flex items-center gap-2">
+                <div className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-2 min-h-[44px] flex items-center`}>
+                  {iAnchorA ? (
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-bold truncate ${theme.fg}`}>{iAnchorA.name || "—"}</div>
+                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                        {iAnchorA.lat?.toFixed(4)}, {iAnchorA.lon?.toFixed(4)}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className={`text-sm ${theme.fgFaint}`}>Selecione âncora</span>
+                  )}
+                </div>
+                <button onClick={() => { setInnerSlot("iA"); setInnerOpen(true); }}
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
+                  🔍
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Âncora B</label>
+              <div className="flex items-center gap-2">
+                <div className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded-xl px-3 py-2 min-h-[44px] flex items-center`}>
+                  {iAnchorB ? (
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-bold truncate ${theme.fg}`}>{iAnchorB.name || "—"}</div>
+                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                        {iAnchorB.lat?.toFixed(4)}, {iAnchorB.lon?.toFixed(4)}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className={`text-sm ${theme.fgFaint}`}>Selecione âncora</span>
+                  )}
+                </div>
+                <button onClick={() => { setInnerSlot("iB"); setInnerOpen(true); }}
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
+                  🔍
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>Modo do radial</label>
+              <div className={`flex rounded-xl overflow-hidden border ${theme.panelBorder} mb-2`}>
+                {[["mc", "MC (Mag)"], ["tc", "TC (True)"]].map(function(pair) {
+                  const m = pair[0], label = pair[1];
+                  return (
+                    <button key={m} onClick={() => setIBearingMode(m)}
+                      className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider ${iBearingMode === m ? theme.accentBg + " text-black" : theme.fgFaint}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className={`text-[9px] ${theme.fgFaint}`}>Radial de A</span>
+                  <input type="number" inputMode="numeric" min="0" max="359" placeholder="0–359°"
+                    value={iBearingA} onChange={(e) => setIBearingA(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <span className={`text-[9px] ${theme.fgFaint}`}>Radial de B</span>
+                  <input type="number" inputMode="numeric" min="0" max="359" placeholder="0–359°"
+                    value={iBearingB} onChange={(e) => setIBearingB(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            </div>
+            {(function() {
+              const r = intersectionResult;
+              if (!r) {
+                if (iAnchorA && iAnchorB && iBearingA && iBearingB) {
+                  return (
+                    <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 text-center text-[11px] text-red-400`}>
+                      ⚠ Radiais paralelos ou divergentes — sem interseção
+                    </div>
+                  );
+                }
+                return (
+                  <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 text-center text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                    Preencha as duas âncoras e os dois radiais
+                  </div>
+                );
+              }
+              return (
+                <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Interseção</div>
+                  <div className={`text-2xl font-black ${theme.cyan} num`}>{r.name}</div>
+                  <div className={`text-xs num ${theme.fgMuted}`}>{r.lat.toFixed(4)}, {r.lon.toFixed(4)}</div>
+                  <div className={`text-[10px] num ${theme.fgFaint}`}>{r.notes}</div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button onClick={() => saveToLib(r)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+                      ⭐ Salvar na biblioteca
+                    </button>
+                    <button onClick={() => chooseAndConfirm(r)}
+                      className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
+                      Usar este ponto
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "coords" && (
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className={`text-[10px] ${theme.fgFaint}`}>
+              Cole ou digite as coordenadas. Formatos aceites:<br/>
+              · DD: <span className="num">38.7169 -9.1395</span><br/>
+              · DDM: <span className="num">38°43.01'N 9°08.37'W</span><br/>
+              · DMS: <span className="num">38°43'01"N 9°08'22"W</span><br/>
+              · Compacto: <span className="num">3843.01N 00908.37W</span>
+            </div>
+            <textarea rows={3}
+              autoFocus
+              placeholder="38°43.01'N 9°08.37'W"
+              value={coordsText}
+              onChange={(e) => setCoordsText(e.target.value)}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl focus:outline-none num`}
+            />
+            {coordsText && (function() {
+              const r = coordsResult;
+              if (!r) {
+                return (
+                  <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 text-center text-[11px] text-red-400`}>
+                    ⚠ Não consegui interpretar essas coordenadas
+                  </div>
+                );
+              }
+              return (
+                <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Coordenadas</div>
+                  <div className={`text-xs num ${theme.fg}`}>{r.lat.toFixed(6)}, {r.lon.toFixed(6)}</div>
+                  <div className={`text-[10px] num ${theme.fgFaint}`}>
+                    {decDegToStr(r.lat, true)} {decDegToStr(r.lon, false)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button onClick={() => saveToLib(r)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
+                      ⭐ Salvar
+                    </button>
+                    <button onClick={() => chooseAndConfirm(r)}
+                      className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
+                      Usar este ponto
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {tab === "map" && (
           <PointFinderMapTab
             flight={flight} theme={theme} pdfOverlays={pdfOverlays}
@@ -2444,23 +2804,32 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         )}
       </div>
 
-      {innerOpen && (
-        <PointFinder
-          flight={flight} ac={ac} theme={theme}
-          userPoints={userPoints}
-          onAddUserPoint={onAddUserPoint}
-          onDeleteUserPoint={onDeleteUserPoint}
-          pdfOverlays={pdfOverlays}
-          depth={depth + 1}
-          initialSource={innerSlot === "anchor" && anchor ? anchor.source : null}
-          initialQuery={innerSlot === "anchor" && anchor && anchor.source && anchor.source.kind === "search" ? anchor.source.id : ""}
-          onConfirm={(pt) => {
-            if (innerSlot === "anchor") setAnchor(pt);
-            setInnerOpen(false);
-          }}
-          onCancel={() => setInnerOpen(false)}
-        />
-      )}
+      {innerOpen && (function() {
+        const slotPoint = innerSlot === "anchor" ? anchor
+          : innerSlot === "iA" ? iAnchorA
+          : innerSlot === "iB" ? iAnchorB : null;
+        const slotSource = slotPoint ? slotPoint.source : null;
+        const slotInitialQuery = slotSource && slotSource.kind === "search" ? slotSource.id : "";
+        return (
+          <PointFinder
+            flight={flight} ac={ac} theme={theme}
+            userPoints={userPoints}
+            onAddUserPoint={onAddUserPoint}
+            onDeleteUserPoint={onDeleteUserPoint}
+            pdfOverlays={pdfOverlays}
+            depth={depth + 1}
+            initialSource={slotSource}
+            initialQuery={slotInitialQuery}
+            onConfirm={(pt) => {
+              if (innerSlot === "anchor") setAnchor(pt);
+              else if (innerSlot === "iA") setIAnchorA(pt);
+              else if (innerSlot === "iB") setIAnchorB(pt);
+              setInnerOpen(false);
+            }}
+            onCancel={() => setInnerOpen(false)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -2689,7 +3058,7 @@ function AiracBadge({ theme }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -2844,7 +3213,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* FREQUÊNCIAS */}
-      <FreqsSection flight={flight} setFlight={setFlight} theme={theme} />
+      <FreqsSection flight={flight} setFlight={setFlight} theme={theme} onRefreshFreqs={onRefreshFreqs} />
 
       {/* WAYPOINTS */}
       <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
@@ -2949,9 +3318,60 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
 
       {/* MEUS PONTOS */}
       <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <button
+            onClick={function() {
+              const data = { format: "navlog-userpts/v1", exportedAt: new Date().toISOString(), points: userPoints };
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "navlog-pontos-" + new Date().toISOString().slice(0,10) + ".json";
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              setTimeout(function() { URL.revokeObjectURL(url); }, 500);
+            }}
+            disabled={(userPoints || []).length === 0}
+            className={`${theme.panel} border ${theme.inputBorder} ${(userPoints || []).length === 0 ? theme.fgFaint + ' opacity-40' : theme.fgMuted} rounded px-2 py-2 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1`}>
+            <Download className="w-3 h-3" /> Exportar JSON
+          </button>
+          <label className={`${theme.panel} border ${theme.inputBorder} ${theme.fgMuted} rounded px-2 py-2 text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer active:scale-95`}>
+            <Upload className="w-3 h-3" /> Importar JSON
+            <input type="file" accept="application/json,.json" className="hidden"
+              onChange={async function(e) {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                try {
+                  const text = await file.text();
+                  const parsed = JSON.parse(text);
+                  let arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.points) ? parsed.points : null);
+                  if (!arr) { alert("Formato não reconhecido (esperado array ou objeto com 'points')."); e.target.value = ""; return; }
+                  let imported = 0, skipped = 0;
+                  for (const pt of arr) {
+                    if (!pt || pt.lat == null || pt.lon == null) { skipped++; continue; }
+                    await onAddUserPoint({
+                      name: pt.name || "PT",
+                      kind: pt.kind || "custom",
+                      lat: Number(pt.lat),
+                      lon: Number(pt.lon),
+                      alt: pt.alt != null ? Number(pt.alt) : null,
+                      notes: pt.notes || "",
+                      tags: pt.tags || [],
+                      source: pt.source || { kind: "manual" },
+                    });
+                    imported++;
+                  }
+                  alert("Importados: " + imported + (skipped ? " · Ignorados: " + skipped : ""));
+                } catch (err) {
+                  alert("Erro ao importar: " + (err.message || err));
+                }
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
         {(userPoints || []).length === 0 ? (
           <div className={`text-[11px] ${theme.fgFaint} text-center py-2`}>
-            Nenhum ponto guardado. Use o botão 🔍 no editor de waypoint para criar (busca / radial+dist) e <strong>Salvar na biblioteca</strong>.
+            Nenhum ponto guardado. Use o botão 🔍 no editor de waypoint para criar (busca / radial+dist / interseção / coords) e <strong>Salvar na biblioteca</strong>.
           </div>
         ) : (
           <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl divide-y ${theme.panelBorder} overflow-hidden`}>
