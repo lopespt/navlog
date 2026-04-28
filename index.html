@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0144";
+const APP_VERSION = "20260428.0150";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5253,7 +5253,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     // Build a CSS matrix transform from 2 reference points
     function makeLayer(ov) {
       var div = document.createElement('div');
-      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;';
+      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:450;';
       var img = document.createElement('img');
       img.src = ov.dataUrl;
       img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
@@ -5267,8 +5267,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         var pts = ov.pdfPts, mpts = ov.mapPts;
         if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return;
         var u1 = pts[0][0], v1 = pts[0][1], u2 = pts[1][0], v2 = pts[1][1];
-        var p1 = map.latLngToContainerPoint([mpts[0][0], mpts[0][1]]);
-        var p2 = map.latLngToContainerPoint([mpts[1][0], mpts[1][1]]);
+        var p1 = map.latLngToLayerPoint([mpts[0][0], mpts[0][1]]);
+        var p2 = map.latLngToLayerPoint([mpts[1][0], mpts[1][1]]);
         var du = u2 - u1, dv = v2 - v1;
         var den = du*du + dv*dv;
         if (den === 0) return;
