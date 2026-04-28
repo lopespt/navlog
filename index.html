@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0223";
+const APP_VERSION = "20260428.0252";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1936,10 +1936,10 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
               ) : (
                 /* Botão de edição — waypoints manuais */
                 <button onClick={() => onEditCp(i)}
-                  className={`flex-1 ${theme.panel} border ${theme.panelBorder} rounded px-3 py-2 flex items-center justify-between transition-colors min-w-0`}>
+                  className={`flex-1 ${theme.panel} border ${computed[i]?.warnings?.length ? 'border-red-500' : theme.panelBorder} rounded px-3 py-2 flex items-center justify-between transition-colors min-w-0`}>
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className={`text-[10px] ${theme.fgFaint} num w-4 shrink-0`}>{i + 1}</div>
-                    <div className="text-left min-w-0">
+                    <div className={`text-[10px] ${computed[i]?.warnings?.length ? 'text-red-400' : theme.fgFaint} num w-4 shrink-0`}>{i + 1}</div>
+                    <div className="text-left min-w-0 flex-1">
                       <div className="font-bold truncate flex items-center gap-1">
                         {cp.name || "—"}
                         {cp.windMode === "none" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
@@ -1951,9 +1951,16 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                           : `${cp.useCruiseAlt ? (computed[i]?.alt ?? cp.alt) : (cp.alt ?? "?")} ft · TC ${String(computed[i]?.tc ?? cp.tc ?? 0).padStart(3, "0")}° · ${computed[i]?.dist ?? cp.dist ?? 0} NM`}
                         {cp.useCruiseAlt && <span className={`text-[8px] ${theme.accent} border border-current rounded px-1 normal-case`}>CRZ</span>}
                       </div>
+                      {computed[i]?.warnings?.length > 0 && (
+                        <div className="mt-0.5 space-y-0.5">
+                          {computed[i].warnings.map(function(w, wi) {
+                            return <div key={wi} className="text-[9px] text-red-400 leading-tight">⚠ {w}</div>;
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <Pencil className={`w-3.5 h-3.5 ${theme.fgFaint} shrink-0 ml-1`} />
+                  <Pencil className={`w-3.5 h-3.5 ${computed[i]?.warnings?.length ? 'text-red-400' : theme.fgFaint} shrink-0 ml-1`} />
                 </button>
               )}
 
@@ -4841,7 +4848,7 @@ async function renderPdfToImage(file, scale) {
 // Warp PDF image to Mercator-aligned canvas using 3-point affine transform.
 // Returns { dataUrl, width, height, bounds } ready for L.imageOverlay.
 async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
-  var REF_ZOOM = 12;
+  var REF_ZOOM = 14;
   var ppts = pdfPts.pdfPts, mpts = pdfPts.mapPts;
 
   // Convert LatLng reference points to Mercator pixels at REF_ZOOM
@@ -4869,9 +4876,9 @@ async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
   var minX=Math.min.apply(null,xs),maxX=Math.max.apply(null,xs);
   var minY=Math.min.apply(null,ys),maxY=Math.max.apply(null,ys);
 
-  // Canvas size — cap at 2048px on longest side
+  // Canvas size — cap at 4096px on longest side
   var cw=maxX-minX, ch=maxY-minY;
-  var sc=Math.min(1, 2048/Math.max(cw,ch));
+  var sc=Math.min(1, 4096/Math.max(cw,ch));
   cw=Math.max(1,Math.round(cw*sc)); ch=Math.max(1,Math.round(ch*sc));
 
   // Load image element then draw warped
@@ -4965,7 +4972,7 @@ async function renderPdfFromHandle(handle) {
 
 // ── PdfGeoreferencer ─────────────────────────────────────────────────────────
 // Full-screen wizard: pick 2 pts on PDF, then 2 pts on map
-function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
+function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdfOverlays }) {
   const [phase, setPhase] = useState('loading'); // loading | pdf | map | done
   const [imgData, setImgData] = useState(null);  // { dataUrl, width, height }
   const [pdfPts, setPdfPts] = useState([]);       // [[u,v], ...]  (≤2)
@@ -5041,6 +5048,14 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
     return () => { pickModeRef.current = false; map.off('click', handler); };
   }, [phase]);
 
+  // Auto-finish when 3rd map point is tapped
+  useEffect(function() {
+    if (phase === 'map' && mapPts.length === 3) {
+      var timer = setTimeout(finish, 400);
+      return function() { clearTimeout(timer); };
+    }
+  }, [mapPts.length, phase]);
+
   async function handlePickFile() {
     var file, handle = null;
     if (window.showOpenFilePicker) {
@@ -5089,7 +5104,11 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
     var rect = e.currentTarget.getBoundingClientRect();
     var u = (e.clientX - rect.left) / zoom;
     var v = (e.clientY - rect.top) / zoom;
+    var newLen = pdfPts.length + 1;
     setPdfPts(p => p.concat([[Math.round(u), Math.round(v)]]));
+    if (newLen >= 3) {
+      setTimeout(function() { setMapPts([]); setPhase('map'); }, 400);
+    }
   }
 
   async function finish() {
@@ -5219,6 +5238,27 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
       <div className="absolute bottom-0 left-0 right-0 z-[9000] pointer-events-none">
         <div className="pointer-events-auto mx-3 mb-2 rounded-2xl overflow-hidden"
           style={{ background: 'rgba(0,0,0,0.88)' }}>
+
+          {/* Overlay visibility toggles — existing cartas visíveis no mapa */}
+          {pdfOverlays && pdfOverlays.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-3 pt-2">
+              <span className="text-zinc-500 text-[10px] w-full mb-0.5">Cartas visíveis:</span>
+              {pdfOverlays.map(function(ov, i) {
+                return (
+                  <button key={ov.id}
+                    onClick={function() {
+                      setPdfOverlays(function(ovs) {
+                        return ovs.map(function(o) { return o.id === ov.id ? Object.assign({}, o, { visible: !o.visible }) : o; });
+                      });
+                    }}
+                    className={'px-2 py-0.5 rounded text-[10px] font-bold border ' + (ov.visible ? 'border-violet-500 text-violet-300' : 'border-zinc-700 text-zinc-600')}>
+                    Carta {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex items-start gap-3 p-3">
             <div style={{ position: 'relative', width: 80, height: 60, flexShrink: 0,
               background: '#222', borderRadius: 6, overflow: 'hidden' }}>
@@ -5243,12 +5283,12 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
                   Toque onde está o ponto {mapPts.length + 1} ({ptLabels[mapPts.length]})
                 </div>
               ) : (
-                <div className="text-green-400 text-xs mt-1">3 pontos marcados ✓</div>
+                <div className="text-green-400 text-xs mt-1">Processando… aguarde</div>
               )}
             </div>
           </div>
 
-          {mapPts.length > 0 && (
+          {mapPts.length > 0 && mapPts.length < 3 && (
             <div className="text-zinc-400 text-[10px] px-3 pb-1">
               {mapPts.map((p, i) => (
                 <span key={i} style={{ color: ptColors[i], marginRight: 8 }}>
@@ -5267,12 +5307,11 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
               className="px-3 py-2 bg-zinc-700 text-white rounded-xl text-xs font-bold active:scale-95">
               ← PDF
             </button>
-            <button disabled={mapPts.length < 3} onClick={finish}
-              className={`flex-1 py-2 rounded-xl text-sm font-bold active:scale-95 ${
-                mapPts.length >= 3 ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-zinc-500'
-              }`}>
-              {mapPts.length >= 3 ? 'Adicionar overlay ✓' : `Faltam ${3 - mapPts.length} pt`}
-            </button>
+            <div className={`flex-1 py-2 rounded-xl text-sm font-bold text-center ${
+              mapPts.length >= 3 ? 'bg-violet-600/50 text-violet-200' : 'bg-zinc-800 text-zinc-400'
+            }`}>
+              {mapPts.length >= 3 ? '✓ Auto-adicionando…' : `Faltam ${3 - mapPts.length} toque${3 - mapPts.length > 1 ? 's' : ''}`}
+            </div>
           </div>
         </div>
       </div>
@@ -5657,6 +5696,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         <PdfGeoreferencer
           theme={theme}
           mapRef={mapRef}
+          pdfOverlays={pdfOverlays}
+          setPdfOverlays={setPdfOverlays}
           onDone={(overlay, handle) => {
             setPdfOverlays(os => [...os, overlay]);
             savePdfOverlayIdb(overlay, handle || null).catch(() => {});
