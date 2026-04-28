@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1141";
+const APP_VERSION = "20260428.1147";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2990,7 +2990,8 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', isolation: 'isolate' }}
-      className={theme.bg}>
+      className={theme.bg}
+      onClick={(e) => e.stopPropagation()}>
       <div className={`flex items-center gap-2 p-3 shrink-0 ${theme.panel} border-b ${theme.panelBorder}`}>
         <button onClick={onCancel}
           className={`px-3 py-1.5 rounded-lg border text-sm ${theme.panelBorder} ${theme.fgFaint}`}>
