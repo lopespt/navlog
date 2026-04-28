@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1636";
+const APP_VERSION = "20260428.1659";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2746,34 +2746,32 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         )}
       </div>
 
-      {innerOpen && (
-        {(function() {
-          const slotPoint = innerSlot === "anchor" ? anchor
-            : innerSlot === "iA" ? iAnchorA
-            : innerSlot === "iB" ? iAnchorB : null;
-          const slotSource = slotPoint ? slotPoint.source : null;
-          const slotInitialQuery = slotSource && slotSource.kind === "search" ? slotSource.id : "";
-          return (
-            <PointFinder
-              flight={flight} ac={ac} theme={theme}
-              userPoints={userPoints}
-              onAddUserPoint={onAddUserPoint}
-              onDeleteUserPoint={onDeleteUserPoint}
-              pdfOverlays={pdfOverlays}
-              depth={depth + 1}
-              initialSource={slotSource}
-              initialQuery={slotInitialQuery}
-              onConfirm={(pt) => {
-                if (innerSlot === "anchor") setAnchor(pt);
-                else if (innerSlot === "iA") setIAnchorA(pt);
-                else if (innerSlot === "iB") setIAnchorB(pt);
-                setInnerOpen(false);
-              }}
-              onCancel={() => setInnerOpen(false)}
-            />
-          );
-        })()}
-      )}
+      {innerOpen && (function() {
+        const slotPoint = innerSlot === "anchor" ? anchor
+          : innerSlot === "iA" ? iAnchorA
+          : innerSlot === "iB" ? iAnchorB : null;
+        const slotSource = slotPoint ? slotPoint.source : null;
+        const slotInitialQuery = slotSource && slotSource.kind === "search" ? slotSource.id : "";
+        return (
+          <PointFinder
+            flight={flight} ac={ac} theme={theme}
+            userPoints={userPoints}
+            onAddUserPoint={onAddUserPoint}
+            onDeleteUserPoint={onDeleteUserPoint}
+            pdfOverlays={pdfOverlays}
+            depth={depth + 1}
+            initialSource={slotSource}
+            initialQuery={slotInitialQuery}
+            onConfirm={(pt) => {
+              if (innerSlot === "anchor") setAnchor(pt);
+              else if (innerSlot === "iA") setIAnchorA(pt);
+              else if (innerSlot === "iB") setIAnchorB(pt);
+              setInnerOpen(false);
+            }}
+            onCancel={() => setInnerOpen(false)}
+          />
+        );
+      })()}
     </div>
   );
 }
