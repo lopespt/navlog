@@ -30,6 +30,17 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- NOAA World Magnetic Model — loads asynchronously, fires 'geomagready' when ready -->
+  <script type="module">
+    try {
+      const { default: geomagnetism } = await import('https://esm.sh/geomagnetism');
+      window._geomagnetism = geomagnetism;
+      window.dispatchEvent(new CustomEvent('geomagready'));
+    } catch(e) {
+      console.warn('geomagnetism failed to load:', e);
+    }
+  </script>
+
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo, useRef } = React;
     const {
@@ -86,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0028";
+const APP_VERSION = "20260428.0037";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -176,6 +187,19 @@ function projectSource(lat2, lon2, tc, distNM) {
   // Reverse: given destination, course from source, distance → source
   var reverseTc = (tc + 180) % 360;
   return projectDest(lat2, lon2, reverseTc, distNM);
+}
+
+// Magnetic declination from NOAA WMM — returns degrees (E positive, W negative).
+// Returns null when library not loaded or coords missing → caller uses flight.variation.
+function getDecl(lat, lon, altFt) {
+  try {
+    if (window._geomagnetism != null && lat != null && lon != null) {
+      var altKm = (altFt ?? 0) / 3280.84;
+      var result = window._geomagnetism.model().point([lat, lon, altKm]);
+      return result.decl ?? 0;
+    }
+  } catch(e) {}
+  return null;
 }
 
 // Decimal degrees → DDM string "DD°MM.MMM'N"
@@ -693,6 +717,15 @@ function NavlogApp() {
 
   const ac = fleet[flight.aircraftKey] || Object.values(fleet)[0];
 
+  // Trigger recompute when the WMM library finishes loading
+  const [geomagReady, setGeomagReady] = useState(!!window._geomagnetism);
+  useEffect(() => {
+    if (window._geomagnetism) { setGeomagReady(true); return; }
+    var handler = function() { setGeomagReady(true); };
+    window.addEventListener('geomagready', handler);
+    return function() { window.removeEventListener('geomagready', handler); };
+  }, []);
+
   // Theme tokens
   const theme = useMemo(() => themes[prefs.theme] || themes.night, [prefs.theme]);
   const fontScale = { s: 0.9, m: 1, l: 1.15 }[prefs.fontSize] || 1;
@@ -768,6 +801,10 @@ function NavlogApp() {
         wDir, wVel, flight.variation
       );
 
+      // Per-leg magnetic variation from WMM (if library loaded and coords known)
+      // Falls back to flight.variation when unavailable
+      var legVar = getDecl(cp.lat, cp.lon, thisAlt) ?? (flight.variation ?? 0);
+
       // ETE = sum of timeMin per portion (climb/descent time is fixed by altitude/ROC, not distance)
       // Fuel = sum of (timeMin/60) × gph per portion
       let totalETE = 0;
@@ -777,10 +814,10 @@ function NavlogApp() {
         totalETE += p.timeMin ?? 0;
         fuelLeg += ((p.timeMin ?? 0) / 60) * p.gph;
         // For heading/WCA display, prefer the cruise phase
-        const pr = calcLeg(cp.tc, 1, p.tas, wDir, wVel, flight.variation, 0);
+        const pr = calcLeg(cp.tc, 1, p.tas, wDir, wVel, legVar, 0);
         if (p.phase === "CRUZEIRO" || displayResult == null) displayResult = pr;
       });
-      if (!displayResult) displayResult = calcLeg(cp.tc, 1, avgTas, wDir, wVel, flight.variation, 0);
+      if (!displayResult) displayResult = calcLeg(cp.tc, 1, avgTas, wDir, wVel, legVar, 0);
 
       const totalDist = cp.dist || 0;
       // Effective GS = total distance / total time
@@ -796,6 +833,7 @@ function NavlogApp() {
         ...cp,
         alt: thisAlt,   // effective altitude (resolved useCruiseAlt)
         tas: avgTas, ...displayResult,
+        variation: legVar, // per-leg magnetic variation (WMM or fallback)
         gs: totalGS,
         ete: totalETE,
         gsPlanned: totalGS,
@@ -833,7 +871,7 @@ function NavlogApp() {
       }
     }
     return _res;
-  }, [flight, ac]);
+  }, [flight, ac, geomagReady]);
 
   // Próximo checkpoint não cruzado
   const nextIdx = useMemo(() => {
@@ -1781,9 +1819,18 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
               onChange={(e) => setN("cruiseAlt", e.target.value)} />
           </div>
           <div>
-            <label className={labelClass}>Var. magnética (W = neg)</label>
-            <input className={fieldClass} type="number" value={flight.variation ?? ""}
-              onChange={(e) => setN("variation", e.target.value)} />
+            <label className={labelClass}>Var. magnética fallback (W = neg)</label>
+            {(() => {
+              const origin = flight.checkpoints.find(cp => cp.isOrigin);
+              const wmm = origin?.lat != null ? getDecl(origin.lat, origin.lon, flight.cruiseAlt ?? 7000) : null;
+              return wmm != null
+                ? <div className={`${fieldClass} flex items-center justify-between`}>
+                    <span className={theme.fgMuted}>Auto WMM</span>
+                    <span className={`num font-bold ${theme.accent}`}>{wmm >= 0 ? '+' : ''}{wmm.toFixed(1)}°</span>
+                  </div>
+                : <input className={fieldClass} type="number" value={flight.variation ?? ""}
+                    onChange={(e) => setN("variation", e.target.value)} placeholder="Ex: -22" />;
+            })()}
           </div>
           <div>
             <label className={labelClass}>Vento direção (°)</label>
@@ -2150,7 +2197,14 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
           {step === "tcdist" && (
             <StepTCDist
               theme={theme}
-              variation={flight.variation ?? 0}
+              variation={(() => {
+                // Use WMM at waypoint coords if available, else at prev WP, else fallback
+                const prevForVar = isNew
+                  ? flight.checkpoints[flight.checkpoints.length - 1]
+                  : flight.checkpoints[editingIdx - 1];
+                return getDecl(cp.lat ?? prevForVar?.lat, cp.lon ?? prevForVar?.lon, cp.alt ?? flight.cruiseAlt ?? 7000)
+                  ?? (flight.variation ?? 0);
+              })()}
               cp={cp}
               setCp={setCp}
               onNext={next}
@@ -2182,7 +2236,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, onClose, theme, ac }) {
                 windMode={windMode}
                 cruiseAlt={flight.cruiseAlt ?? 7000}
                 prevAlt={prevAltForResumo}
-                variation={flight.variation ?? 0}
+                variation={getDecl(cp.lat, cp.lon, cp.alt ?? flight.cruiseAlt ?? 7000) ?? (flight.variation ?? 0)}
                 onEdit={(s) => setStep(s)}
                 onSave={save}
                 onRemove={!isNew && !isOrigin ? remove : null}
@@ -4773,8 +4827,18 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme }) {
     return window.L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [size/2, size/2] });
   }
   function planeIcon(heading) {
-    const html = `<div style="transform:rotate(${heading}deg);font-size:22px;filter:drop-shadow(0 1px 3px #000)">✈</div>`;
-    return window.L.divIcon({ html, className: '', iconSize: [26,26], iconAnchor: [13,13] });
+    // SVG airplane pointing north (up) at 0° — rotate by true course
+    const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32'>"
+      + "<g transform='rotate(" + heading + ",16,16)'>"
+      // fuselage
+      + "<path d='M16 4 L19 22 L16 20 L13 22 Z' fill='#a855f7' stroke='white' stroke-width='1.5' stroke-linejoin='round'/>"
+      // wings
+      + "<path d='M16 14 L6 20 L7 17 L16 13 L25 17 L26 20 Z' fill='#a855f7' stroke='white' stroke-width='1' stroke-linejoin='round'/>"
+      // tail
+      + "<path d='M16 19 L12 24 L13 22 L19 22 L20 24 Z' fill='#a855f7' stroke='white' stroke-width='0.8' stroke-linejoin='round'/>"
+      + "</g></svg>";
+    const html = "<div style='line-height:0'>" + svg + "</div>";
+    return window.L.divIcon({ html, className: '', iconSize: [32,32], iconAnchor: [16,16] });
   }
 
   // Redraw route + markers when liveRoute changes
