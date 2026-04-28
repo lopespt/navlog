@@ -879,6 +879,64 @@ function NavlogApp() {
     await userPtsDelete(id);
     setUserPoints((p) => p.filter((x) => x.id !== id));
   }
+
+  // Auto-fill freqs/elev from AIRAC when an ICAO is entered for origin/destination/alternate.
+  // Only fills if the matching freqs slot is empty (never overwrites user input). Refresh
+  // button in FreqsSection lets the user re-fetch on demand.
+  function _airacFreqKey(type) {
+    var t = String(type || "").toLowerCase();
+    if (t === "atis") return "atis";
+    if (t === "ground") return "ground";
+    if (t === "tower") return "tower";
+    if (t === "approach" || t === "departure") return "approach";
+    if (t === "ctaf") return "ctaf";
+    if (t === "unicom") return "unicom";
+    return null;
+  }
+  function airportToFreqs(ap) {
+    if (!ap) return null;
+    var out = {};
+    if (ap.elevation_ft != null) out.elev = String(ap.elevation_ft);
+    (ap.frequencies || []).forEach(function(f) {
+      var k = _airacFreqKey(f.type);
+      if (!k) return;
+      if (out[k]) return; // first one wins per type
+      var v = Number(f.frequency_mhz);
+      if (isFinite(v)) out[k] = (Math.round(v * 1000) / 1000).toFixed(3);
+    });
+    return out;
+  }
+
+  async function refreshAirportFreqs(which, overwrite) {
+    var icao = flight && flight[which];
+    if (!icao || !/^[A-Z0-9]{4}$/.test(String(icao).toUpperCase())) return;
+    var ap = await airacAirport(icao);
+    if (!ap) return;
+    var derived = airportToFreqs(ap);
+    if (!derived) return;
+    setFlight(function(f) {
+      var prev = (f.freqs && f.freqs[which]) || {};
+      var merged = {};
+      Object.keys(derived).forEach(function(k) {
+        merged[k] = overwrite ? derived[k] : (prev[k] || derived[k]);
+      });
+      // preserve any user-entered fields not in derived
+      Object.keys(prev).forEach(function(k) { if (!(k in merged)) merged[k] = prev[k]; });
+      return Object.assign({}, f, { freqs: Object.assign({}, f.freqs || {}, { [which]: merged }) });
+    });
+  }
+
+  useEffect(function() {
+    ["origin", "destination", "alternate"].forEach(function(which) {
+      var icao = flight[which];
+      if (!icao || !/^[A-Z0-9]{4}$/.test(String(icao).toUpperCase())) return;
+      var current = (flight.freqs && flight.freqs[which]) || {};
+      var hasAny = Object.keys(current).some(function(k) { return current[k]; });
+      if (hasAny) return; // never auto-overwrite
+      refreshAirportFreqs(which, false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flight.origin, flight.destination, flight.alternate]);
   const [fleet, setFleet] = useState(() => {
     try {
       const saved = localStorage.getItem('navlog_fleet');
@@ -3000,7 +3058,7 @@ function AiracBadge({ theme }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -3155,7 +3213,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* FREQUÊNCIAS */}
-      <FreqsSection flight={flight} setFlight={setFlight} theme={theme} />
+      <FreqsSection flight={flight} setFlight={setFlight} theme={theme} onRefreshFreqs={onRefreshFreqs} />
 
       {/* WAYPOINTS */}
       <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
