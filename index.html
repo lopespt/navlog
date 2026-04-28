@@ -29,6 +29,7 @@
   <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
   <!-- NOAA World Magnetic Model — loads asynchronously, fires 'geomagready' when ready -->
   <script type="module">
@@ -97,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0108";
+const APP_VERSION = "20260428.0118";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -688,6 +689,7 @@ function NavlogApp() {
   const [editingIdx, setEditingIdx] = useState(null);
   const [insertAfterIdx, setInsertAfterIdx] = useState(null);
   const [insertCoords, setInsertCoords] = useState(null); // [lat, lon] from map click
+  const [pdfOverlays, setPdfOverlays] = useState([]); // PDF map overlays
   const [routesOpen, setRoutesOpen] = useState(false);
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [ataEditOpen, setAtaEditOpen] = useState(false);
@@ -1520,6 +1522,7 @@ function NavlogApp() {
           <MapTab
             flight={flight} computed={computed} liveRoute={liveRoute}
             liveETAs={liveETAs} ac={ac} theme={theme}
+            pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
             onInsertWaypoint={(afterIdx, lat, lon) => {
               setInsertAfterIdx(afterIdx);
               setInsertCoords([lat, lon]);
@@ -4798,6 +4801,322 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
 
 
+// ── PDF overlay helpers ───────────────────────────────────────────────────────
+
+// Render first page of a PDF file → { dataUrl, width, height }
+async function renderPdfToImage(file, scale) {
+  scale = scale || 2;
+  if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  var ab = await file.arrayBuffer();
+  var pdf = await window.pdfjsLib.getDocument({ data: ab }).promise;
+  var page = await pdf.getPage(1);
+  var vp = page.getViewport({ scale: scale });
+  var canvas = document.createElement('canvas');
+  canvas.width  = vp.width;
+  canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  return { dataUrl: canvas.toDataURL('image/png'), width: vp.width, height: vp.height };
+}
+
+// ── PdfGeoreferencer ─────────────────────────────────────────────────────────
+// Full-screen wizard: pick 2 pts on PDF, then 2 pts on map
+function PdfGeoreferencer({ theme, mapRef, onDone, onCancel }) {
+  const [phase, setPhase] = useState('loading'); // loading | pdf | map | done
+  const [imgData, setImgData] = useState(null);  // { dataUrl, width, height }
+  const [pdfPts, setPdfPts] = useState([]);       // [[u,v], ...]  (≤2)
+  const [mapPts, setMapPts] = useState([]);       // [[lat,lon], ...] (≤2)
+  const [zoom, setZoom] = useState(1);
+  const [opacity, setOpacity] = useState(0.7);
+  const fileRef = useRef(null);
+  const canvasRef = useRef(null);
+  const pickModeRef = useRef(false); // map pick mode flag
+
+  // Attach/detach map click handler during map phase
+  useEffect(() => {
+    var map = mapRef.current;
+    if (!map || phase !== 'map') return;
+    pickModeRef.current = true;
+    function handler(e) {
+      if (!pickModeRef.current) return;
+      var pts = mapPts.concat([[e.latlng.lat, e.latlng.lng]]);
+      setMapPts(pts);
+      if (pts.length >= 2) { pickModeRef.current = false; }
+    }
+    map.on('click', handler);
+    return () => { pickModeRef.current = false; map.off('click', handler); };
+  }, [phase]);
+
+  async function handleFile(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    setPhase('loading');
+    try {
+      var result = await renderPdfToImage(file, 2);
+      setImgData(result);
+      setPhase('pdf');
+    } catch(err) {
+      alert('Erro ao carregar PDF: ' + err.message);
+      setPhase('loading');
+    }
+  }
+
+  function handleImgClick(e) {
+    if (phase !== 'pdf' || pdfPts.length >= 2) return;
+    var rect = e.currentTarget.getBoundingClientRect();
+    var u = (e.clientX - rect.left) / zoom;
+    var v = (e.clientY - rect.top) / zoom;
+    setPdfPts(p => p.concat([[Math.round(u), Math.round(v)]]));
+  }
+
+  function finish() {
+    if (pdfPts.length < 2 || mapPts.length < 2) return;
+    onDone({
+      id: Date.now(),
+      dataUrl: imgData.dataUrl,
+      width: imgData.width,
+      height: imgData.height,
+      pdfPts: pdfPts,
+      mapPts: mapPts,
+      opacity: opacity,
+      visible: true,
+    });
+  }
+
+  // ── Render ──
+  if (phase === 'loading' && !imgData) {
+    return (
+      <div className="fixed inset-0 z-[9000] flex flex-col items-center justify-center gap-4"
+        style={{ background: 'rgba(0,0,0,0.92)' }}>
+        <div className={`text-lg font-bold ${theme.fg}`}>Adicionar overlay de carta</div>
+        <div className={`text-sm ${theme.fgMuted} text-center px-8`}>
+          Selecione um PDF para georreferenciar e sobrepor ao mapa
+        </div>
+        <button onClick={() => fileRef.current.click()}
+          className="px-6 py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+          Selecionar PDF
+        </button>
+        <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFile} />
+        <button onClick={onCancel} className={`text-sm ${theme.fgFaint} mt-2`}>Cancelar</button>
+      </div>
+    );
+  }
+
+  if (phase === 'loading' && imgData) {
+    return (
+      <div className="fixed inset-0 z-[9000] flex items-center justify-center"
+        style={{ background: 'rgba(0,0,0,0.92)' }}>
+        <div className={`text-sm ${theme.fg}`}>Processando PDF…</div>
+      </div>
+    );
+  }
+
+  if (phase === 'pdf') {
+    const ptColors = ['#ef4444','#3b82f6'];
+    return (
+      <div className="fixed inset-0 z-[9000] flex flex-col" style={{ background: '#111' }}>
+        {/* Header */}
+        <div className="flex items-center gap-2 px-3 py-2 bg-black/80 shrink-0">
+          <div className="text-white font-bold text-sm flex-1">
+            Passo 1: Toque 2 pontos de referência no PDF
+          </div>
+          <div className="flex gap-1">
+            <button onClick={() => setZoom(z => Math.max(0.3, z - 0.3))}
+              className="px-3 py-1 bg-zinc-700 text-white rounded text-sm">−</button>
+            <span className="px-2 py-1 text-white text-sm">{Math.round(zoom*100)}%</span>
+            <button onClick={() => setZoom(z => Math.min(5, z + 0.3))}
+              className="px-3 py-1 bg-zinc-700 text-white rounded text-sm">+</button>
+          </div>
+          <button onClick={onCancel} className="text-zinc-400 text-sm px-2">✕</button>
+        </div>
+
+        {/* Instruction */}
+        <div className={`text-center text-xs py-1 shrink-0 ${pdfPts.length < 2 ? 'text-amber-400' : 'text-green-400'}`}>
+          {pdfPts.length === 0 && 'Toque no ponto 1 (vermelho)'}
+          {pdfPts.length === 1 && 'Toque no ponto 2 (azul)'}
+          {pdfPts.length >= 2 && '2 pontos selecionados ✓'}
+        </div>
+
+        {/* PDF image — scrollable */}
+        <div className="flex-1 overflow-auto" style={{ cursor: 'crosshair' }}>
+          <div style={{ position: 'relative', display: 'inline-block',
+            width: imgData.width * zoom, height: imgData.height * zoom }}
+            onClick={handleImgClick}>
+            <img src={imgData.dataUrl} alt="PDF"
+              style={{ width: imgData.width * zoom, height: imgData.height * zoom,
+                display: 'block', userSelect: 'none', pointerEvents: 'none' }} />
+            {/* Reference point markers */}
+            {pdfPts.map(([u, v], idx) => (
+              <div key={idx} style={{
+                position: 'absolute',
+                left: u * zoom - 10, top: v * zoom - 10,
+                width: 20, height: 20,
+                border: `3px solid ${ptColors[idx]}`,
+                borderRadius: '50%',
+                background: ptColors[idx] + '44',
+                pointerEvents: 'none',
+              }}>
+                <div style={{ position: 'absolute', top: -16, left: 0,
+                  color: ptColors[idx], fontSize: 10, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                  P{idx+1} ({u},{v})
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-2 p-3 bg-black/80 shrink-0">
+          {pdfPts.length > 0 && (
+            <button onClick={() => setPdfPts([])}
+              className="px-4 py-2 bg-zinc-700 text-white rounded-xl text-sm font-bold active:scale-95">
+              Refazer
+            </button>
+          )}
+          <button disabled={pdfPts.length < 2} onClick={() => { setMapPts([]); setPhase('map'); }}
+            className={`flex-1 py-2 rounded-xl text-sm font-bold active:scale-95 transition-transform ${
+              pdfPts.length >= 2 ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-zinc-500'
+            }`}>
+            Próximo: marcar no mapa →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'map') {
+    const ptColors = ['#ef4444','#3b82f6'];
+    const needed = 2 - mapPts.length;
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-[9000] pointer-events-none">
+        {/* Floating instruction banner */}
+        <div className="pointer-events-auto mx-3 mb-2 rounded-2xl overflow-hidden"
+          style={{ background: 'rgba(0,0,0,0.88)' }}>
+          {/* PDF thumbnail with picked points */}
+          <div className="flex items-start gap-3 p-3">
+            <div style={{ position: 'relative', width: 80, height: 60, flexShrink: 0,
+              background: '#222', borderRadius: 6, overflow: 'hidden' }}>
+              <img src={imgData.dataUrl} alt="ref"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              {pdfPts.map(([u, v], idx) => {
+                var left = (u / imgData.width) * 100;
+                var top  = (v / imgData.height) * 100;
+                return (
+                  <div key={idx} style={{
+                    position: 'absolute', left: left + '%', top: top + '%',
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: ptColors[idx],
+                    transform: 'translate(-50%,-50%)',
+                    border: '1px solid white',
+                  }} />
+                );
+              })}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-white font-bold text-sm">Passo 2: Marcar no mapa</div>
+              {mapPts.length < 2 ? (
+                <div style={{ color: ptColors[mapPts.length], fontSize: 12, marginTop: 2 }}>
+                  Toque no mapa onde está o ponto {mapPts.length + 1}
+                  {' '}(círculo {mapPts.length === 0 ? 'vermelho' : 'azul'} no PDF)
+                </div>
+              ) : (
+                <div className="text-green-400 text-xs mt-1">2 pontos marcados ✓</div>
+              )}
+            </div>
+          </div>
+
+          {mapPts.length > 0 && (
+            <div className="text-zinc-400 text-[10px] px-3 pb-1">
+              {mapPts.map((p, i) => (
+                <span key={i} style={{ color: ptColors[i], marginRight: 8 }}>
+                  P{i+1}: {p[0].toFixed(4)}° {p[1].toFixed(4)}°
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2 px-3 pb-3 pt-1">
+            <button onClick={() => setMapPts([])}
+              className="px-3 py-2 bg-zinc-700 text-white rounded-xl text-xs font-bold active:scale-95">
+              Refazer
+            </button>
+            <button onClick={() => { setPhase('pdf'); setPdfPts([]); setMapPts([]); }}
+              className="px-3 py-2 bg-zinc-700 text-white rounded-xl text-xs font-bold active:scale-95">
+              ← PDF
+            </button>
+            <button disabled={mapPts.length < 2} onClick={finish}
+              className={`flex-1 py-2 rounded-xl text-sm font-bold active:scale-95 ${
+                mapPts.length >= 2 ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-zinc-500'
+              }`}>
+              Adicionar overlay ✓
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── PdfLayersPanel ────────────────────────────────────────────────────────────
+function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.85)' }}>
+      <div className={`flex items-center px-4 py-3 border-b ${theme.panelBorder} ${theme.panel}`}>
+        <div className={`font-bold ${theme.fg} flex-1`}>Camadas / Cartas</div>
+        <button onClick={onClose} className={`${theme.fgFaint} text-xl px-2`}>✕</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {overlays.length === 0 && (
+          <div className={`text-sm ${theme.fgFaint} text-center py-8`}>
+            Nenhuma carta adicionada
+          </div>
+        )}
+        {overlays.map(ov => (
+          <div key={ov.id} className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3`}>
+            <div className="flex items-center gap-3">
+              <img src={ov.dataUrl} alt="" style={{ width: 48, height: 36, objectFit: 'contain',
+                background: '#222', borderRadius: 4, flexShrink: 0 }} />
+              <div className="flex-1 min-w-0">
+                <div className={`text-sm font-bold ${theme.fg} truncate`}>
+                  Carta {new Date(ov.id).toLocaleTimeString()}
+                </div>
+                <div className={`text-[10px] ${theme.fgFaint}`}>
+                  {ov.pdfPts.length} pts PDF · {ov.mapPts.length} pts mapa
+                </div>
+              </div>
+              <button onClick={() => setOverlays(os => os.map(o => o.id === ov.id ? {...o, visible: !o.visible} : o))}
+                className={`text-xs px-2 py-1 rounded border ${ov.visible ? 'border-violet-500 text-violet-400' : theme.panelBorder + ' ' + theme.fgFaint}`}>
+                {ov.visible ? 'ON' : 'OFF'}
+              </button>
+              <button onClick={() => setOverlays(os => os.filter(o => o.id !== ov.id))}
+                className="text-red-500 text-lg px-1">✕</button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <span className={`text-[10px] ${theme.fgFaint}`}>Opac.</span>
+              <input type="range" min="0.1" max="1" step="0.05"
+                value={ov.opacity}
+                onChange={e => setOverlays(os => os.map(o => o.id === ov.id ? {...o, opacity: parseFloat(e.target.value)} : o))}
+                className="flex-1" />
+              <span className={`text-[10px] ${theme.fgFaint} w-8 text-right`}>{Math.round(ov.opacity*100)}%</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-3 border-t border-zinc-700">
+        <button onClick={onAddNew}
+          className="w-full py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+          + Adicionar carta PDF
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // Flat-earth distance from point P to segment A→B (in degrees, approximate)
 function ptSegDist(px, py, ax, ay, bx, by) {
@@ -4809,13 +5128,17 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
   const [tick, setTick] = useState(0);
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [georefActive, setGeorefActive] = useState(false);
+  // Leaflet layers for PDF overlays — keyed by overlay id
+  const pdfLayerRefs = useRef({});
 
   // Re-render simulated position every second
   useEffect(() => {
@@ -4872,6 +5195,68 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     const layer = window.L.tileLayer(url, { attribution: attr, maxZoom: 18 }).addTo(map);
     overlayRef.current.tileLayer = layer;
   }, [tileMode]);
+
+  // Sync PDF overlay layers with Leaflet map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+
+    // Build a CSS matrix transform from 2 reference points
+    function makeLayer(ov) {
+      var div = document.createElement('div');
+      div.style.cssText = 'position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;';
+      var img = document.createElement('img');
+      img.src = ov.dataUrl;
+      img.style.cssText = 'width:' + ov.width + 'px;height:' + ov.height + 'px;display:block;';
+      div.appendChild(img);
+      map.getPanes().overlayPane.appendChild(div);
+
+      function update() {
+        if (!ov.visible) { div.style.display = 'none'; return; }
+        div.style.display = '';
+        div.style.opacity = String(ov.opacity);
+        var pts = ov.pdfPts, mpts = ov.mapPts;
+        if (!pts || pts.length < 2 || !mpts || mpts.length < 2) return;
+        var u1 = pts[0][0], v1 = pts[0][1], u2 = pts[1][0], v2 = pts[1][1];
+        var p1 = map.latLngToContainerPoint([mpts[0][0], mpts[0][1]]);
+        var p2 = map.latLngToContainerPoint([mpts[1][0], mpts[1][1]]);
+        var du = u2 - u1, dv = v2 - v1;
+        var den = du*du + dv*dv;
+        if (den === 0) return;
+        var a  = ((p2.x-p1.x)*du + (p2.y-p1.y)*dv) / den;
+        var b  = ((p2.y-p1.y)*du - (p2.x-p1.x)*dv) / den;
+        var tx = p1.x - a*u1 + b*v1;
+        var ty = p1.y - b*u1 - a*v1;
+        div.style.transform = 'matrix(' + a + ',' + b + ',' + (-b) + ',' + a + ',' + tx + ',' + ty + ')';
+      }
+
+      map.on('zoom move zoomend moveend', update);
+      update();
+      return { div, update, remove: function() {
+        map.off('zoom move zoomend moveend', update);
+        if (div.parentNode) div.parentNode.removeChild(div);
+      }};
+    }
+
+    // Add new overlays, remove deleted ones, update changed ones
+    var ids = new Set(pdfOverlays.map(o => o.id));
+    // Remove layers for deleted overlays
+    Object.keys(pdfLayerRefs.current).forEach(function(id) {
+      if (!ids.has(Number(id))) {
+        pdfLayerRefs.current[id].remove();
+        delete pdfLayerRefs.current[id];
+      }
+    });
+    // Add/update remaining
+    pdfOverlays.forEach(function(ov) {
+      if (pdfLayerRefs.current[ov.id]) {
+        // Update existing — re-run update to reflect opacity/visibility changes
+        pdfLayerRefs.current[ov.id].update();
+      } else {
+        pdfLayerRefs.current[ov.id] = makeLayer(ov);
+      }
+    });
+  }, [pdfOverlays]);
 
   // Custom icon factory
   function makeIcon(color, label, small) {
@@ -4980,7 +5365,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ position: "relative", isolation: "isolate", height: "calc(100dvh - 8rem)" }}>
-      {/* Tile switcher + add WP button */}
+      {/* Tile switcher + add WP + layers buttons */}
       <div className={`flex gap-1 p-2 ${theme.panel} border-b ${theme.panelBorder} shrink-0`}>
         {[['osm','OSM'],['sat','Satélite']].map(([key, label]) => (
           <button key={key} onClick={() => setTileMode(key)}
@@ -4990,13 +5375,22 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             {label}
           </button>
         ))}
-        <button
-          onClick={() => setPickMode(p => !p)}
-          className={`ml-auto px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-            pickMode ? `border-violet-500 text-violet-400 bg-violet-500/20` : `${theme.panelBorder} ${theme.fgFaint}`
-          }`}>
-          {pickMode ? '✕ Cancelar' : '+ WP'}
-        </button>
+        <div className="ml-auto flex gap-1">
+          <button
+            onClick={() => setPickMode(p => !p)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+              pickMode ? `border-violet-500 text-violet-400 bg-violet-500/20` : `${theme.panelBorder} ${theme.fgFaint}`
+            }`}>
+            {pickMode ? '✕' : '+ WP'}
+          </button>
+          <button
+            onClick={() => setLayersOpen(true)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+              pdfOverlays.length > 0 ? `border-violet-500 text-violet-400` : `${theme.panelBorder} ${theme.fgFaint}`
+            }`}>
+            Cartas{pdfOverlays.length > 0 ? ` (${pdfOverlays.length})` : ''}
+          </button>
+        </div>
       </div>
 
       {/* Pick mode instruction banner */}
@@ -5022,6 +5416,25 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             </div>
           </div>
         </div>
+      )}
+
+      {layersOpen && (
+        <PdfLayersPanel
+          theme={theme}
+          overlays={pdfOverlays}
+          setOverlays={setPdfOverlays}
+          onAddNew={() => { setLayersOpen(false); setGeorefActive(true); }}
+          onClose={() => setLayersOpen(false)}
+        />
+      )}
+
+      {georefActive && (
+        <PdfGeoreferencer
+          theme={theme}
+          mapRef={mapRef}
+          onDone={(overlay) => { setPdfOverlays(os => [...os, overlay]); setGeorefActive(false); }}
+          onCancel={() => setGeorefActive(false)}
+        />
       )}
 
     </div>
