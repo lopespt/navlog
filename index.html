@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0120";
+const APP_VERSION = "20260428.0122";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5107,7 +5107,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onClose }) {
         ))}
       </div>
 
-      <div className="p-3 border-t border-zinc-700">
+      <div className="p-3 border-t border-zinc-700" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
         <button onClick={onAddNew}
           className="w-full py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
           + Adicionar carta PDF
