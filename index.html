@@ -97,7 +97,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0102";
+const APP_VERSION = "20260428.0108";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2045,20 +2045,17 @@ const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo
 function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac }) {
   const isNew = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
-  // Default altitude = last user waypoint's altitude (resolve useCruiseAlt)
-  const lastUserCp = [...flight.checkpoints].filter((cp) => !cp.isOrigin && !cp.isAuto).pop();
-  const lastUserAlt = lastUserCp?.useCruiseAlt ? (flight.cruiseAlt ?? 7000) : (lastUserCp?.alt ?? flight.cruiseAlt ?? 7000);
   const initial = isNew
-    ? { name: "", alt: lastUserAlt, tc: null, dist: null, windDir: null, windVel: null,
+    ? { name: "", alt: null, useCruiseAlt: false, tc: null, dist: null, windDir: null, windVel: null,
         lat: initLat ?? null, lon: initLon ?? null }
     : { ...flight.checkpoints[editingIdx] };
 
   const [cp, setCp] = useState(initial);
   const [step, setStep] = useState(isNew ? "nome" : "resumo");
   const [windMode, setWindMode] = useState(
-    initial.windMode === "none" ? "none"
+    initial.windMode === "none"   ? "none"
     : initial.windMode === "custom" ? "custom"
-    : "route" // padrão
+    : isNew ? "none" : "route" // new WPs default to no-wind
   );
 
   // When inserting at a specific position, prevCp is the WP we're inserting after
@@ -2100,15 +2097,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
         cps[editingIdx] = { ...saved };
       }
       // Pass 1 — project lat/lon from TC+dist for the edited waypoint only.
-      // Source of truth is always the stored position; following waypoints are never touched.
+      // Reprojects if: (a) lat is null, OR (b) user explicitly edited TC/dist this session.
       var _editIdx = isNew ? (insertAfterIdx != null ? insertAfterIdx + 1 : cps.length - 1) : editingIdx;
       var _editCp = cps[_editIdx];
       var _editPrev = _editIdx > 0 ? cps[_editIdx - 1] : null;
-      if (_editCp != null && _editCp.lat == null
+      if (_editCp != null
+          && (_editCp.lat == null || _editCp._tcDistEdited)
           && _editPrev != null && _editPrev.lat != null && _editPrev.lon != null
           && _editCp.tc != null && (_editCp.dist ?? 0) > 0) {
         var _proj = projectDest(_editPrev.lat, _editPrev.lon, _editCp.tc, _editCp.dist);
-        cps[_editIdx] = Object.assign({}, cps[_editIdx], { lat: _proj[0], lon: _proj[1] });
+        cps[_editIdx] = Object.assign({}, cps[_editIdx], { lat: _proj[0], lon: _proj[1], _tcDistEdited: undefined });
       }
       // Pass 1b — if edited WP now has a position, project the NEXT WP if it has no position but has TC+dist.
       var _editCpAfter = cps[_editIdx];
@@ -2696,7 +2694,7 @@ function StepTCDist({ theme, variation, cp, setCp, onNext }) {
   }
 
   function confirm() {
-    const updates = {};
+    const updates = { _tcDistEdited: true };
     if (tcVal != null) updates.tc = Math.round(tcVal);
     if (distVal != null) updates.dist = distVal;
     setCp(p => ({ ...p, ...updates }));
