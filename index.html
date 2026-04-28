@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0311";
+const APP_VERSION = "20260428.0500";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2274,6 +2274,63 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 className={fld}
               />
             )}
+
+            {/* Quando nivelar — só para pernas com variação de altitude */}
+            {!isOrigin && (function() {
+              var currentAlt = cp.useCruiseAlt ? cruiseAlt : cp.alt;
+              var isClimbing   = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
+              var isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
+              if (!isClimbing && !isDescending) return null;
+              var contextDefault = isDescending ? "at_fix" : "asap";
+              var arrivalMode  = cp.arrivalMode ?? null;
+              var arrivalValue = cp.arrivalValue ?? 5;
+              var modeOpts = [
+                { key: "asap",       label: "ASAP" },
+                { key: "at_fix",     label: "No fix" },
+                { key: "before_nm",  label: "−NM" },
+                { key: "before_min", label: "−min" },
+              ];
+              function setMode(key) {
+                setCp(function(p) { return Object.assign({}, p, { arrivalMode: p.arrivalMode === key ? null : key }); });
+              }
+              function adjustValue(delta) {
+                setCp(function(p) { return Object.assign({}, p, { arrivalValue: Math.max(1, Math.min(60, (p.arrivalValue ?? 5) + delta)) }); });
+              }
+              return (
+                <div className={`mt-2 ${theme.panel} border ${theme.panelBorder} rounded-xl p-3 space-y-2`}>
+                  <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+                    {isClimbing ? "↗ Subida" : "↘ Descida"} · nivelar
+                    {arrivalMode == null && <span className={`ml-1 ${theme.cyan}`}>· padrão: {contextDefault === "asap" ? "ASAP" : "no fix"}</span>}
+                  </div>
+                  <div className="flex gap-1">
+                    {modeOpts.map(function(opt) {
+                      var key = opt.key, label = opt.label;
+                      var active = arrivalMode === key || (arrivalMode == null && key === contextDefault);
+                      return (
+                        <button key={key} onClick={function() { setMode(key); }}
+                          className={`flex-1 py-2 rounded-lg border text-[11px] font-bold transition-colors active:scale-95 ${
+                            active ? `${theme.accentBorder} bg-amber-500/10 ${theme.accent}` : `${theme.panelBorder} ${theme.fgFaint}`
+                          }`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(arrivalMode === "before_nm" || arrivalMode === "before_min") && (
+                    <div className="flex items-center gap-3">
+                      <button onClick={function() { adjustValue(-1); }}
+                        className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>−</button>
+                      <div className="flex-1 text-center">
+                        <span className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{arrivalValue}</span>
+                        <span className={`ml-1 text-sm ${theme.fgFaint}`}>{arrivalMode === "before_nm" ? "NM" : "min"}</span>
+                      </div>
+                      <button onClick={function() { adjustValue(1); }}
+                        className={`w-10 h-10 rounded-lg border ${theme.panelBorder} ${theme.fg} text-xl font-black flex items-center justify-center active:scale-95`}>+</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* TC / DIST (não origem) */}
