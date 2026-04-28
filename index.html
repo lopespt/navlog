@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.0252";
+const APP_VERSION = "20260428.0304";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1778,6 +1778,22 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
     `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:${theme.accentBorder} focus:outline-none`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
+  // Quick-add: inline waypoint by name only
+  const [quickName, setQuickName] = useState('');
+  const quickInputRef = useRef(null);
+  function handleQuickAdd() {
+    var n = quickName.trim().toUpperCase().slice(0, 10);
+    if (!n) return;
+    setFlight(function(f) {
+      return Object.assign({}, f, { checkpoints: f.checkpoints.concat([{
+        name: n, useCruiseAlt: true, windMode: 'route',
+        lat: null, lon: null, alt: null, tc: null, dist: null, notes: ''
+      }]) });
+    });
+    setQuickName('');
+    setTimeout(function() { quickInputRef.current && quickInputRef.current.focus(); }, 50);
+  }
+
   return (
     <div className="px-3 py-3 space-y-4">
       {/* AERONAVE */}
@@ -1977,10 +1993,28 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
             </div>
             );
           })}
-          <button onClick={onAddCp}
-            className={`w-full border border-dashed ${theme.inputBorder} rounded px-3 py-2 ${theme.fgFaint} hover:${theme.accent} flex items-center justify-center gap-2 text-sm transition-colors`}>
-            <Plus className="w-4 h-4" /> Adicionar waypoint
-          </button>
+          {/* Quick-add: type name → tap + → waypoint adicionado com defaults */}
+          <div className={`flex gap-2 items-center ${theme.panel} border border-dashed ${theme.inputBorder} rounded px-2 py-1.5`}>
+            <input
+              ref={quickInputRef}
+              value={quickName}
+              onChange={function(e) { setQuickName(e.target.value.toUpperCase().slice(0,10)); }}
+              onKeyDown={function(e) { if (e.key === 'Enter') handleQuickAdd(); }}
+              placeholder="FIXO"
+              maxLength={10}
+              autoCapitalize="characters"
+              className={`flex-1 bg-transparent ${theme.fg} text-sm font-bold uppercase placeholder-zinc-600 outline-none min-w-0 tracking-wider`}
+            />
+            <button onClick={handleQuickAdd} disabled={!quickName.trim()}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${quickName.trim() ? 'bg-violet-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-600'}`}>
+              +
+            </button>
+            <button onClick={onAddCp}
+              title="Editor completo"
+              className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border ${theme.panelBorder} ${theme.fgFaint} active:scale-95`}>
+              ···
+            </button>
+          </div>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button onClick={onImportFPL}
@@ -5448,6 +5482,11 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     if (!window.L || !mapDivRef.current || mapRef.current) return;
     const map = window.L.map(mapDivRef.current, { zoomControl: true, attributionControl: true });
 
+    // Custom pane for route — sits above overlayPane (z:400) where imageOverlays live
+    map.createPane('routePane');
+    map.getPane('routePane').style.zIndex = 500;
+    map.getPane('routePane').style.pointerEvents = 'none';
+
     map.on('click', function(e) {
       if (!pickModeRef.current) return;
       setPickMode(false);
@@ -5551,9 +5590,9 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
     if (userWps.length === 0) return;
 
-    // Route polyline through user waypoints
+    // Route polyline through user waypoints — in routePane (z:500) above PDF overlays (z:450)
     const coords = userWps.map(cp => [cp.lat, cp.lon]);
-    ov.route = window.L.polyline(coords, { color: '#a855f7', weight: 2.5, opacity: 0.9 }).addTo(map);
+    ov.route = window.L.polyline(coords, { color: '#a855f7', weight: 2.5, opacity: 0.9, pane: 'routePane' }).addTo(map);
     map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
 
     // User waypoint markers
