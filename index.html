@@ -98,7 +98,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.1531";
+const APP_VERSION = "20260428.1558";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2076,7 +2076,7 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
       n = "MAP" + Math.abs(Math.round(lat * 10)).toString().slice(-3) + Math.abs(Math.round(lon * 10)).toString().slice(-3);
       n = n.slice(0, 10);
     }
-    return { name: n, kind: "custom", lat, lon };
+    return { name: n, kind: "custom", lat, lon, source: { kind: "map", lat, lon } };
   }
 
   return (
@@ -2113,8 +2113,11 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
   );
 }
 
-function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays }) {
-  const [tab, setTab] = useState("search");
+function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
+  const initialTab = initialSource && initialSource.kind === "radial" ? "radial"
+    : initialSource && initialSource.kind === "map" ? "map"
+    : "search";
+  const [tab, setTab] = useState(initialTab);
   const [innerOpen, setInnerOpen] = useState(false);
   const [innerSlot, setInnerSlot] = useState(null); // 'anchor'
 
@@ -2163,10 +2166,13 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
   }, [userPoints, query]);
 
   // Radial+distance tab state
-  const [anchor, setAnchor] = useState(null);
-  const [bearingMode, setBearingMode] = useState("mc");
-  const [bearing, setBearing] = useState("");
-  const [distance, setDistance] = useState("");
+  // Pre-fill from initialSource when it's a radial computation, so 'Editar fonte'
+  // re-opens with anchor/bearing/distance ready to tweak.
+  const _initRadial = initialSource && initialSource.kind === "radial" ? initialSource : null;
+  const [anchor, setAnchor] = useState(_initRadial && _initRadial.anchor ? _initRadial.anchor : null);
+  const [bearingMode, setBearingMode] = useState(_initRadial && _initRadial.bearingMode ? _initRadial.bearingMode : "mc");
+  const [bearing, setBearing] = useState(_initRadial && _initRadial.bearing != null ? String(_initRadial.bearing) : "");
+  const [distance, setDistance] = useState(_initRadial && _initRadial.distance != null ? String(_initRadial.distance) : "");
 
   const radialResult = (function() {
     if (!anchor || anchor.lat == null || anchor.lon == null) return null;
@@ -2182,6 +2188,17 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
       lon: Math.round(proj[1] * 1e6) / 1e6,
       kind: "computed",
       notes: (anchor.name || "") + " " + bearingMode.toUpperCase() + " " + Math.round(brg) + "° / " + dist + " NM",
+      source: {
+        kind: "radial",
+        anchor: {
+          name: anchor.name, kind: anchor.kind || "custom",
+          lat: anchor.lat, lon: anchor.lon, alt: anchor.alt ?? null,
+          source: anchor.source || { kind: "manual" },
+        },
+        bearing: brg,
+        bearingMode: bearingMode,
+        distance: dist,
+      },
     };
   })();
 
@@ -2189,13 +2206,15 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
     const lat = item.latitude != null ? Number(item.latitude) : (item.coordinates && item.coordinates.lat);
     const lon = item.longitude != null ? Number(item.longitude) : (item.coordinates && item.coordinates.lon);
     if (lat == null || lon == null) return null;
+    const id = (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "PT";
     return {
-      name: (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "PT",
+      name: id,
       kind,
       lat: Math.round(Number(lat) * 1e6) / 1e6,
       lon: Math.round(Number(lon) * 1e6) / 1e6,
       alt: kind === "airport" && item.elevation_ft != null ? Number(item.elevation_ft) : null,
       notes: kind === "airport" ? [item.name, item.city].filter(Boolean).join(" · ") : (item.name || ""),
+      source: { kind: "search", airacKind: kind, id: id },
     };
   }
 
@@ -2212,6 +2231,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
       lat: pt.lat, lon: pt.lon,
       alt: pt.alt ?? null,
       notes: pt.notes || "",
+      source: pt.source || { kind: "manual" },
     });
   }
 
@@ -2262,7 +2282,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                 <div className={`px-3 py-1.5 text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Meus pontos</div>
                 {localMatches.map((pt) => (
                   <button key={pt.id || pt.name}
-                    onClick={() => chooseAndConfirm({ name: pt.name, kind: pt.kind || "custom", lat: pt.lat, lon: pt.lon, alt: pt.alt, notes: pt.notes })}
+                    onClick={() => chooseAndConfirm({ name: pt.name, kind: pt.kind || "custom", lat: pt.lat, lon: pt.lon, alt: pt.alt, notes: pt.notes, source: pt.source || { kind: "library", libraryId: pt.id } })}
                     className={`w-full flex items-center gap-2 px-3 py-2.5 text-left active:opacity-70 border-t ${theme.panelBorder}`}>
                     <span className="text-base">⭐</span>
                     <div className="flex-1 min-w-0">
@@ -2432,6 +2452,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
           onDeleteUserPoint={onDeleteUserPoint}
           pdfOverlays={pdfOverlays}
           depth={depth + 1}
+          initialSource={innerSlot === "anchor" && anchor ? anchor.source : null}
+          initialQuery={innerSlot === "anchor" && anchor && anchor.source && anchor.source.kind === "search" ? anchor.source.id : ""}
           onConfirm={(pt) => {
             if (innerSlot === "anchor") setAnchor(pt);
             setInnerOpen(false);
@@ -3085,22 +3107,25 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
     };
   }, []);
   function applyAiracSuggestion(item, kind) {
-    let name, lat, lon, alt = null;
+    let name, lat, lon, alt = null, source = null;
     if (kind === "local") {
       name = item.name || "";
       lat = item.lat != null ? Number(item.lat) : null;
       lon = item.lon != null ? Number(item.lon) : null;
       alt = item.alt != null ? Number(item.alt) : null;
+      source = item.source || { kind: "library", libraryId: item.id };
     } else {
       name = (kind === "airport" ? (item.icao || item.iata) : (item.identifier || item.icao)) || "";
       lat = item.latitude != null ? Number(item.latitude) : (item.coordinates?.lat != null ? Number(item.coordinates.lat) : null);
       lon = item.longitude != null ? Number(item.longitude) : (item.coordinates?.lon != null ? Number(item.coordinates.lon) : null);
       if (kind === "airport" && item.elevation_ft != null) alt = Number(item.elevation_ft);
+      source = { kind: "search", airacKind: kind, id: name };
     }
     setCp(p => {
       const n = Object.assign({}, p, { name: String(name).slice(0, 10).toUpperCase() });
       if (lat != null && lon != null) { n.lat = Math.round(lat * 1e6) / 1e6; n.lon = Math.round(lon * 1e6) / 1e6; n._tcDistEdited = true; }
       if (alt != null) { n.alt = alt; n.useCruiseAlt = false; }
+      if (source) n.source = source;
       return n;
     });
     setAiracSugs(null);
@@ -3453,9 +3478,30 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               </button>
               <button onClick={function() { setFinderOpen(true); }}
                 className={`py-2.5 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} flex items-center justify-center gap-2 text-sm font-bold`}>
-                🔍 Buscar / Calcular
+                {cp.source && cp.source.kind && cp.source.kind !== "manual" ? "🔍 Editar fonte" : "🔍 Buscar / Calcular"}
               </button>
             </div>
+            {/* Origem do ponto (quando criado via search/radial/map/library) */}
+            {cp.source && cp.source.kind && cp.source.kind !== "manual" && (function() {
+              var s = cp.source;
+              var label = "—";
+              if (s.kind === "search") label = (s.airacKind === "airport" ? "✈ " : s.airacKind === "navaid" ? "⊕ " : "◇ ") + (s.id || "AIRAC");
+              else if (s.kind === "radial") {
+                var aName = (s.anchor && s.anchor.name) || "?";
+                var brg = s.bearing != null ? Math.round(s.bearing) : "?";
+                var dist = s.distance != null ? s.distance : "?";
+                var mode = (s.bearingMode || "mc").toUpperCase();
+                label = "⊕ Radial · " + aName + " " + mode + " " + brg + "° / " + dist + " NM";
+              } else if (s.kind === "map") label = "📍 Selecionado no mapa";
+              else if (s.kind === "library") label = "⭐ Da biblioteca";
+              return (
+                <button type="button" onClick={function() { setFinderOpen(true); }}
+                  className={`w-full text-left text-[10px] ${theme.cyan} truncate active:opacity-70`}
+                  title="Editar origem">
+                  Origem: {label}
+                </button>
+              );
+            })()}
             {prevCp != null && prevCp.lat != null && cp.lat != null && cp.lon != null && (
               <div className={`text-[10px] ${theme.cyan} text-center`}>
                 TC {cp.tc ?? "—"}° · {cp.dist ?? "—"} NM (calculado)
@@ -3776,6 +3822,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           onDeleteUserPoint={onDeleteUserPoint}
           pdfOverlays={pdfOverlays}
           initialQuery={cp.name || ""}
+          initialSource={cp.source || null}
           onCancel={function() { setFinderOpen(false); }}
           onConfirm={function(pt) {
             setCp(function(p) {
@@ -3789,6 +3836,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 out.alt = Number(pt.alt);
                 out.useCruiseAlt = false;
               }
+              if (pt.source) out.source = pt.source;
               return out;
             });
             if (pt.lat != null && pt.lon != null) applyCoords(pt.lat, pt.lon);
