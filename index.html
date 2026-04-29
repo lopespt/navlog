@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0017";
+const APP_VERSION = "20260429.0021";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -3409,7 +3409,8 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* MEUS PONTOS */}
-      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}>
+      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}
+        collapsible defaultOpen={(userPoints || []).length <= 5}>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <button
             onClick={function() {
@@ -3837,13 +3838,26 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
   );
 }
 
-function Section({ icon, title, children, theme }) {
+function Section({ icon, title, children, theme, collapsible, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen != null ? defaultOpen : true);
+  if (!collapsible) {
+    return (
+      <section>
+        <h2 className={`flex items-center gap-2 text-[10px] uppercase tracking-widest ${theme?.fgMuted || "text-zinc-400"} mb-2`}>
+          {icon}{title}
+        </h2>
+        {children}
+      </section>
+    );
+  }
   return (
     <section>
-      <h2 className={`flex items-center gap-2 text-[10px] uppercase tracking-widest ${theme?.fgMuted || "text-zinc-400"} mb-2`}>
-        {icon}{title}
-      </h2>
-      {children}
+      <button onClick={() => setOpen(o => !o)}
+        className={`w-full flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest ${theme?.fgMuted || "text-zinc-400"} mb-2 active:opacity-70`}>
+        <span className="flex items-center gap-2">{icon}{title}</span>
+        {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
+      {open && children}
     </section>
   );
 }
@@ -6126,33 +6140,23 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               )}
             </div>
           </div>
-          {/* Barra de progresso da perna atual */}
-          {lastAtaMs != null && (next.eteLeg ?? next.etePlanned) > 0 && (
-            <div className="mb-3">
-              {(() => {
-                const legETE = next.eteLeg ?? next.etePlanned;
-                const progressPct = Math.min(100, (elapsed / 60) / legETE * 100);
-                return (
-                <>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
-                    <span className={`text-[10px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-150 duration-1000 ${
-                        progressPct >= 95 ? "bg-red-500" :
-                        progressPct >= 75 ? "bg-amber-400" :
-                        isAlert ? "bg-red-500" : "bg-amber-500"
-                      }`}
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </div>
-                </>
-                );
-              })()}
-            </div>
-          )}
+          {/* Barra de progresso — fina, sem label (a percentagem é implícita) */}
+          {lastAtaMs != null && (next.eteLeg ?? next.etePlanned) > 0 && (() => {
+            const legETE = next.eteLeg ?? next.etePlanned;
+            const progressPct = Math.min(100, (elapsed / 60) / legETE * 100);
+            return (
+              <div className="h-1 rounded-full bg-black/40 overflow-hidden mb-3">
+                <div
+                  className={`h-full rounded-full ${
+                    progressPct >= 95 ? "bg-red-500" :
+                    progressPct >= 75 ? "bg-amber-400" :
+                    isAlert ? "bg-red-500" : "bg-amber-500"
+                  }`}
+                  style={{ width: `${progressPct}%`, transition: "width 1s linear" }}
+                />
+              </div>
+            );
+          })()}
 
           {/* Dist + alt + vento como info secundária */}
           <div className={`grid grid-cols-3 text-[10px] num ${theme.fgFaint} mb-3 px-1 gap-1`}>
