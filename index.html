@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0024";
+const APP_VERSION = "20260429.0309";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2322,7 +2322,7 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
         <div className="grid grid-cols-2 gap-2">
           <input type="text" placeholder="Nome (auto)" maxLength={10}
             value={name} onChange={(e) => setName(e.target.value.toUpperCase())}
-            className={`${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none num`}
+            className={`${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30 num`}
           />
           <button onClick={() => { const p = buildPoint(); if (p) onSave(p); }}
             disabled={!picked}
@@ -2522,7 +2522,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
   }
 
   const headerLabel = depth > 0 ? "Escolher ponto · âncora" : "Localizar ponto";
-  const inputCls = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl num focus:outline-none`;
+  const inputCls = `w-full ${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl num focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:${theme.accentBorder}`;
 
   return (
     <div onClick={(e) => e.stopPropagation()}
@@ -2852,7 +2852,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
               placeholder="38°43.01'N 9°08.37'W"
               value={coordsText}
               onChange={(e) => setCoordsText(e.target.value)}
-              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl focus:outline-none num`}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30 num`}
             />
             {coordsText && (function() {
               const r = coordsResult;
@@ -3088,19 +3088,19 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
             <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Altitude (ft)</span>
             <input type="number" inputMode="numeric" value={alt}
               onChange={(e) => setAlt(e.target.value === '' ? '' : Number(e.target.value))}
-              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
           </label>
           <label className="space-y-0.5 block">
             <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>TAS (kt)</span>
             <input type="number" inputMode="numeric" value={tas}
               onChange={(e) => setTas(e.target.value === '' ? '' : Number(e.target.value))}
-              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
           </label>
           <label className="space-y-0.5 block">
             <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Alvo</span>
             <select value={targetIdx ?? ''}
               onChange={(e) => setTargetIdx(e.target.value === '' ? null : Number(e.target.value))}
-              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none`}>
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none focus:ring-2 focus:ring-amber-500/30`}>
               {targetIdx == null && <option value="">—</option>}
               {targetOptions.map(({ cp, i }) => (
                 <option key={i} value={i}>{cp.name || ('WP ' + i)}</option>
@@ -3185,7 +3185,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
   }
 
   const fieldClass =
-    `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:${theme.accentBorder} focus:outline-none`;
+    `w-full ${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded-xl num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   return (
@@ -3510,7 +3510,7 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
     const freqs = { ...(flight.freqs || {}), [which]: { ...(flight.freqs?.[which] || {}), [key]: val } };
     setFlight({ ...flight, freqs });
   };
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:${theme.accentBorder} focus:outline-none`;
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
 
   return (
     <section>
@@ -3733,7 +3733,7 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
                 </label>
                 <select value={insertAfterIdx}
                   onChange={(e) => setInsertAfterIdx(Number(e.target.value))}
-                  className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none`}>
+                  className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30`}>
                   {cps.map((cp, i) => (
                     <option key={i} value={i}>
                       {i + 1}. {cp.name || "(sem nome)"}{cp.isOrigin ? " · origem" : i === cps.length - 1 ? " · destino" : ""}
@@ -4130,7 +4130,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
     onClose();
   }
 
-  const fld  = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded-xl num focus:outline-none`;
+  const fld  = `w-full ${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded-xl num focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:${theme.accentBorder}`;
   const lbl  = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
   const sect = `space-y-2`;
 
@@ -4171,7 +4171,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 setTimeout(function() { setAiracSugs(null); }, 150);
               }}
               placeholder="LPPT"
-              className={`w-full ${theme.inputBg} border-2 ${cp.name ? theme.accentBorder : theme.inputBorder} ${theme.fg} px-4 py-3 text-2xl font-black tracking-widest rounded-xl num focus:outline-none`}
+              className={`w-full ${theme.inputBg} border-2 ${cp.name ? theme.accentBorder : theme.inputBorder} ${theme.fg} px-4 py-3 text-2xl font-black tracking-widest rounded-xl num focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
             />
             {(function() {
               var q = (cp.name || "").toUpperCase();
@@ -4262,7 +4262,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           <div className={sect}>
             <label className={lbl}>Posição (graus + minutos)</label>
             {(function() {
-              const subFld = `${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-2 text-base rounded-xl num focus:outline-none w-full text-center`;
+              const subFld = `${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-2 py-2 text-base rounded-xl num focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:${theme.accentBorder} w-full text-center`;
               const unit  = `text-base font-bold ${theme.fgMuted} px-1`;
               const hemBtn = function(active) {
                 return `w-12 px-0 py-2 rounded-xl border-2 text-base font-black ${active ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint} active:scale-95`;
@@ -4437,7 +4437,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   <input type="number" inputMode="numeric" placeholder="7000" min="0" max="60000" step="100"
                     value={cp.alt != null ? cp.alt : ""}
                     onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { alt: e.target.value === "" ? null : Number(e.target.value), useCruiseAlt: false }); }); }}
-                    className={`flex-1 min-w-0 bg-transparent ${theme.fg} px-3 py-2.5 text-base num focus:outline-none`}
+                    className={`flex-1 min-w-0 bg-transparent ${theme.fg} px-3 py-2.5 text-base num focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
                   />
                   <span className={`self-center text-xs ${theme.fgFaint} px-1`}>ft</span>
                   <button
@@ -4658,7 +4658,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             <textarea rows={2} placeholder="Freq. TWR, QNH, instruções ATC…"
               value={cp.notes || ""}
               onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { notes: e.target.value }); }); }}
-              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none resize-none`}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none`}
             />
           </div>
 
@@ -4674,7 +4674,9 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             </button>
           )}
           <button onClick={save} disabled={!cp.name || !cp.name.trim()}
-            className={`flex-1 py-3 rounded-xl font-bold text-base active:scale-95 transition-transform duration-100 ${cp.name && cp.name.trim() ? "bg-violet-600 text-white" : theme.panel + " " + theme.fgFaint + " opacity-40"}`}>
+            className={`flex-1 py-3 rounded-xl font-bold text-base active:scale-[0.98] transition-all duration-150 inline-flex items-center justify-center gap-2 ${cp.name && cp.name.trim() ? `${theme.accentBg} ${theme.accentBgFg}` : theme.panel + " " + theme.fgFaint + " opacity-40"}`}
+            style={{ minHeight: 56 }}>
+            <Save className="w-5 h-5" />
             {isNew ? "Adicionar waypoint" : "Guardar alterações"}
           </button>
         </div>
@@ -5107,7 +5109,7 @@ function StepAlt({ cp, setCp, cruiseAlt, prevAlt, isOrigin, theme, onNext }) {
       {!isOrigin && (
         <button onClick={setInherit}
           className={`w-full flex items-center justify-between px-4 py-3 border-2 rounded-xl transition-colors ${
-            useInherit ? `${theme.accentBorder} bg-violet-500/10` : `${theme.panelBorder} ${theme.panel}`
+            useInherit ? `${theme.accentBorder} bg-amber-500/10` : `${theme.panelBorder} ${theme.panel}`
           }`}>
           <div className="text-left">
             <div className={`text-sm font-bold ${useInherit ? theme.accent : theme.fgMuted}`}>Herdar altitude</div>
@@ -5440,7 +5442,7 @@ function StepOverride({ cp, setCp, theme, onNext }) {
     });
   }
 
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none`;
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   return (
@@ -6860,7 +6862,7 @@ function NotesEditor({ checkpoint, theme, onSave, onClose }) {
           placeholder="Ex: QNH 1008, pista 28R, espere 3000ft até RIPLI..."
           autoFocus
           rows={5}
-          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-sm rounded-xl focus:outline-none resize-none`}
+          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none`}
         />
         <div className="grid grid-cols-2 gap-2">
           {text && (
@@ -6898,7 +6900,7 @@ function FPLImporter({ theme, onImport, onClose }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Ex: DCT EMBOI UZ23 RIPLI DCT TOD"
-          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded h-24 num focus:${theme.accentBorder} focus:outline-none`}
+          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded h-24 num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
         />
         <button
           disabled={!text.trim()}
@@ -6973,7 +6975,7 @@ function AircraftEditor({ aircraft, theme, onSave, onClose }) {
   const setN = (k, v) => setAc((a) => ({ ...a, [k]: v === '' ? 0 : Number(v) }));
   const setS = (k, v) => setAc((a) => ({ ...a, [k]: v }));
 
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:outline-none`;
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   const isValid = ac.name?.trim() && ac.short?.trim() && ac.tasCruise > 0 && ac.gphCruise > 0 && ac.fuelUsable > 0;
@@ -7917,7 +7919,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
           Selecione um PDF para georreferenciar e sobrepor ao mapa
         </div>
         <button onClick={handlePickFile}
-          className="px-6 py-3 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
+          className="px-6 py-3 bg-amber-500 text-black rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
           Selecionar PDF
         </button>
         <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFile} />
@@ -7995,7 +7997,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
           <button onClick={() => { setMapPts([]); setPhase('map'); }}
             disabled={pdfPts.length < 3}
             className={`flex-1 h-12 rounded-xl text-sm font-bold active:scale-95 transition-transform duration-100 ${
-              pdfPts.length >= 3 ? 'bg-violet-600 text-white' : 'bg-zinc-800 text-zinc-600'
+              pdfPts.length >= 3 ? 'bg-amber-500 text-black' : 'bg-zinc-800 text-zinc-600'
             }`}>
             {pdfPts.length >= 3 ? 'Próximo →' : `Faltam ${3 - pdfPts.length} pt`}
           </button>
@@ -8024,7 +8026,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
                         return ovs.map(function(o) { return o.id === ov.id ? Object.assign({}, o, { visible: !o.visible }) : o; });
                       });
                     }}
-                    className={'px-2 py-0.5 rounded text-[10px] font-bold border ' + (ov.visible ? 'border-violet-500 text-violet-300' : 'border-zinc-700 text-zinc-600')}>
+                    className={'px-2 py-0.5 rounded text-[10px] font-bold border ' + (ov.visible ? 'border-amber-500 text-amber-300' : 'border-zinc-700 text-zinc-600')}>
                     Carta {i + 1}
                   </button>
                 );
@@ -8081,7 +8083,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
               ← PDF
             </button>
             <div className={`flex-1 py-2 rounded-xl text-sm font-bold text-center ${
-              mapPts.length >= 3 ? 'bg-violet-600/50 text-violet-200' : 'bg-zinc-800 text-zinc-400'
+              mapPts.length >= 3 ? 'bg-amber-600/50 text-amber-200' : 'bg-zinc-800 text-zinc-400'
             }`}>
               {mapPts.length >= 3 ? '✓ Auto-adicionando…' : `Faltam ${3 - mapPts.length} toque${3 - mapPts.length > 1 ? 's' : ''}`}
             </div>
@@ -8102,7 +8104,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
       <div className={`flex items-center gap-2 px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
         <div className={`font-bold ${theme.fg} flex-1`}>🗺 Cartas PDF</div>
         <button onClick={onAddNew}
-          className="px-4 py-2 bg-violet-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
+          className="px-4 py-2 bg-amber-500 text-black rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100">
           + Adicionar
         </button>
         <button onClick={onClose} className="text-zinc-400 text-xl px-2 leading-none">✕</button>
@@ -8113,7 +8115,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
           <div className="flex flex-col items-center gap-4 py-12">
             <div className="text-sm text-zinc-400 text-center">Nenhuma carta adicionada.</div>
             <button onClick={onAddNew}
-              className="px-8 py-4 bg-violet-600 text-white rounded-2xl font-bold text-base active:scale-95 transition-transform duration-100 shadow-lg">
+              className="px-8 py-4 bg-amber-500 text-black rounded-2xl font-bold text-base active:scale-95 transition-transform duration-100 shadow-lg">
               + Adicionar carta PDF
             </button>
           </div>
@@ -8158,7 +8160,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
               )}
               {ov.dataUrl && (
                 <button onClick={() => setOverlays(os => os.map(o => o.id === ov.id ? {...o, visible: !o.visible} : o))}
-                  className={`text-xs px-2 py-1 rounded border ${ov.visible ? 'border-violet-500 text-violet-400' : 'border-zinc-600 text-zinc-500'}`}>
+                  className={`text-xs px-2 py-1 rounded border ${ov.visible ? 'border-amber-500 text-amber-400' : 'border-zinc-600 text-zinc-500'}`}>
                   {ov.visible ? 'ON' : 'OFF'}
                 </button>
               )}
@@ -8725,14 +8727,14 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           <button
             onClick={() => setPickMode(p => !p)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-              pickMode ? `border-violet-500 text-violet-400 bg-violet-500/20` : `${theme.panelBorder} ${theme.fgFaint}`
+              pickMode ? `border-amber-500 text-amber-400 bg-amber-500/20` : `${theme.panelBorder} ${theme.fgFaint}`
             }`}>
             {pickMode ? '✕' : '+ WP'}
           </button>
           <button
             onClick={() => setLayersOpen(true)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
-              pdfOverlays.length > 0 ? `border-violet-500 text-violet-400 bg-violet-500/20` : `border-sky-600 text-sky-400`
+              pdfOverlays.length > 0 ? `border-amber-500 text-amber-400 bg-amber-500/20` : `border-sky-600 text-sky-400`
             }`}>
             🗺 Cartas{pdfOverlays.length > 0 ? ` (${pdfOverlays.length})` : ''}
           </button>
@@ -8742,7 +8744,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       {/* Pick mode instruction banner */}
       {pickMode && (
         <div className="absolute top-12 left-0 right-0 z-50 flex justify-center pointer-events-none">
-          <div className="bg-violet-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg mt-1">
+          <div className="bg-amber-500 text-black text-xs font-bold px-4 py-2 rounded-full shadow-lg mt-1">
             Toque no mapa para adicionar waypoint
           </div>
         </div>
