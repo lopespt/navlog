@@ -50,7 +50,8 @@
       Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
-      TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation
+      TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation,
+      Search, Star, ClipboardList, RefreshCw
     } = LucideReact;
 
 function haptic(pattern) {
@@ -98,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260428.2357";
+const APP_VERSION = "20260429.0011";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2234,7 +2235,7 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
     const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
     if (wps.length >= 2) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.7, dashArray: '4,4', pane: 'pfRoute' }).addTo(map);
+      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.7, dashArray: '4,4', pane: 'pfRoute' }).addTo(map);
       wps.forEach(cp => {
         const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
         const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
@@ -2325,8 +2326,8 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
           />
           <button onClick={() => { const p = buildPoint(); if (p) onSave(p); }}
             disabled={!picked}
-            className={`px-3 py-2 rounded-xl border text-xs font-bold ${picked ? theme.panelBorder + ' ' + theme.fgMuted : theme.panel + ' ' + theme.fgFaint + ' opacity-40'}`}>
-            ⭐ Salvar
+            className={`px-3 py-2 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-1 ${picked ? theme.panelBorder + ' ' + theme.fgMuted : theme.panel + ' ' + theme.fgFaint + ' opacity-40'}`}>
+            <Star className="w-3.5 h-3.5" /> Salvar
           </button>
         </div>
         <button onClick={() => { const p = buildPoint(); if (p) onConfirm(p); }}
@@ -2575,7 +2576,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   <button key={pt.id || pt.name}
                     onClick={() => chooseAndConfirm({ name: pt.name, kind: pt.kind || "custom", lat: pt.lat, lon: pt.lon, alt: pt.alt, notes: pt.notes, source: pt.source || { kind: "library", libraryId: pt.id } })}
                     className={`w-full flex items-center gap-2 px-3 py-2.5 text-left active:opacity-70 border-t ${theme.panelBorder}`}>
-                    <span className="text-base">⭐</span>
+                    <Star className={`w-4 h-4 ${theme.accent} fill-current shrink-0`} />
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
                       <div className={`text-[10px] truncate ${theme.fgFaint} num`}>
@@ -2664,8 +2665,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   )}
                 </div>
                 <button onClick={() => { setInnerSlot("anchor"); setInnerOpen(true); }}
-                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
-                  🔍 Buscar
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95 inline-flex items-center gap-1`}>
+                  <Search className="w-4 h-4" /> Buscar
                 </button>
               </div>
             </div>
@@ -2712,7 +2713,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button onClick={() => saveToLib(r)}
                       className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
-                      ⭐ Salvar na biblioteca
+                      <Star className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Salvar na biblioteca
                     </button>
                     <button onClick={() => chooseAndConfirm(r)}
                       className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
@@ -2743,8 +2744,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   )}
                 </div>
                 <button onClick={() => { setInnerSlot("iA"); setInnerOpen(true); }}
-                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
-                  🔍
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95 inline-flex items-center justify-center`}>
+                  <Search className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -2764,8 +2765,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   )}
                 </div>
                 <button onClick={() => { setInnerSlot("iB"); setInnerOpen(true); }}
-                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95`}>
-                  🔍
+                  className={`px-4 py-2 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} text-sm font-bold active:scale-95 inline-flex items-center justify-center`}>
+                  <Search className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -2824,7 +2825,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button onClick={() => saveToLib(r)}
                       className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
-                      ⭐ Salvar na biblioteca
+                      <Star className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />Salvar na biblioteca
                     </button>
                     <button onClick={() => chooseAndConfirm(r)}
                       className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
@@ -2871,8 +2872,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   </div>
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button onClick={() => saveToLib(r)}
-                      className={`px-3 py-2 rounded-lg border text-xs font-bold ${theme.panelBorder} ${theme.fgMuted}`}>
-                      ⭐ Salvar
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold inline-flex items-center justify-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
+                      <Star className="w-3.5 h-3.5" /> Salvar
                     </button>
                     <button onClick={() => chooseAndConfirm(r)}
                       className={`px-3 py-2 rounded-lg ${theme.accentBg} ${theme.accentBgFg} text-xs font-bold`}>
@@ -2957,7 +2958,7 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
     const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
     if (wps.length >= 2) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.65, dashArray: '4,4', pane: 'devRoute' }).addTo(map);
+      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.65, dashArray: '4,4', pane: 'devRoute' }).addTo(map);
       wps.forEach(cp => {
         const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
         const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
@@ -3462,14 +3463,17 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
         </div>
         {(userPoints || []).length === 0 ? (
           <div className={`text-[11px] ${theme.fgFaint} text-center py-2`}>
-            Nenhum ponto guardado. Use o botão 🔍 no editor de waypoint para criar (busca / radial+dist / interseção / coords) e <strong>Salvar na biblioteca</strong>.
+            Nenhum ponto guardado. Use o botão <Search className="w-3 h-3 inline -mt-0.5" /> no editor de waypoint para criar (busca / radial+dist / interseção / coords) e <strong>Salvar na biblioteca</strong>.
           </div>
         ) : (
           <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl divide-y ${theme.panelBorder} overflow-hidden`}>
             {[...userPoints].sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); }).map(function(pt) {
               return (
                 <div key={pt.id || pt.name} className="flex items-center gap-2 px-3 py-2">
-                  <span className={`text-[10px] font-bold w-12 shrink-0 ${theme.accent}`}>⭐ {pt.kind === "computed" ? "CALC" : pt.kind === "airport" ? "APT" : pt.kind === "navaid" ? "NAV" : pt.kind === "waypoint" ? "WPT" : "MEU"}</span>
+                  <span className={`text-[10px] font-bold w-14 shrink-0 ${theme.accent} inline-flex items-center gap-1`}>
+                    <Star className="w-3 h-3 fill-current" />
+                    {pt.kind === "computed" ? "CALC" : pt.kind === "airport" ? "APT" : pt.kind === "navaid" ? "NAV" : pt.kind === "waypoint" ? "WPT" : "MEU"}
+                  </span>
                   <div className="flex-1 min-w-0">
                     <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
                     <div className={`text-[10px] truncate num ${theme.fgFaint}`}>
@@ -3530,14 +3534,14 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
                       <button type="button"
                         onClick={() => onRefreshFreqs && onRefreshFreqs(which, true)}
                         title="Buscar do AIRAC (sobrescreve)"
-                        className={`text-[9px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
-                        ↻ AIRAC
+                        className={`text-[9px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
+                        <RefreshCw className="w-3 h-3" /> AIRAC
                       </button>
                       <button type="button"
                         onClick={() => setProceduresIcao(String(icao).toUpperCase())}
                         title="Ver SID / STAR / Approach"
-                        className={`text-[9px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
-                        📋 Procs
+                        className={`text-[9px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
+                        <ClipboardList className="w-3 h-3" /> Procs
                       </button>
                     </div>
                   )}
@@ -4139,18 +4143,26 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 );
               }
               var rowBase = "w-full text-left px-3 py-2 active:opacity-70";
+              function rowIcon(kind) {
+                if (kind === "airport") return <Plane className="w-3.5 h-3.5" />;
+                if (kind === "navaid")  return <Radio className="w-3.5 h-3.5" />;
+                if (kind === "local")   return <Star className="w-3.5 h-3.5 fill-current" />;
+                return <MapPin className="w-3.5 h-3.5" />;
+              }
+              function rowKindLabel(kind) {
+                if (kind === "airport") return "APT";
+                if (kind === "navaid")  return "NAV";
+                if (kind === "local")   return "MEU";
+                return "WPT";
+              }
               function row(key, kind, item, label, sub, right) {
-                var iconLabel = kind === "airport" ? "✈ APT"
-                  : kind === "navaid" ? "⊕ NAV"
-                  : kind === "local" ? "⭐ MEU"
-                  : "◇ WPT";
                 return (
                   <button key={key} type="button"
                     onMouseDown={function(e) { e.preventDefault(); }}
                     onClick={function() { applyAiracSuggestion(item, kind); }}
                     className={`${rowBase} flex items-center gap-2 border-b ${theme.panelBorder} last:border-b-0`}>
-                    <span className={`text-[10px] font-bold w-12 shrink-0 ${kind === "local" ? theme.accent : theme.cyan}`}>
-                      {iconLabel}
+                    <span className={`text-[10px] font-bold w-14 shrink-0 inline-flex items-center gap-1 ${kind === "local" ? theme.accent : theme.fgMuted}`}>
+                      {rowIcon(kind)} {rowKindLabel(kind)}
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{label}</div>
@@ -4278,27 +4290,38 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               </button>
               <button onClick={function() { setFinderOpen(true); }}
                 className={`py-2.5 rounded-xl border-2 ${theme.accentBorder} ${theme.accent} flex items-center justify-center gap-2 text-sm font-bold`}>
-                {cp.source && cp.source.kind && cp.source.kind !== "manual" ? "🔍 Editar fonte" : "🔍 Buscar / Calcular"}
+                <Search className="w-4 h-4" />
+                {cp.source && cp.source.kind && cp.source.kind !== "manual" ? "Editar fonte" : "Buscar / Calcular"}
               </button>
             </div>
             {/* Origem do ponto (quando criado via search/radial/map/library) */}
             {cp.source && cp.source.kind && cp.source.kind !== "manual" && (function() {
               var s = cp.source;
-              var label = "—";
-              if (s.kind === "search") label = (s.airacKind === "airport" ? "✈ " : s.airacKind === "navaid" ? "⊕ " : "◇ ") + (s.id || "AIRAC");
-              else if (s.kind === "radial") {
+              var icon = null, label = "—";
+              if (s.kind === "search") {
+                icon = s.airacKind === "airport" ? <Plane className="w-3 h-3" />
+                  : s.airacKind === "navaid"   ? <Radio className="w-3 h-3" />
+                  : <MapPin className="w-3 h-3" />;
+                label = s.id || "AIRAC";
+              } else if (s.kind === "radial") {
                 var aName = (s.anchor && s.anchor.name) || "?";
                 var brg = s.bearing != null ? Math.round(s.bearing) : "?";
                 var dist = s.distance != null ? s.distance : "?";
                 var mode = (s.bearingMode || "mc").toUpperCase();
-                label = "⊕ Radial · " + aName + " " + mode + " " + brg + "° / " + dist + " NM";
-              } else if (s.kind === "map") label = "📍 Selecionado no mapa";
-              else if (s.kind === "library") label = "⭐ Da biblioteca";
+                icon = <Radio className="w-3 h-3" />;
+                label = "Radial · " + aName + " " + mode + " " + brg + "° / " + dist + " NM";
+              } else if (s.kind === "map") {
+                icon = <MapPin className="w-3 h-3" />;
+                label = "Selecionado no mapa";
+              } else if (s.kind === "library") {
+                icon = <Star className="w-3 h-3 fill-current" />;
+                label = "Da biblioteca";
+              }
               return (
                 <button type="button" onClick={function() { setFinderOpen(true); }}
-                  className={`w-full text-left text-[10px] ${theme.cyan} truncate active:opacity-70`}
+                  className={`w-full text-left text-[10px] ${theme.accent} truncate active:opacity-70 inline-flex items-center gap-1`}
                   title="Editar origem">
-                  Origem: {label}
+                  <span className={theme.fgFaint}>Origem:</span> {icon} {label}
                 </button>
               );
             })()}
@@ -4831,7 +4854,7 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
     const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
     if (wps.length >= 2) {
       const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#a855f7', weight: 2, opacity: 0.8, dashArray: '5,5', pane: 'pickerRoute' }).addTo(map);
+      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.8, dashArray: '5,5', pane: 'pickerRoute' }).addTo(map);
       wps.forEach(cp => {
         const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
         const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
@@ -8463,12 +8486,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
     // Route polyline through user waypoints — in routePane (z:500) above PDF overlays (z:450)
     const coords = userWps.map(cp => [cp.lat, cp.lon]);
-    ov.route = window.L.polyline(coords, { color: '#a855f7', weight: 2.5, opacity: 0.9, pane: 'routePane' }).addTo(map);
+    ov.route = window.L.polyline(coords, { color: '#f59e0b', weight: 2.5, opacity: 0.9, pane: 'routePane' }).addTo(map);
     map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
-      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#a78bfa' : '#a855f7';
+      const color = cp.isOrigin ? '#22c55e' : cp.coordProjected ? '#fbbf24' : '#f59e0b';
       const label = cp.name?.slice(0,4) ?? String(i);
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, label, false) }).addTo(map);
       const etaStr = liveETAs[cp.userIdx] != null
@@ -8541,9 +8564,11 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     updateLegLabelVisibility();
     legLabelUpdaterRef.current = updateLegLabelVisibility;
 
-    // Virtual waypoint markers (TOC/TOD/BOD) — small dots on the route
+    // Virtual waypoint markers (TOC/TOD/BOD/BOC) — small dots on the route.
+    // Pale amber so cyan stays reserved for "agora / em voo" indicators
+    // (deviation overlay, simulated aircraft, DESVIO ATIVO chip).
     virtWps.forEach(cp => {
-      const color = '#22d3ee';
+      const color = '#fde68a';
       const m = window.L.marker([cp.lat, cp.lon], { icon: makeIcon(color, cp.name, true) }).addTo(map);
       m.bindPopup(`<b>${cp.name}</b><br/>${cp.alt} ft`);
       ov.markers.push(m);
