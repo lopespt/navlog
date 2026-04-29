@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0011";
+const APP_VERSION = "20260429.0014";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2579,7 +2579,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                     <Star className={`w-4 h-4 ${theme.accent} fill-current shrink-0`} />
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
-                      <div className={`text-[10px] truncate ${theme.fgFaint} num`}>
+                      <div className={`text-xs truncate ${theme.fgFaint} num`}>
                         {pt.lat?.toFixed(4)}, {pt.lon?.toFixed(4)}{pt.notes ? " · " + pt.notes : ""}
                       </div>
                     </div>
@@ -2609,7 +2609,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                         <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>✈ APT</span>
                         <div className="flex-1 min-w-0">
                           <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
-                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                          <div className={`text-xs truncate ${theme.fgFaint}`}>{pt.notes}</div>
                         </div>
                         {pt.alt != null && <span className={`text-[10px] num shrink-0 ${theme.fgFaint}`}>{pt.alt} ft</span>}
                       </button>
@@ -2623,7 +2623,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                         <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>⊕ NAV</span>
                         <div className="flex-1 min-w-0">
                           <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
-                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                          <div className={`text-xs truncate ${theme.fgFaint}`}>{pt.notes}</div>
                         </div>
                       </button>
                     );
@@ -2636,7 +2636,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                         <span className={`text-[10px] font-bold w-10 shrink-0 ${theme.cyan}`}>◇ WPT</span>
                         <div className="flex-1 min-w-0">
                           <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
-                          <div className={`text-[10px] truncate ${theme.fgFaint}`}>{pt.notes}</div>
+                          <div className={`text-xs truncate ${theme.fgFaint}`}>{pt.notes}</div>
                         </div>
                       </button>
                     );
@@ -2656,7 +2656,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   {anchor ? (
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{anchor.name || "—"}</div>
-                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                      <div className={`text-xs num truncate ${theme.fgFaint}`}>
                         {anchor.lat?.toFixed(4)}, {anchor.lon?.toFixed(4)}
                       </div>
                     </div>
@@ -2735,7 +2735,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   {iAnchorA ? (
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{iAnchorA.name || "—"}</div>
-                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                      <div className={`text-xs num truncate ${theme.fgFaint}`}>
                         {iAnchorA.lat?.toFixed(4)}, {iAnchorA.lon?.toFixed(4)}
                       </div>
                     </div>
@@ -2756,7 +2756,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
                   {iAnchorB ? (
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{iAnchorB.name || "—"}</div>
-                      <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                      <div className={`text-xs num truncate ${theme.fgFaint}`}>
                         {iAnchorB.lat?.toFixed(4)}, {iAnchorB.lon?.toFixed(4)}
                       </div>
                     </div>
@@ -3476,7 +3476,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
-                    <div className={`text-[10px] truncate num ${theme.fgFaint}`}>
+                    <div className={`text-xs truncate num ${theme.fgFaint}`}>
                       {pt.lat != null ? pt.lat.toFixed(4) : "—"}, {pt.lon != null ? pt.lon.toFixed(4) : "—"}
                       {pt.alt != null ? ` · ${pt.alt} ft` : ""}
                       {pt.notes ? ` · ${pt.notes}` : ""}
@@ -3712,7 +3712,7 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
                             {leg.fix_identifier || leg.fix_name || "—"}
                             {!hasCoords && <span className={`ml-2 text-[10px] ${theme.fgFaint}`}>(sem coords, ignorado)</span>}
                           </div>
-                          <div className={`text-[10px] num truncate ${theme.fgFaint}`}>
+                          <div className={`text-xs num truncate ${theme.fgFaint}`}>
                             {altStr}
                             {leg.course != null ? ` · MC ${leg.course}°` : ""}
                             {leg.turn_direction ? ` · turn ${leg.turn_direction}` : ""}
@@ -4166,7 +4166,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{label}</div>
-                      {sub && <div className={`text-[10px] truncate ${theme.fgFaint}`}>{sub}</div>}
+                      {sub && <div className={`text-xs truncate ${theme.fgFaint}`}>{sub}</div>}
                     </div>
                     {right && <span className={`text-[10px] num shrink-0 ${theme.fgFaint}`}>{right}</span>}
                   </button>
@@ -5983,7 +5983,8 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
           </div>
           <button onClick={depart}
-            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-4 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}>
+            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-5 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}
+            style={{ minHeight: 64 }}>
             <Plane className="w-5 h-5" /> Partir agora
           </button>
         </div>
@@ -6183,13 +6184,15 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
-              className={`${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all duration-150`}>
-              <CircleCheckBig className="w-4 h-4" /> Agora
+              className={`${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-5 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}
+              style={{ minHeight: 64 }}>
+              <CircleCheckBig className="w-5 h-5" /> Agora
             </button>
             <button
               onClick={() => next.isVirtual ? onEditVirtualAta(next.autoKey) : onEditAta(next.userIdx)}
-              className={`${theme.panel} border ${next.isVirtual ? "border-cyan-600" : theme.accentBorder} ${next.isVirtual ? theme.cyan : theme.accent} font-bold py-4 rounded-lg text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all duration-150`}>
-              <Clock className="w-4 h-4" /> Registrar hora
+              className={`${theme.panel} border-2 ${next.isVirtual ? "border-cyan-600" : theme.accentBorder} ${next.isVirtual ? theme.cyan : theme.accent} font-bold py-5 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}
+              style={{ minHeight: 64 }}>
+              <Clock className="w-5 h-5" /> Registrar hora
             </button>
           </div>
         </div>
