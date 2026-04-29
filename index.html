@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0014";
+const APP_VERSION = "20260429.0017";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2535,7 +2535,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         <div className="flex-1 text-center">
           <div className={`text-sm font-bold ${theme.cyan}`}>{headerLabel}</div>
           {depth > 0 && (
-            <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>nível {depth + 1}</div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>nível {depth + 1}</div>
           )}
         </div>
         <div style={{ width: 80 }} />
@@ -2571,7 +2571,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
             />
             {localMatches.length > 0 && (
               <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
-                <div className={`px-3 py-1.5 text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Meus pontos</div>
+                <div className={`px-3 py-1.5 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Meus pontos</div>
                 {localMatches.map((pt) => (
                   <button key={pt.id || pt.name}
                     onClick={() => chooseAndConfirm({ name: pt.name, kind: pt.kind || "custom", lat: pt.lat, lon: pt.lon, alt: pt.alt, notes: pt.notes, source: pt.source || { kind: "library", libraryId: pt.id } })}
@@ -2600,7 +2600,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
               const rowBase = "w-full flex items-center gap-2 px-3 py-2.5 text-left active:opacity-70";
               return (
                 <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden`}>
-                  <div className={`px-3 py-1.5 text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>AIRAC</div>
+                  <div className={`px-3 py-1.5 text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>AIRAC</div>
                   {aps.map((it, i) => {
                     const pt = pickFromAirac(it, "airport"); if (!pt) return null;
                     return (
@@ -2785,14 +2785,14 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span className={`text-[9px] ${theme.fgFaint}`}>Radial de A</span>
+                  <span className={`text-[10px] ${theme.fgFaint}`}>Radial de A</span>
                   <input type="number" inputMode="numeric" min="0" max="359" placeholder="0–359°"
                     value={iBearingA} onChange={(e) => setIBearingA(e.target.value)}
                     className={inputCls}
                   />
                 </div>
                 <div>
-                  <span className={`text-[9px] ${theme.fgFaint}`}>Radial de B</span>
+                  <span className={`text-[10px] ${theme.fgFaint}`}>Radial de B</span>
                   <input type="number" inputMode="numeric" min="0" max="359" placeholder="0–359°"
                     value={iBearingB} onChange={(e) => setIBearingB(e.target.value)}
                     className={inputCls}
@@ -3085,19 +3085,19 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
       <div className={`p-3 shrink-0 ${theme.panel} border-t ${theme.panelBorder} space-y-2`}>
         <div className="grid grid-cols-3 gap-2">
           <label className="space-y-0.5 block">
-            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Altitude (ft)</span>
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Altitude (ft)</span>
             <input type="number" inputMode="numeric" value={alt}
               onChange={(e) => setAlt(e.target.value === '' ? '' : Number(e.target.value))}
               className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
           </label>
           <label className="space-y-0.5 block">
-            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>TAS (kt)</span>
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>TAS (kt)</span>
             <input type="number" inputMode="numeric" value={tas}
               onChange={(e) => setTas(e.target.value === '' ? '' : Number(e.target.value))}
               className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none`} />
           </label>
           <label className="space-y-0.5 block">
-            <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Alvo</span>
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Alvo</span>
             <select value={targetIdx ?? ''}
               onChange={(e) => setTargetIdx(e.target.value === '' ? null : Number(e.target.value))}
               className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none`}>
@@ -3342,7 +3342,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                   <div className="min-w-0 flex-1">
                     <div className={`text-xs font-bold ${theme.cyan}`}>
                       {cp.name === "TOC" ? "↗ TOC" : "↘ TOD"}
-                      <span className={`ml-2 text-[9px] ${theme.fgFaint} font-normal`}>AUTO</span>
+                      <span className={`ml-2 text-[10px] ${theme.fgFaint} font-normal`}>AUTO</span>
                     </div>
                     <div className={`text-[10px] ${theme.fgFaint} num`}>{cp.alt} ft · +{cp.dist} NM · TC {String(cp.tc ?? 0).padStart(3,"0")}°</div>
                   </div>
@@ -3356,19 +3356,19 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                     <div className="text-left min-w-0 flex-1">
                       <div className="font-bold truncate flex items-center gap-1">
                         {cp.name || "—"}
-                        {cp.windMode === "none" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
-                        {cp.windMode === "custom" && <span className={`text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
+                        {cp.windMode === "none" && <span className={`text-[10px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
+                        {cp.windMode === "custom" && <span className={`text-[10px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
                       </div>
                       <div className={`text-[10px] ${theme.fgFaint} uppercase tracking-wider truncate flex items-center gap-1`}>
                         {cp.isOrigin
                           ? `Origem · ${cp.useCruiseAlt ? (computed.find(c=>c.isOrigin)?.alt ?? cp.alt) : (cp.alt ?? 0)} ft`
                           : `${cp.useCruiseAlt ? (computed[i]?.alt ?? cp.alt) : (cp.alt ?? "?")} ft · TC ${String(computed[i]?.tc ?? cp.tc ?? 0).padStart(3, "0")}° · ${computed[i]?.dist ?? cp.dist ?? 0} NM`}
-                        {cp.useCruiseAlt && <span className={`text-[8px] ${theme.accent} border border-current rounded px-1 normal-case`}>CRZ</span>}
+                        {cp.useCruiseAlt && <span className={`text-[10px] ${theme.accent} border border-current rounded px-1 normal-case`}>CRZ</span>}
                       </div>
                       {computed[i]?.warnings?.length > 0 && (
                         <div className="mt-0.5 space-y-0.5">
                           {computed[i].warnings.map(function(w, wi) {
-                            return <div key={wi} className="text-[9px] text-red-400 leading-tight">⚠ {w}</div>;
+                            return <div key={wi} className="text-[10px] text-red-400 leading-tight">⚠ {w}</div>;
                           })}
                         </div>
                       )}
@@ -3469,12 +3469,14 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl divide-y ${theme.panelBorder} overflow-hidden`}>
             {[...userPoints].sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); }).map(function(pt) {
               return (
-                <div key={pt.id || pt.name} className="flex items-center gap-2 px-3 py-2">
-                  <span className={`text-[10px] font-bold w-14 shrink-0 ${theme.accent} inline-flex items-center gap-1`}>
-                    <Star className="w-3 h-3 fill-current" />
+                <div key={pt.id || pt.name}
+                  className="grid items-center gap-2 px-3 py-2"
+                  style={{ gridTemplateColumns: "3.5rem minmax(0, 1fr) auto" }}>
+                  <span className={`text-[10px] font-bold ${theme.accent} inline-flex items-center gap-1`}>
+                    <Star className="w-3 h-3 fill-current shrink-0" />
                     {pt.kind === "computed" ? "CALC" : pt.kind === "airport" ? "APT" : pt.kind === "navaid" ? "NAV" : pt.kind === "waypoint" ? "WPT" : "MEU"}
                   </span>
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0">
                     <div className={`font-bold truncate ${theme.fg}`}>{pt.name}</div>
                     <div className={`text-xs truncate num ${theme.fgFaint}`}>
                       {pt.lat != null ? pt.lat.toFixed(4) : "—"}, {pt.lon != null ? pt.lon.toFixed(4) : "—"}
@@ -3534,13 +3536,13 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
                       <button type="button"
                         onClick={() => onRefreshFreqs && onRefreshFreqs(which, true)}
                         title="Buscar do AIRAC (sobrescreve)"
-                        className={`text-[9px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
+                        className={`text-[10px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
                         <RefreshCw className="w-3 h-3" /> AIRAC
                       </button>
                       <button type="button"
                         onClick={() => setProceduresIcao(String(icao).toUpperCase())}
                         title="Ver SID / STAR / Approach"
-                        className={`text-[9px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
+                        className={`text-[10px] px-2 py-1 rounded border inline-flex items-center gap-1 ${theme.panelBorder} ${theme.fgMuted}`}>
                         <ClipboardList className="w-3 h-3" /> Procs
                       </button>
                     </div>
@@ -3553,7 +3555,7 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
                     ["elev", "Elev (ft)"],
                   ].map(([k, l]) => (
                     <div key={k}>
-                      <label className={`text-[9px] uppercase ${theme.fgFaint} block`}>{l}</label>
+                      <label className={`text-[10px] uppercase ${theme.fgFaint} block`}>{l}</label>
                       <input className={fieldClass}
                         value={flight.freqs?.[which]?.[k] || ""}
                         onChange={(e) => setFreq(which, k, e.target.value)} />
@@ -3686,7 +3688,7 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
             <div className={`text-sm font-bold ${theme.cyan}`}>
               {selected.typeCode} · {selected.identifier}{selected.transition ? " · " + selected.transition : ""}
             </div>
-            <div className={`text-[9px] ${theme.fgFaint}`}>{icao}</div>
+            <div className={`text-[10px] ${theme.fgFaint}`}>{icao}</div>
           </div>
           <div style={{ width: 80 }} />
         </div>
@@ -3704,20 +3706,20 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
                       : `${leg.altitude_ft} ft`)
                     : "—";
                   return (
-                    <div key={i} className={`px-3 py-2 ${hasCoords ? "" : "opacity-50"}`}>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] num w-8 shrink-0 ${theme.fgFaint}`}>#{leg.sequence != null ? leg.sequence : i}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className={`font-bold truncate ${theme.fg}`}>
-                            {leg.fix_identifier || leg.fix_name || "—"}
-                            {!hasCoords && <span className={`ml-2 text-[10px] ${theme.fgFaint}`}>(sem coords, ignorado)</span>}
-                          </div>
-                          <div className={`text-xs num truncate ${theme.fgFaint}`}>
-                            {altStr}
-                            {leg.course != null ? ` · MC ${leg.course}°` : ""}
-                            {leg.turn_direction ? ` · turn ${leg.turn_direction}` : ""}
-                            {leg.path_terminator ? ` · ${leg.path_terminator}` : ""}
-                          </div>
+                    <div key={i}
+                      className={`px-3 py-2 grid items-center gap-2 ${hasCoords ? "" : "opacity-50"}`}
+                      style={{ gridTemplateColumns: "2rem minmax(0, 1fr)" }}>
+                      <span className={`text-[10px] num ${theme.fgFaint}`}>#{leg.sequence != null ? leg.sequence : i}</span>
+                      <div className="min-w-0">
+                        <div className={`font-bold truncate ${theme.fg}`}>
+                          {leg.fix_identifier || leg.fix_name || "—"}
+                          {!hasCoords && <span className={`ml-2 text-[10px] ${theme.fgFaint}`}>(sem coords, ignorado)</span>}
+                        </div>
+                        <div className={`text-xs num truncate ${theme.fgFaint}`}>
+                          {altStr}
+                          {leg.course != null ? ` · MC ${leg.course}°` : ""}
+                          {leg.turn_direction ? ` · turn ${leg.turn_direction}` : ""}
+                          {leg.path_terminator ? ` · ${leg.path_terminator}` : ""}
                         </div>
                       </div>
                     </div>
@@ -3849,7 +3851,7 @@ function Section({ icon, title, children, theme }) {
 function Stat({ label, value, theme }) {
   return (
     <div className={`${theme?.panel || "bg-zinc-900"} border ${theme?.panelBorder || "border-zinc-800"} rounded px-2 py-1.5`}>
-      <div className={`text-[9px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
+      <div className={`text-[10px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
       <div className={`text-sm font-bold num ${theme?.accent || "text-amber-400"}`}>{value}</div>
     </div>
   );
@@ -4094,7 +4096,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             <span className={`text-base font-black tracking-widest ${theme.accent} cockpit-glow`}>
               {isNew ? "NOVO" : (cp.name || "—")}
             </span>
-            <span className={`text-[9px] ${theme.fgFaint} uppercase tracking-widest`}>
+            <span className={`text-[10px] ${theme.fgFaint} uppercase tracking-widest`}>
               {isNew ? "waypoint" : "editar waypoint"}
             </span>
           </div>
@@ -4142,7 +4144,8 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   </div>
                 );
               }
-              var rowBase = "w-full text-left px-3 py-2 active:opacity-70";
+              var rowBase = "w-full text-left px-3 py-2 active:opacity-70 grid items-center gap-2";
+              var rowGrid = { gridTemplateColumns: "3.5rem minmax(0, 1fr) auto" };
               function rowIcon(kind) {
                 if (kind === "airport") return <Plane className="w-3.5 h-3.5" />;
                 if (kind === "navaid")  return <Radio className="w-3.5 h-3.5" />;
@@ -4160,15 +4163,16 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   <button key={key} type="button"
                     onMouseDown={function(e) { e.preventDefault(); }}
                     onClick={function() { applyAiracSuggestion(item, kind); }}
-                    className={`${rowBase} flex items-center gap-2 border-b ${theme.panelBorder} last:border-b-0`}>
-                    <span className={`text-[10px] font-bold w-14 shrink-0 inline-flex items-center gap-1 ${kind === "local" ? theme.accent : theme.fgMuted}`}>
+                    style={rowGrid}
+                    className={`${rowBase} border-b ${theme.panelBorder} last:border-b-0`}>
+                    <span className={`text-[10px] font-bold inline-flex items-center gap-1 ${kind === "local" ? theme.accent : theme.fgMuted}`}>
                       {rowIcon(kind)} {rowKindLabel(kind)}
                     </span>
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0">
                       <div className={`font-bold truncate ${theme.fg}`}>{label}</div>
                       {sub && <div className={`text-xs truncate ${theme.fgFaint}`}>{sub}</div>}
                     </div>
-                    {right && <span className={`text-[10px] num shrink-0 ${theme.fgFaint}`}>{right}</span>}
+                    {right ? <span className={`text-[10px] num ${theme.fgFaint} text-right`}>{right}</span> : <span />}
                   </button>
                 );
               }
@@ -4229,7 +4233,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 <div className="space-y-2">
                   {/* LAT */}
                   <div>
-                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LAT</span>
+                    <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>LAT</span>
                     <div className="flex items-center gap-1">
                       <input type="number" inputMode="numeric" min="0" max="90" step="1" placeholder="38"
                         value={latParts.deg}
@@ -4253,7 +4257,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   </div>
                   {/* LON */}
                   <div>
-                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>LON</span>
+                    <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>LON</span>
                     <div className="flex items-center gap-1">
                       <input type="number" inputMode="numeric" min="0" max="180" step="1" placeholder="9"
                         value={lonParts.deg}
@@ -4340,13 +4344,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { alt: null, useCruiseAlt: false }); }); }}
                   className={`py-2.5 rounded-xl border-2 text-xs font-bold flex flex-col items-center gap-0.5 ${altMode === "inherit" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
                   Herdar
-                  <span className="text-[9px] font-normal opacity-70">{prevAlt != null ? prevAlt + " ft" : "—"}</span>
+                  <span className="text-[10px] font-normal opacity-70">{prevAlt != null ? prevAlt + " ft" : "—"}</span>
                 </button>
               )}
               <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { useCruiseAlt: true, alt: cruiseAlt }); }); }}
                 className={`py-2.5 rounded-xl border-2 text-xs font-bold flex flex-col items-center gap-0.5 ${altMode === "cruise" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
                 CRZ
-                <span className="text-[9px] font-normal opacity-70">{cruiseAlt} ft</span>
+                <span className="text-[10px] font-normal opacity-70">{cruiseAlt} ft</span>
               </button>
               <button onClick={function() { setCp(function(p) { return Object.assign({}, p, { useCruiseAlt: false, alt: p.alt != null ? p.alt : cruiseAlt }); }); }}
                 className={`py-2.5 rounded-xl border-2 text-xs font-bold ${altMode === "custom" ? theme.accentBorder + " " + theme.accent : theme.panelBorder + " " + theme.fgFaint}`}>
@@ -4391,7 +4395,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                     onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
                     style={{ touchAction: "none" }}
                     className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
-                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="text-[10px] opacity-60 leading-none">↕</span>
                     <span className="leading-tight mt-0.5">1k</span>
                   </button>
                   <button
@@ -4399,7 +4403,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                     onPointerMove={onPM} onPointerUp={onPU} onPointerCancel={onPU}
                     style={{ touchAction: "none" }}
                     className={`${handleCls} border-l ${theme.inputBorder} ${theme.fgMuted}`}>
-                    <span className="text-[9px] opacity-60 leading-none">↕</span>
+                    <span className="text-[10px] opacity-60 leading-none">↕</span>
                     <span className="leading-tight mt-0.5">100</span>
                   </button>
                 </div>
@@ -4525,7 +4529,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>{tcMode === "mh" ? "MC (°)" : "TC (°)"} 0–359</span>
+                  <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>{tcMode === "mh" ? "MC (°)" : "TC (°)"} 0–359</span>
                   <input type="number" inputMode="numeric" placeholder="270" min="0" max="359"
                     value={cp.tc != null ? (tcMode === "mh" ? String(Math.round(mod360(cp.tc - variation))) : String(cp.tc)) : ""}
                     onChange={function(e) {
@@ -4537,7 +4541,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   />
                 </div>
                 <div>
-                  <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Distância (NM)</span>
+                  <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>Distância (NM)</span>
                   <input type="number" inputMode="decimal" placeholder="50" min="0"
                     value={cp.dist != null ? cp.dist : ""}
                     onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { dist: e.target.value === "" ? null : parseFloat(e.target.value), _tcDistEdited: true }); }); }}
@@ -4566,7 +4570,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
               {windMode === "custom" && (
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <div>
-                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Direção (°)</span>
+                    <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>Direção (°)</span>
                     <input type="number" inputMode="numeric" placeholder="270" min="0" max="359"
                       value={cp.windDir != null ? cp.windDir : ""}
                       onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { windDir: e.target.value === "" ? null : Number(e.target.value) }); }); }}
@@ -4574,7 +4578,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                     />
                   </div>
                   <div>
-                    <span className={`text-[9px] ${theme.fgFaint} mb-0.5 block`}>Velocidade (kt)</span>
+                    <span className={`text-[10px] ${theme.fgFaint} mb-0.5 block`}>Velocidade (kt)</span>
                     <input type="number" inputMode="numeric" placeholder="15"
                       value={cp.windVel != null ? cp.windVel : ""}
                       onChange={function(e) { setCp(function(p) { return Object.assign({}, p, { windVel: e.target.value === "" ? null : Number(e.target.value) }); }); }}
@@ -5179,7 +5183,7 @@ function StepTCDist({ theme, variation, cp, setCp, onNext }) {
       <div className="grid grid-cols-2 gap-2">
         <button onClick={() => setField("tc")}
           className={`${theme.panel} border-2 ${field === "tc" ? theme.accentBorder : theme.panelBorder} rounded-xl px-3 py-3 flex flex-col items-center gap-0.5`}>
-          <div className={`text-[9px] uppercase tracking-widest ${field === "tc" ? theme.accent : theme.fgFaint}`}>
+          <div className={`text-[10px] uppercase tracking-widest ${field === "tc" ? theme.accent : theme.fgFaint}`}>
             {tcMode === "mh" ? "MC" : "TC"}
           </div>
           <div className={`text-3xl font-black num ${field === "tc" ? (tcInputValid ? theme.accent : "text-red-400") : (tcInputValid ? theme.fg : theme.fgFaint)}`}>
@@ -5192,7 +5196,7 @@ function StepTCDist({ theme, variation, cp, setCp, onNext }) {
 
         <button onClick={() => setField("dist")}
           className={`${theme.panel} border-2 ${field === "dist" ? theme.accentBorder : theme.panelBorder} rounded-xl px-3 py-3 flex flex-col items-center gap-0.5`}>
-          <div className={`text-[9px] uppercase tracking-widest ${field === "dist" ? theme.accent : theme.fgFaint}`}>
+          <div className={`text-[10px] uppercase tracking-widest ${field === "dist" ? theme.accent : theme.fgFaint}`}>
             DIST
           </div>
           <div className={`text-3xl font-black num ${field === "dist" ? (distValid ? theme.accent : "text-red-400") : (distValid ? theme.fg : theme.fgFaint)}`}>
@@ -5292,7 +5296,7 @@ function StepTC({ theme, variation, initial, onConfirm }) {
           {mode === "tc" ? "True Course" : "Magnetic Course"}
         </div>
         {mode === "mh" && variation != null && (
-          <div className={`text-[9px] ${theme.fgFaint} mt-0.5`}>
+          <div className={`text-[10px] ${theme.fgFaint} mt-0.5`}>
             Var. {variation >= 0 ? "+" : ""}{variation}° → TC = MC {variation >= 0 ? "−" : "+"}{Math.abs(variation)}°
           </div>
         )}
@@ -5387,7 +5391,7 @@ function StepOverride({ cp, setCp, theme, onNext }) {
   }
 
   const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none`;
-  const labelClass = `text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
+  const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   return (
     <div className="space-y-4">
@@ -5484,7 +5488,7 @@ function StepNumerico({ theme, label, unit, hint, maxDigits, allowDecimal, valid
     <div className="space-y-3">
       <div>
         <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>{label}</div>
-        <div className={`text-[9px] ${theme.fgFaint} mt-0.5`}>{hint}</div>
+        <div className={`text-[10px] ${theme.fgFaint} mt-0.5`}>{hint}</div>
       </div>
 
       {/* Display */}
@@ -5638,11 +5642,11 @@ function StepVento({ theme, cp, setCp, windMode, setWindMode, defaultDir, defaul
                 className={`${theme.panel} border-2 rounded-xl px-3 py-3 text-center transition-all duration-150 ${
                   field === key ? theme.accentBorder : theme.panelBorder
                 }`}>
-                <div className={`text-[9px] uppercase ${field === key ? theme.accent : theme.fgFaint}`}>{label}</div>
+                <div className={`text-[10px] uppercase ${field === key ? theme.accent : theme.fgFaint}`}>{label}</div>
                 <div className={`text-3xl font-black num ${val ? (field === key ? theme.accent : theme.fg) : theme.fgFaint}`}>
                   {val || "—"}
                 </div>
-                <div className={`text-[9px] ${theme.fgFaint}`}>{unit}</div>
+                <div className={`text-[10px] ${theme.fgFaint}`}>{unit}</div>
               </button>
             ))}
           </div>
@@ -5727,10 +5731,10 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
             onClick={() => !derived && onEdit(step)}
             className={`w-full flex items-center justify-between px-4 py-3 text-left border-b ${theme.panelBorder} last:border-b-0 ${derived ? 'opacity-60 cursor-default' : 'active:opacity-70'}`}>
             <div>
-              <div className={`text-[9px] uppercase tracking-wider ${theme.fgFaint} flex items-center gap-1.5`}>
+              <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint} flex items-center gap-1.5`}>
                 {label}
                 {derived && (
-                  <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${theme.accentBg} text-black`}>
+                  <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${theme.accentBg} text-black`}>
                     GPS
                   </span>
                 )}
@@ -5738,7 +5742,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
               <div className={`text-base font-bold num ${theme.fg}`}>{value}</div>
             </div>
             {derived
-              ? <span className={`text-[9px] ${theme.fgFaint} shrink-0`}>auto</span>
+              ? <span className={`text-[10px] ${theme.fgFaint} shrink-0`}>auto</span>
               : <Pencil className={`w-4 h-4 ${theme.fgFaint} shrink-0`} />
             }
           </button>
@@ -5974,11 +5978,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className={`text-[10px] uppercase tracking-widest ${theme.accent} mb-1`}>Pronto para partir</div>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>EOBT</div>
+              <div className={`text-[10px] uppercase ${theme.fgFaint}`}>EOBT</div>
               <div className={`text-2xl font-black num cockpit-glow ${theme.accent}`}>{flight.eobt}</div>
             </div>
             <div className="text-right">
-              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Origem</div>
+              <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Origem</div>
               <div className={`text-2xl font-black ${theme.fg}`}>{flight.origin || computed[0]?.name || "—"}</div>
             </div>
           </div>
@@ -5994,12 +5998,12 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           <div className="flex items-center gap-2">
             <Plane className={`w-4 h-4 ${theme.success}`} />
             <div className="text-left">
-              <div className={`text-[9px] uppercase ${theme.fgFaint}`}>ATD</div>
+              <div className={`text-[10px] uppercase ${theme.fgFaint}`}>ATD</div>
               <div className={`font-bold num ${theme.success}`}>{displayTime(flight.atd)}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`text-[9px] uppercase ${theme.fgFaint}`}>{flight.origin || computed[0]?.name}</div>
+            <div className={`text-[10px] uppercase ${theme.fgFaint}`}>{flight.origin || computed[0]?.name}</div>
             <Edit2 className={`w-3.5 h-3.5 ${theme.fgFaint}`} />
           </div>
         </button>
@@ -6082,7 +6086,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             </div>
             {next.mh != null && (
               <div className="text-right">
-                <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
+                <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>MH</div>
                 <div className={`text-4xl font-black num cockpit-glow leading-none ${accentColor}`}>
                   {Math.round(next.mh).toString().padStart(3,"0")}°
                 </div>
@@ -6099,13 +6103,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           {/* ETE + ETA */}
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-3 py-3`}>
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
+              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
               <div className={`text-3xl font-black num cockpit-glow ${theme.fg}`}>
                 {Math.round(next.eteLeg ?? next.etePlanned ?? 0)}<span className={`text-base font-bold ${theme.fgFaint} ml-1`}>min</span>
               </div>
             </div>
             <div className={`bg-black/30 border rounded-lg px-3 py-3 ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
+              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
               {liveNext != null ? (
                 <>
                   <div className={`text-3xl font-black num cockpit-glow ${accentColor}`}>
@@ -6131,8 +6135,8 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                 return (
                 <>
                   <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
-                    <span className={`text-[9px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
+                    <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Progresso da perna</span>
+                    <span className={`text-[10px] num ${theme.fgFaint}`}>{Math.round(progressPct)}%</span>
                   </div>
                   <div className="h-2 rounded-full bg-black/40 border border-zinc-700 overflow-hidden">
                     <div
@@ -6220,7 +6224,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         <div className="flex items-center gap-2">
           <Clock className={`w-4 h-4 ${lastAtaMs != null ? theme.accent : theme.fgFaint}`} />
           <div>
-            <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Desde último ponto</div>
+            <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Desde último ponto</div>
             <div className={`text-lg font-bold num cockpit-glow ${lastAtaMs != null ? theme.accent : theme.fgFaint}`}>
               {lastAtaMs != null
                 ? `${String(elapsedMin).padStart(2,"0")}:${String(elapsedSec).padStart(2,"0")}`
@@ -6230,11 +6234,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
         <div className={`w-px h-10 bg-current opacity-20`} />
         <div className="text-right">
-          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Comb. restante est.</div>
+          <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Comb. restante est.</div>
           <div className={`text-lg font-bold num cockpit-glow ${fuelColor}`}>
             {Math.round(currentFuel)} <span className={`text-xs ${theme.fgFaint}`}>gal</span>
           </div>
-          <div className={`text-[9px] num ${theme.fgFaint}`}>{fuelPct.toFixed(0)}% de {fuelStart}</div>
+          <div className={`text-[10px] num ${theme.fgFaint}`}>{fuelPct.toFixed(0)}% de {fuelStart}</div>
         </div>
       </div>
 
@@ -6277,15 +6281,15 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 
       <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg p-3 grid grid-cols-3 gap-3 text-center`}>
         <div>
-          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Dist Total</div>
+          <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Dist Total</div>
           <div className={`text-base font-bold num ${theme.fg}`}>{computed[computed.length-1]?.cumDist?.toFixed(0)||0} NM</div>
         </div>
         <div>
-          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Tempo Total</div>
+          <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Tempo Total</div>
           <div className={`text-base font-bold num ${theme.fg}`}>{(computed[computed.length-1]?.cumTime||0).toFixed(0)} min</div>
         </div>
         <div>
-          <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Cruzados</div>
+          <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Cruzados</div>
           <div className={`text-base font-bold num ${theme.fg}`}>
             {computed.filter(c=>c.ata!=null).length}/{computed.filter(c=>!c.isOrigin).length}
           </div>
@@ -6298,7 +6302,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 function BigStat({ label, value, theme }) {
   return (
     <div className={`bg-black/30 border ${theme?.panelBorder || "border-zinc-800"} rounded px-2 py-2 text-center`}>
-      <div className={`text-[9px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
+      <div className={`text-[10px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
       <div className={`text-xl font-bold num ${theme?.fg || "text-zinc-100"}`}>{value}</div>
     </div>
   );
@@ -6313,7 +6317,7 @@ function ETACell({ label, value, delta, muted, theme }) {
     delta < -1 ? (theme?.success || "text-green-400") : (theme?.fgFaint || "text-zinc-500");
   return (
     <div className={`bg-black/30 border rounded px-2 py-2 ${muted ? (theme?.panelBorder || "border-zinc-800") : "border-cyan-500/40"}`}>
-      <div className={`text-[9px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
+      <div className={`text-[10px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
       <div className={`text-xl font-bold num ${muted ? (theme?.fgMuted || "text-zinc-300") : (theme?.cyan || "text-cyan-400")}`}>{value}</div>
       {absDelta != null && absDelta > 0 && (
         <div className={`text-[10px] num ${deltaColor}`}>{sign}{absDelta} min</div>
@@ -6380,9 +6384,9 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
         <div className="flex-1 min-w-0">
           <div className={`font-bold truncate ${crossed ? (isVirtual ? theme.cyan : theme.success) : isNext ? (isVirtual ? theme.cyan : theme.accent) : isVirtual ? theme.cyan : theme.fg}`}>
             {cp.name}
-            {!isVirtual && cp.windMode === "none"   && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
-            {!isVirtual && cp.windMode === "custom" && <span className={`ml-1 text-[9px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
-            {!isVirtual && cp.warnings?.length > 0  && <span className="ml-1 text-[9px] text-amber-400 border border-current rounded px-1">⚠</span>}
+            {!isVirtual && cp.windMode === "none"   && <span className={`ml-1 text-[10px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
+            {!isVirtual && cp.windMode === "custom" && <span className={`ml-1 text-[10px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
+            {!isVirtual && cp.warnings?.length > 0  && <span className="ml-1 text-[10px] text-amber-400 border border-current rounded px-1">⚠</span>}
           </div>
           {!cp.isOrigin && (
             <div className={`text-[10px] ${isVirtual ? theme.cyan : theme.fgFaint} num opacity-70`}>{subtitle}</div>
@@ -6397,30 +6401,30 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
             {cp.isOrigin ? (
               etaPlanned != null ? (
                 <div>
-                  <div className={`text-[9px] uppercase ${theme.success}`}>{etaOriginLabel ?? "ATD"}</div>
+                  <div className={`text-[10px] uppercase ${theme.success}`}>{etaOriginLabel ?? "ATD"}</div>
                   <div className={`num font-bold ${theme.success}`}>{formatHHMM(etaPlanned)}</div>
                 </div>
               ) : null
             ) : crossed ? (
               <div>
-                <div className={`text-[9px] uppercase ${isVirtual ? theme.cyan : theme.success} flex items-center gap-1 justify-end`}>
+                <div className={`text-[10px] uppercase ${isVirtual ? theme.cyan : theme.success} flex items-center gap-1 justify-end`}>
                   ATA {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-60" />}
                 </div>
                 <div className={`num font-bold ${isVirtual ? theme.cyan : theme.success}`}>{displayTime(cp.ata)}</div>
                 {!isVirtual && cp.gsActual && (
-                  <div className={`text-[9px] num ${theme.fgFaint}`}>GS {Math.round(cp.gsActual)} kt</div>
+                  <div className={`text-[10px] num ${theme.fgFaint}`}>GS {Math.round(cp.gsActual)} kt</div>
                 )}
               </div>
             ) : hasLiveBase && etaLive != null ? (
               <div>
-                <div className={`text-[9px] uppercase ${theme.fgFaint} flex items-center gap-1 justify-end`}>
+                <div className={`text-[10px] uppercase ${theme.fgFaint} flex items-center gap-1 justify-end`}>
                   EST {!isVirtual && <Pencil className="w-2.5 h-2.5 opacity-40" />}
                 </div>
                 <div className={`num font-bold ${isVirtual ? theme.cyan : absDelta != null && absDelta > 0 ? deltaColor : theme.fgMuted}`}>
                   {formatHHMM(etaLive)}
                 </div>
                 {!isVirtual && absDelta != null && absDelta > 0 && (
-                  <div className={`text-[9px] num ${deltaColor}`}>{sign}{absDelta} min</div>
+                  <div className={`text-[10px] num ${deltaColor}`}>{sign}{absDelta} min</div>
                 )}
               </div>
             ) : null}
@@ -6621,11 +6625,11 @@ function LogTab({ flight, computed, liveFuel, ac, theme }) {
         <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-2`}>Resumo do voo</div>
         <div className="grid grid-cols-2 gap-2 text-center">
           <div>
-            <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Origem</div>
+            <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Origem</div>
             <div className={`text-base font-bold ${theme.accent}`}>{flight.origin}</div>
           </div>
           <div>
-            <div className={`text-[9px] uppercase ${theme.fgFaint}`}>Destino</div>
+            <div className={`text-[10px] uppercase ${theme.fgFaint}`}>Destino</div>
             <div className={`text-base font-bold ${theme.accent}`}>{flight.destination}</div>
           </div>
         </div>
@@ -6634,7 +6638,7 @@ function LogTab({ flight, computed, liveFuel, ac, theme }) {
       {/* Comparação planejado vs real */}
       <Section theme={theme} icon={<BookOpen className="w-4 h-4" />} title="Planejado vs Real">
         <div className={`${theme.panel} border ${theme.panelBorder} rounded overflow-hidden`}>
-          <div className={`grid grid-cols-3 px-3 py-2 text-[9px] uppercase ${theme.fgFaint} border-b ${theme.panelBorder}`}>
+          <div className={`grid grid-cols-3 px-3 py-2 text-[10px] uppercase ${theme.fgFaint} border-b ${theme.panelBorder}`}>
             <div>Métrica</div><div className="text-right">Plano</div><div className="text-right">Real</div>
           </div>
           <CompareRow theme={theme} label="Distância (NM)"
@@ -6674,7 +6678,7 @@ function LogTab({ flight, computed, liveFuel, ac, theme }) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className={`text-[9px] uppercase ${theme.fgFaint}`}>GS real</div>
+                    <div className={`text-[10px] uppercase ${theme.fgFaint}`}>GS real</div>
                     <div className={`text-sm font-bold num ${theme.fg}`}>
                       {cp.gsActual ? Math.round(cp.gsActual) : "—"} kt
                     </div>
@@ -6764,7 +6768,7 @@ function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
               </button>
             ))}
           </div>
-          <div className={`text-[9px] ${theme.fgFaint} mt-1`}>
+          <div className={`text-[10px] ${theme.fgFaint} mt-1`}>
             O card do próximo waypoint acende vermelho quando o desvio superar este valor.
           </div>
         </div>
@@ -7201,7 +7205,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           <div className="flex items-center justify-between">
             {/* Nome do waypoint */}
             <div>
-              <div className={`text-[9px] uppercase tracking-widest ${theme.fgFaint}`}>Waypoint</div>
+              <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Waypoint</div>
               <div className={`text-2xl font-black ${theme.accent} cockpit-glow`}>{checkpoint.name}</div>
             </div>
 
@@ -7209,14 +7213,14 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
             <div className="text-right space-y-1">
               <div className="flex items-center justify-end gap-3">
                 <div>
-                  <div className={`text-[9px] uppercase ${theme.fgFaint}`}>ETA plan.</div>
+                  <div className={`text-[10px] uppercase ${theme.fgFaint}`}>ETA plan.</div>
                   <div className={`text-lg font-bold num ${theme.fgMuted}`}>
                     {etaPlanned != null ? formatHHMM(etaPlanned) : "--:--"}
                   </div>
                 </div>
                 {etaLive != null && (
                   <div>
-                    <div className={`text-[9px] uppercase ${theme.cyan}`}>ETA atual.</div>
+                    <div className={`text-[10px] uppercase ${theme.cyan}`}>ETA atual.</div>
                     <div className={`text-lg font-bold num ${theme.cyan}`}>
                       {formatHHMM(etaLive)}
                     </div>
