@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0309";
+const APP_VERSION = "20260429.0311";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -3510,7 +3510,7 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
     const freqs = { ...(flight.freqs || {}), [which]: { ...(flight.freqs?.[which] || {}), [key]: val } };
     setFlight({ ...flight, freqs });
   };
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
+  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded-lg num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
 
   return (
     <section>
@@ -3529,7 +3529,7 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
             const icao = flight[which];
             const isIcao = icao && /^[A-Z0-9]{4}$/.test(String(icao).toUpperCase());
             return (
-              <div key={which} className={`${theme.panel} border ${theme.panelBorder} rounded p-2`}>
+              <div key={which} className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3`}>
                 <div className="flex items-center justify-between mb-1.5">
                   <div className={`text-xs font-bold ${theme.accent}`}>{label}</div>
                   {isIcao && (
@@ -3549,7 +3549,7 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     ["atis", "ATIS"], ["ground", "Ground"], ["tower", "Tower"],
                     ["approach", "App/Dep"], ["ctaf", "CTAF"], ["unicom", "UNICOM"],
@@ -5442,7 +5442,7 @@ function StepOverride({ cp, setCp, theme, onNext }) {
     });
   }
 
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
+  const fieldClass = `w-full ${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-3 py-2 text-base rounded-xl num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   return (
@@ -6975,7 +6975,7 @@ function AircraftEditor({ aircraft, theme, onSave, onClose }) {
   const setN = (k, v) => setAc((a) => ({ ...a, [k]: v === '' ? 0 : Number(v) }));
   const setS = (k, v) => setAc((a) => ({ ...a, [k]: v }));
 
-  const fieldClass = `w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
+  const fieldClass = `w-full ${theme.inputBg} border-2 ${theme.inputBorder} ${theme.fg} px-3 py-2.5 text-base rounded-xl num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`;
   const labelClass = `text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-1 block`;
 
   const isValid = ac.name?.trim() && ac.short?.trim() && ac.tasCruise > 0 && ac.gphCruise > 0 && ac.fuelUsable > 0;
