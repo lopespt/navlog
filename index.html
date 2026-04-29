@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0311";
+const APP_VERSION = "20260429.0345";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -948,6 +948,9 @@ function NavlogApp() {
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const [deviationOpen, setDeviationOpen] = useState(false);
   const [userPoints, setUserPoints] = useState([]);
+  // Map center+zoom is preserved across tab switches (Leaflet otherwise
+  // re-initialises and re-fits-bounds whenever the MapTab remounts).
+  const [mapView, setMapView] = useState(null);
   const [pointFinderOpen, setPointFinderOpen] = useState(false);
   const wakeLockRef = useRef(null);
 
@@ -1990,6 +1993,7 @@ function NavlogApp() {
             flight={flight} computed={computed} liveRoute={liveRoute}
             liveETAs={liveETAs} ac={ac} theme={theme}
             pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
+            initialView={mapView} onViewChange={setMapView}
             onInsertWaypoint={(afterIdx, lat, lon) => {
               setInsertAfterIdx(afterIdx);
               setInsertCoords([lat, lon]);
@@ -8200,7 +8204,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
@@ -8218,6 +8222,13 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const legLabelUpdaterRef = useRef(function() {});
   // Threshold above which we want the hi-res rasterization
   const HIRES_ZOOM = 12;
+  // True once the map has been restored from a saved view — suppresses the
+  // default fitBounds on the route effect so the user's pan/zoom is preserved
+  // when switching tabs.
+  const restoredViewRef = useRef(false);
+  // Stable ref so map listeners always call the latest reporter
+  const onViewChangeRef = useRef(onViewChange);
+  useEffect(() => { onViewChangeRef.current = onViewChange; }, [onViewChange]);
 
   // Calibration: replace one of the existing 3 control points by clicking on
   // the chart (where the user sees the feature) and then on the map (where the
@@ -8372,6 +8383,14 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       onInsertWaypointRef.current(bestIdx, lat, lon);
     });
 
+    function reportView() {
+      try {
+        if (!onViewChangeRef.current) return;
+        var c = map.getCenter();
+        onViewChangeRef.current({ center: [c.lat, c.lng], zoom: map.getZoom() });
+      } catch (_) {}
+    }
+
     // Debounce zoomend so rapid pinch / wheel gestures only kick the heavy
     // pipeline (label visibility + hi-res scheduler + overlay re-sync) once
     // after the user settles.
@@ -8382,15 +8401,36 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         try {
           legLabelUpdaterRef.current();
           setMapZoom(map.getZoom());
+          reportView();
         } catch (_) {}
         zoomDebounce = null;
       }, 80);
     });
 
+    var moveDebounce = null;
+    map.on('moveend', function() {
+      if (moveDebounce) clearTimeout(moveDebounce);
+      moveDebounce = setTimeout(function() {
+        reportView();
+        moveDebounce = null;
+      }, 120);
+    });
+
     mapRef.current = map;
     try { setMapZoom(map.getZoom()); } catch (_) {}
+
+    // Restore the last viewed center/zoom if we have one (tab switch). When
+    // restored, the route effect should NOT fit-bounds back to the route.
+    if (initialView && initialView.center && typeof initialView.zoom === 'number') {
+      try {
+        map.setView(initialView.center, initialView.zoom, { animate: false });
+        restoredViewRef.current = true;
+      } catch (_) {}
+    }
+
     return () => {
       if (zoomDebounce) clearTimeout(zoomDebounce);
+      if (moveDebounce) clearTimeout(moveDebounce);
       map.remove();
       mapRef.current = null;
     };
@@ -8536,7 +8576,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     // Route polyline through user waypoints — in routePane (z:500) above PDF overlays (z:450)
     const coords = userWps.map(cp => [cp.lat, cp.lon]);
     ov.route = window.L.polyline(coords, { color: '#f59e0b', weight: 2.5, opacity: 0.9, pane: 'routePane' }).addTo(map);
-    map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
+    // Only auto-fit on the first render. After that, preserve the user's
+    // current pan/zoom (also when restored from a saved view across tabs).
+    if (!restoredViewRef.current) {
+      map.fitBounds(ov.route.getBounds(), { padding: [50, 50] });
+      restoredViewRef.current = true;
+    }
 
     // User waypoint markers
     userWps.forEach((cp, i) => {
