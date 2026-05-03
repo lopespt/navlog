@@ -104,7 +104,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260430.1000";
+const APP_VERSION = "20260503.2200";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1264,6 +1264,7 @@ function NavlogApp() {
       ...f,
       atd: null,
       autoWpATAs: {},
+      windVel: 0,
       checkpoints: f.checkpoints.map((cp) =>
         cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null }
       ),
@@ -1285,6 +1286,7 @@ function NavlogApp() {
       ...DEFAULT_FLIGHT,
       callsign: flight.callsign,
       aircraftKey: flight.aircraftKey,
+      windVel: 0,
       checkpoints: [
         { name: "ORIG", alt: 0, tc: null, dist: 0, ata: null, gsActual: null, isOrigin: true },
       ],
