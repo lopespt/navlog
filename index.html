@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0610";
+const APP_VERSION = "20260429.0700";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -468,6 +468,13 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
     portions = [{ phase: "CRUZEIRO", dist, tas: tasCruise, gph: gphR, timeMin: t }];
   }
 
+  // Drop empty portions (e.g. before_* with cruiseFirst=0 or safeBefore=0 leave
+  // a spurious 0-NM CRUZEIRO that would otherwise emit virtuals at the WP).
+  portions = portions.filter(p => (p.dist ?? 0) > 0.001);
+  if (portions.length === 0) {
+    portions = [{ phase: "CRUZEIRO", dist: 0, tas: tasCr0, gph: gphCr0, timeMin: 0 }];
+  }
+
   // avgTas: display TAS (cruise phase preferred)
   const totalTime = portions.reduce((s, p) => s + (p.timeMin ?? 0), 0);
   const totalD    = portions.reduce((s, p) => s + p.dist, 0);
@@ -536,22 +543,52 @@ function resolveAltitudeProfile(cps, ac, flight) {
         var acRoc2 = isClimb ? (ac.rocClimb ?? 500) : (ac.rodDescent ?? 500);
         var legRes2 = calcLeg(cpTo.tc ?? 0, 1, acTas2, wDir2, wVel2, variation, 0);
         var gsPhase2 = Math.max(1, legRes2.gs);
-        var climbDistNM2 = gsPhase2 * (altDiff / acRoc2) / 60;
+        var phaseDist = gsPhase2 * (altDiff / acRoc2) / 60;
 
-        if (climbDistNM2 > totalSegDist) {
+        // Honour the destination anchor's arrivalMode/arrivalValue so the
+        // resolver pushes the descent (or climb) earlier into prior legs when
+        // the last leg alone can't fit "phase + buffer". This way an inherit
+        // WP between two anchors gets an altitude consistent with the actual
+        // planned phase distribution.
+        var defaultMode = isClimb ? "asap" : "at_fix";
+        var mode = cpTo.arrivalMode ?? defaultMode;
+        var wantBefore = 0;
+        if (mode === "before_nm") {
+          wantBefore = cpTo.arrivalValue ?? 5;
+        } else if (mode === "before_min") {
+          // Buffer cruise sits AT segToAlt (after climb or after descent)
+          var tasLevel = correctTAS(ac.tasCruise, segToAlt, flight.isaDevC || 0);
+          var gsLevel = Math.max(1, calcLeg(cpTo.tc ?? 0, 1, tasLevel, wDir2, wVel2, variation, 0).gs);
+          wantBefore = (cpTo.arrivalValue ?? 5) * gsLevel / 60;
+        }
+        // Clamp the buffer if the segment can't fit the whole intent.
+        var safePhase  = Math.min(phaseDist, totalSegDist);
+        var safeBefore = Math.max(0, Math.min(wantBefore, totalSegDist - safePhase));
+        var cruiseFirst;
+        if (mode === "asap")        cruiseFirst = 0;
+        else if (mode === "at_fix") cruiseFirst = Math.max(0, totalSegDist - safePhase);
+        else /* before_* */          cruiseFirst = Math.max(0, totalSegDist - safePhase - safeBefore);
+        var phaseEnd = cruiseFirst + safePhase;
+
+        if (phaseDist > totalSegDist) {
           altWarnings[si] = (isClimb ? 'Subida' : 'Descida') + ' para ' + segToAlt +
-            ' ft impossível: precisa ' + climbDistNM2.toFixed(0) +
+            ' ft impossível: precisa ' + phaseDist.toFixed(0) +
             ' NM mas disponível ' + totalSegDist.toFixed(0) + ' NM';
         }
 
-        // Assign intermediate altitudes proportionally
+        // Assign intermediate altitudes based on which phase region they fall in
         if (si > lastAnchorIdx + 1) {
           var distFromSeg = 0;
           for (var ij = lastAnchorIdx + 1; ij < si; ij++) {
             distFromSeg += (cps[ij].dist ?? 0);
-            profile[ij] = (climbDistNM2 > 0 && distFromSeg < climbDistNM2)
-              ? Math.round(segFromAlt + (distFromSeg / climbDistNM2) * (segToAlt - segFromAlt))
-              : segToAlt;
+            if (distFromSeg <= cruiseFirst + 0.001) {
+              profile[ij] = segFromAlt;
+            } else if (distFromSeg >= phaseEnd - 0.001) {
+              profile[ij] = segToAlt;
+            } else {
+              var phaseFrac = safePhase > 0 ? (distFromSeg - cruiseFirst) / safePhase : 0;
+              profile[ij] = Math.round(segFromAlt + phaseFrac * (segToAlt - segFromAlt));
+            }
           }
         }
       } else {
