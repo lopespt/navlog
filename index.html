@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0410";
+const APP_VERSION = "20260429.0445";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -3945,7 +3945,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   const cruiseAlt = flight.cruiseAlt ?? 7000;
   const initial = isNew
-    ? { name: "", alt: null, useCruiseAlt: true, tc: null, dist: null, windDir: null, windVel: null,
+    ? { name: "", alt: null,
+        // When inserting between existing WPs, default to "inherit" so the
+        // new WP follows the climb/descent gradient instead of becoming a
+        // cruise-alt anchor that ends the climb at this fix. When appending
+        // at the end of the route, default to cruise alt as before.
+        useCruiseAlt: insertAfterIdx == null,
+        tc: null, dist: null, windDir: null, windVel: null,
         lat: initLat ?? null, lon: initLon ?? null, notes: "" }
     : { ...flight.checkpoints[editingIdx] };
 
