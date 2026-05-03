@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0810";
+const APP_VERSION = "20260429.0830";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -4258,6 +4258,25 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
     }
     return null;
   })();
+  // Previous *anchor* altitude (walks back skipping inherit WPs) — used to
+  // decide whether the QUANDO NIVELAR section is meaningful for this WP. With
+  // a chain of inherit WPs in the trailing buffer, the immediate prevAlt may
+  // already equal currentAlt (resolver placed them at dest alt) — but the
+  // segment as a whole still climbs/descends, so the arrivalMode picker
+  // should remain visible for review/edit.
+  const prevAnchorAlt = (function() {
+    const prevIdx = isNew
+      ? (insertAfterIdx != null ? insertAfterIdx : flight.checkpoints.length - 1)
+      : editingIdx - 1;
+    for (let k = prevIdx; k >= 0; k--) {
+      const wp = flight.checkpoints[k];
+      if (!wp) continue;
+      if (wp.useCruiseAlt) return cruiseAlt;
+      if (wp.alt != null) return wp.alt;
+      if (wp.isOrigin) return Number(flight.freqs?.origin?.elev) || 0;
+    }
+    return null;
+  })();
   const variation = getDecl(cp.lat ?? prevCp?.lat, cp.lon ?? prevCp?.lon, cp.alt ?? cruiseAlt) ?? (flight.variation ?? 0);
   const mod360 = function(x) { return ((x % 360) + 360) % 360; };
 
@@ -4672,12 +4691,21 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
             })()}
           </div>
 
-          {/* QUANDO NIVELAR — só quando há variação de altitude */}
+          {/* QUANDO NIVELAR — quando há variação de altitude no segmento, OU
+              quando o usuário já configurou um modo (mesmo que a perna imediata
+              esteja level por causa do buffer pós-descida). */}
           {!isOrigin && (function() {
             var currentAlt = cp.useCruiseAlt ? cruiseAlt : cp.alt;
-            var isClimbing   = prevAlt != null && currentAlt != null && currentAlt - prevAlt > 50;
-            var isDescending = prevAlt != null && currentAlt != null && prevAlt - currentAlt > 50;
-            if (!isClimbing && !isDescending) return null;
+            // Use prevAnchorAlt (segment-wide) so the picker stays visible when
+            // the immediate previous WP is in the trailing buffer at the same
+            // alt as this destination — the arrivalMode still applies to the
+            // segment as a whole.
+            var refAlt = prevAnchorAlt;
+            var isClimbing   = refAlt != null && currentAlt != null && currentAlt - refAlt > 50;
+            var isDescending = refAlt != null && currentAlt != null && refAlt - currentAlt > 50;
+            // Keep visible if the user has already configured arrivalMode, so
+            // they can review/edit it even after surrounding WPs change.
+            if (!isClimbing && !isDescending && !cp.arrivalMode) return null;
             var contextDefault = isDescending ? "at_fix" : "asap";
             var arrivalMode  = cp.arrivalMode ?? null;
             var arrivalValue = cp.arrivalValue ?? 5;
