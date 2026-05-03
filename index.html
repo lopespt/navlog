@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0700";
+const APP_VERSION = "20260429.0810";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -487,13 +487,21 @@ function computeLegPhases(prevAlt, thisAlt, dist, cp, ac, isaDevC, wDir, wVel, v
 // Waypoints with cp.alt == null && !cp.useCruiseAlt inherit altitude from the
 // previous anchor; multi-leg climbs/descents distribute intermediate altitudes
 // proportionally so computeLegPhases sees a smooth profile.
-// Returns { profile: number[], altWarnings: (string|null)[] }
+// Returns { profile: number[], altWarnings: (string|null)[], legPlans: { [legIdx]: portions[] } }
+//
+// legPlans contains pre-computed portions for each leg in a multi-anchor
+// segment containing inherit WPs. The segment is treated as ONE continuous
+// climb/descent profile (cruise → phase → buffer), and each leg receives only
+// the slice of phases it actually overlaps. This produces a single TOD/BOD per
+// profile instead of one per leg, no matter how many inherit WPs are crossed.
 function resolveAltitudeProfile(cps, ac, flight) {
   var n = cps.length;
   var profile = new Array(n).fill(0);
   var altWarnings = new Array(n).fill(null);
+  var legPlans = {};
   var cruiseAlt = flight.cruiseAlt ?? 7000;
   var variation = flight.variation ?? 0;
+  var isaDev = flight.isaDevC || 0;
 
   // Anchor altitude: explicit value or useCruiseAlt; null means "inherit"
   var anchorAlt = new Array(n).fill(null);
@@ -571,12 +579,29 @@ function resolveAltitudeProfile(cps, ac, flight) {
         var phaseEnd = cruiseFirst + safePhase;
 
         if (phaseDist > totalSegDist) {
-          altWarnings[si] = (isClimb ? 'Subida' : 'Descida') + ' para ' + segToAlt +
-            ' ft impossível: precisa ' + phaseDist.toFixed(0) +
-            ' NM mas disponível ' + totalSegDist.toFixed(0) + ' NM';
+          var verb = isClimb ? 'Subir' : 'Descer';
+          var phaseLabel0 = isClimb ? 'subida' : 'descida';
+          var deficitNM = (phaseDist - totalSegDist).toFixed(1);
+          var bufferNote = (mode === 'before_min' || mode === 'before_nm')
+            ? (' + buffer ' + (cpTo.arrivalValue ?? 5) + (mode === 'before_min' ? ' min' : ' NM'))
+            : '';
+          altWarnings[si] = verb + ' para ' + segToAlt + ' ft em ' + totalSegDist.toFixed(1) +
+            ' NM impossível: ' + phaseLabel0 + ' precisa ' + phaseDist.toFixed(1) + ' NM' + bufferNote +
+            ' (faltam ' + deficitNM + ' NM). Marque WPs intermédios como "Herdar" para distribuir o perfil.';
+        } else if (mode !== 'asap' && mode !== 'at_fix' && safeBefore < wantBefore - 0.1) {
+          // Phase fits but the requested buffer was clamped — surface that too.
+          altWarnings[si] = 'Buffer reduzido para ' + safeBefore.toFixed(1) + ' NM (pediu ' +
+            wantBefore.toFixed(1) + ' NM): perna não comporta ' + (isClimb ? 'subida' : 'descida') +
+            ' + nivelamento completo.';
         }
 
-        // Assign intermediate altitudes based on which phase region they fall in
+        // Assign intermediate altitudes AND build per-leg portions by slicing
+        // the segment regions:
+        //   A: [0, cruiseFirst]               — CRUZEIRO at segFromAlt
+        //   B: [cruiseFirst, phaseEnd]        — phase (CLIMB or DESCEND)
+        //   C: [phaseEnd, totalSegDist]       — CRUZEIRO at segToAlt (buffer)
+        // Each leg gets portions = its overlap with each region. Continuous
+        // descent/climb across inherit WPs ⇒ middle legs are single-phase.
         if (si > lastAnchorIdx + 1) {
           var distFromSeg = 0;
           for (var ij = lastAnchorIdx + 1; ij < si; ij++) {
@@ -589,6 +614,53 @@ function resolveAltitudeProfile(cps, ac, flight) {
               var phaseFrac = safePhase > 0 ? (distFromSeg - cruiseFirst) / safePhase : 0;
               profile[ij] = Math.round(segFromAlt + phaseFrac * (segToAlt - segFromAlt));
             }
+          }
+
+          // Pre-compute speeds/fuels for each region (uses the segment's wind
+          // and the destination anchor's overrides — a known simplification but
+          // consistent with the resolver's altDiff/phaseDist math above).
+          var tasCruiseHigh = correctTAS(ac.tasCruise, segFromAlt, isaDev);
+          var tasCruiseLowR = correctTAS(ac.tasCruise, segToAlt, isaDev);
+          var phaseTas = correctTAS(acTas2, (segFromAlt + segToAlt) / 2, isaDev);
+          var gsCruiseHigh = Math.max(1, calcLeg(cpTo.tc ?? 0, 1, tasCruiseHigh, wDir2, wVel2, variation, 0).gs);
+          var gsCruiseLowR = Math.max(1, calcLeg(cpTo.tc ?? 0, 1, tasCruiseLowR, wDir2, wVel2, variation, 0).gs);
+          var gsPhaseR = Math.max(1, calcLeg(cpTo.tc ?? 0, 1, phaseTas, wDir2, wVel2, variation, 0).gs);
+          var gphCruiseR = ac.gphCruise || 12;
+          var gphPhaseR = isClimb ? (ac.gphClimb || gphCruiseR) : (ac.gphDescent || gphCruiseR);
+          var phaseLabel = isClimb ? "SUBIDA" : "DESCIDA";
+
+          var runDist = 0;
+          for (var lk = lastAnchorIdx + 1; lk <= si; lk++) {
+            var legD = cps[lk].dist || 0;
+            var lStart = runDist;
+            var lEnd = runDist + legD;
+            runDist = lEnd;
+            var lp = [];
+            // Region A overlap (cruise high)
+            var aD = Math.max(0, Math.min(lEnd, cruiseFirst) - lStart);
+            if (aD > 0.001) lp.push({
+              phase: "CRUZEIRO", dist: aD,
+              tas: tasCruiseHigh, gph: gphCruiseR,
+              timeMin: aD / gsCruiseHigh * 60,
+            });
+            // Region B overlap (phase)
+            var bD = Math.max(0, Math.min(lEnd, phaseEnd) - Math.max(lStart, cruiseFirst));
+            if (bD > 0.001) lp.push({
+              phase: phaseLabel, dist: bD,
+              tas: phaseTas, gph: gphPhaseR,
+              timeMin: bD / gsPhaseR * 60,
+            });
+            // Region C overlap (buffer cruise low)
+            var cD = Math.max(0, lEnd - Math.max(lStart, phaseEnd));
+            if (cD > 0.001) lp.push({
+              phase: "CRUZEIRO", dist: cD,
+              tas: tasCruiseLowR, gph: gphCruiseR,
+              timeMin: cD / gsCruiseLowR * 60,
+            });
+            if (lp.length === 0) lp.push({
+              phase: "CRUZEIRO", dist: 0, tas: tasCruiseLowR, gph: gphCruiseR, timeMin: 0,
+            });
+            legPlans[lk] = lp;
           }
         }
       } else {
@@ -607,7 +679,7 @@ function resolveAltitudeProfile(cps, ac, flight) {
   // Trailing waypoints after the last anchor inherit its altitude
   for (var ri = lastAnchorIdx + 1; ri < n; ri++) profile[ri] = lastAnchorAlt;
 
-  return { profile: profile, altWarnings: altWarnings };
+  return { profile: profile, altWarnings: altWarnings, legPlans: legPlans };
 }
 
 // Derive TOC/TOD/BOC/BOD annotation string from a computed checkpoint's portions
@@ -1138,6 +1210,7 @@ function NavlogApp() {
     var _altRes = resolveAltitudeProfile(resolvedCps, ac, flight);
     var altProfile     = _altRes.profile;
     var altProfileWarn = _altRes.altWarnings;
+    var altLegPlans    = _altRes.legPlans || {};
 
     const eobtMin = parseHHMM(flight.eobt) ?? 0;
     const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
@@ -1183,11 +1256,24 @@ function NavlogApp() {
         wVel = flight.windVel;
       }
 
-      // Compute phase split — wind resolved first so GS/timeMin per phase is correct
-      const { portions, avgTas } = computeLegPhases(
-        prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0,
-        wDir, wVel, flight.variation
-      );
+      // Phase split: prefer the resolver's segment-aware plan (continuous
+      // climb/descent across inherit WPs ⇒ middle legs are single-phase, only
+      // the boundary legs carry TOC/TOD virtuals). Fall back to per-leg
+      // computeLegPhases when the resolver didn't pre-plan this leg.
+      let portions, avgTas;
+      if (altLegPlans[i]) {
+        portions = altLegPlans[i];
+        const _tt = portions.reduce((s, p) => s + (p.timeMin || 0), 0);
+        const _td = portions.reduce((s, p) => s + (p.dist || 0), 0);
+        avgTas = _tt > 0 ? (_td / _tt) * 60 : (ac.tasCruise || 100);
+      } else {
+        const _r = computeLegPhases(
+          prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0,
+          wDir, wVel, flight.variation
+        );
+        portions = _r.portions;
+        avgTas = _r.avgTas;
+      }
 
       // Per-leg magnetic variation from WMM (if library loaded and coords known)
       // Falls back to flight.variation when unavailable
