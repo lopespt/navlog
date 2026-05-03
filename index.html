@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0510";
+const APP_VERSION = "20260429.0530";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1203,6 +1203,23 @@ function NavlogApp() {
         notes: cp.notes || "",
       };
     });
+
+    // Detect cross-leg phase transitions at user WPs: when the climb (or
+    // descent) completes exactly at a fix instead of mid-leg, no virtual
+    // marker is emitted by liveRoute (the leg is single-phase). Tag the WP
+    // itself so the views can render a TOC/TOD/BOC/BOD badge inline.
+    for (var _ph = 0; _ph < _res.length; _ph++) {
+      var _here = _res[_ph];
+      var _next = _res[_ph + 1];
+      if (!_here || _here.isOrigin || !_here.portions || _here.portions.length === 0) continue;
+      if (!_next || !_next.portions || _next.portions.length === 0) continue;
+      var _lastPhase = _here.portions[_here.portions.length - 1].phase;
+      var _nextFirst = _next.portions[0].phase;
+      if (_lastPhase === "SUBIDA" && _nextFirst !== "SUBIDA") _here.phaseHint = "TOC";
+      else if (_lastPhase === "DESCIDA" && _nextFirst !== "DESCIDA") _here.phaseHint = "BOD";
+      else if (_lastPhase !== "SUBIDA" && _nextFirst === "SUBIDA") _here.phaseHint = "BOC";
+      else if (_lastPhase !== "DESCIDA" && _nextFirst === "DESCIDA") _here.phaseHint = "TOD";
+    }
 
     // Project lat/lon for waypoints without explicit coords using TC + dist
     // Forward pass: project from each known coord to subsequent unknown waypoints
@@ -3405,6 +3422,14 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                     <div className="text-left min-w-0 flex-1">
                       <div className="font-bold truncate flex items-center gap-1">
                         {cp.name || "—"}
+                        {computed[i]?.phaseHint && (
+                          <span className={`text-[10px] ${theme.cyan} border border-current rounded px-1`}>
+                            {computed[i].phaseHint === "TOC" ? "↗ TOC"
+                              : computed[i].phaseHint === "TOD" ? "↘ TOD"
+                              : computed[i].phaseHint === "BOC" ? "↗ BOC"
+                              : "↘ BOD"}
+                          </span>
+                        )}
                         {cp.windMode === "none" && <span className={`text-[10px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
                         {cp.windMode === "custom" && <span className={`text-[10px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
                       </div>
