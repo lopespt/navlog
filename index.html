@@ -104,7 +104,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260503.2200";
+const APP_VERSION = "20260503.2230";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -5244,6 +5244,8 @@ function StepOverride({ cp, setCp, theme, onNext }) {
     { key: "gphClimbOvr",   label: "GPH Subida",   unit: "gal/h", phase: "↗" },
     { key: "gphCruiseOvr",  label: "GPH Cruzeiro", unit: "gal/h", phase: "→" },
     { key: "gphDescentOvr", label: "GPH Descida",  unit: "gal/h", phase: "↘" },
+    { key: "rocClimbOvr",   label: "ROC Subida",   unit: "fpm",   phase: "↗" },
+    { key: "rodDescentOvr", label: "ROD Descida",  unit: "fpm",   phase: "↘" },
   ];
 
   const [vals, setVals] = useState(() => {
@@ -5309,9 +5311,25 @@ function StepOverride({ cp, setCp, theme, onNext }) {
         </div>
         <div className={`text-[10px] uppercase font-bold ${theme.fgMuted}`}>GPH (gal/h)</div>
         <div className="grid grid-cols-3 gap-2">
-          {fields.slice(3).map(({ key, label, unit, phase }) => (
+          {fields.slice(3, 6).map(({ key, label, unit, phase }) => (
             <div key={key}>
               <label className={labelClass}>{phase} {label.split(" ")[1]}</label>
+              <input
+                className={fieldClass}
+                type="number"
+                placeholder="padrão"
+                value={vals[key]}
+                onChange={(e) => setVals((v) => ({ ...v, [key]: e.target.value }))}
+                onBlur={apply}
+              />
+            </div>
+          ))}
+        </div>
+        <div className={`text-[10px] uppercase font-bold ${theme.fgMuted}`}>Velocidade vertical (fpm)</div>
+        <div className="grid grid-cols-2 gap-2">
+          {fields.slice(6).map(({ key, label, unit, phase }) => (
+            <div key={key}>
+              <label className={labelClass}>{phase} {label.split(" ")[0]}</label>
               <input
                 className={fieldClass}
                 type="number"
@@ -5574,8 +5592,8 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
     windMode === "custom" ? `${cp.windDir ?? "—"}° / ${cp.windVel ?? "—"} kt` :
                             "Padrão da rota";
 
-  const overrideKeys = ["tasClimbOvr","tasCruiseOvr","tasDescentOvr","gphClimbOvr","gphCruiseOvr","gphDescentOvr"];
-  const overrideLabels = { tasClimbOvr: "TAS↗", tasCruiseOvr: "TAS→", tasDescentOvr: "TAS↘", gphClimbOvr: "GPH↗", gphCruiseOvr: "GPH→", gphDescentOvr: "GPH↘" };
+  const overrideKeys = ["tasClimbOvr","tasCruiseOvr","tasDescentOvr","gphClimbOvr","gphCruiseOvr","gphDescentOvr","rocClimbOvr","rodDescentOvr"];
+  const overrideLabels = { tasClimbOvr: "TAS↗", tasCruiseOvr: "TAS→", tasDescentOvr: "TAS↘", gphClimbOvr: "GPH↗", gphCruiseOvr: "GPH→", gphDescentOvr: "GPH↘", rocClimbOvr: "ROC↗", rodDescentOvr: "ROD↘" };
   const overrideActive = overrideKeys.filter((k) => cp[k] != null);
   const overrideValue = overrideActive.length > 0
     ? overrideActive.map((k) => `${overrideLabels[k]} ${cp[k]}`).join(" · ")

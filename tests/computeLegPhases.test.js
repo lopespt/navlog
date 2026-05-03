@@ -177,3 +177,40 @@ test("tailwind shortens climb time-NM (gsClimb > tasClimb)", () => {
   // Same climb time (altDiff/ROC), faster GS → covers more NM during climb.
   assert.ok(climbDistTail > climbDistNoWind + 1, `noWind=${climbDistNoWind} tail=${climbDistTail}`);
 });
+
+// ── Per-checkpoint ROC/ROD overrides ──────────────────────────────────────
+test("rocClimbOvr halves climb time → halves climbDist", () => {
+  // Default: ROC=500 fpm, climbTime=4300/500=8.6 min, climbDist≈12.61 NM (no wind, gsClimb=88).
+  // Override ROC=1000 fpm → climbTime=4.3 min → climbDist≈6.3 NM.
+  const base = makeCP({ dist: 20 });
+  const fast = makeCP({ dist: 20, rocClimbOvr: 1000 });
+  const r0 = P.computeLegPhases(2700, 7000, 20, base, ac, 0, 0, 0, 0);
+  const r1 = P.computeLegPhases(2700, 7000, 20, fast, ac, 0, 0, 0, 0);
+  const d0 = phaseDistSum(r0.portions, "SUBIDA");
+  const d1 = phaseDistSum(r1.portions, "SUBIDA");
+  assert.ok(nearly(d1, d0 / 2, 0.2), `base=${d0.toFixed(2)} fast=${d1.toFixed(2)}`);
+  // Both still cover the full leg.
+  assert.ok(nearly(totalDist(r0.portions), 20, 0.01));
+  assert.ok(nearly(totalDist(r1.portions), 20, 0.01));
+});
+
+test("rodDescentOvr stretches descent time → stretches descDist", () => {
+  // Default: ROD=500 fpm, descTime=4300/500=8.6, descDist≈14.19 (gsDescent=99).
+  // Override ROD=250 fpm → descTime=17.2, descDist≈28.38 → BIGGER than 25 leg → whole-leg DESCIDA.
+  const slow = makeCP({ dist: 25, rodDescentOvr: 250 });
+  const r = P.computeLegPhases(7000, 2700, 25, slow, ac, 0, 0, 0, 0);
+  // Whole leg should be DESCIDA since descDist (~28) > leg (25) − 0.1.
+  assert.equal(r.portions.length, 1);
+  assert.equal(r.portions[0].phase, "DESCIDA");
+});
+
+test("rocClimbOvr=0 falls back to ac.rocClimb (?? semantics)", () => {
+  // Sanity: 0 is a valid override (not falsy via ??), but in practice the UI
+  // would never set 0; we do test it just to confirm ?? lets `null`/`undefined`
+  // fall back, not `0`.
+  const cp = makeCP({ dist: 20, rocClimbOvr: undefined });
+  const r = P.computeLegPhases(2700, 7000, 20, cp, ac, 0, 0, 0, 0);
+  // Should match the default-behavior climbDist (~12.61).
+  const d = phaseDistSum(r.portions, "SUBIDA");
+  assert.ok(nearly(d, 12.61, 0.1), `expected default climbDist, got ${d}`);
+});

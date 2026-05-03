@@ -220,3 +220,52 @@ test("trailing inherit WPs after last anchor get the last anchor's alt", () => {
   const r = P.resolveAltitudeProfile(cps, ac, flight);
   assert.equal(r.profile[2], 4000);
 });
+
+// ── Per-checkpoint ROC/ROD overrides on the destination anchor ────────────
+test("destination anchor's rodDescentOvr stretches resolver phaseDist", () => {
+  // Two-leg descent: 7000 → inherit → 2000 (5500 ft drop) over 30 NM.
+  // Default ROD=500: phaseDist ≈ gsDescent·11/60 ≈ 99·11/60 ≈ 18.15 → fits in 30 NM.
+  // Override ROD=250: phaseDist doubles → ~36.3 NM > 30 → impossible, warning.
+  const flight = makeFlight({ cruiseAlt: 7000 });
+  const baseCps = () => [
+    makeOrigin({ useCruiseAlt: true }),
+    makeCP({ name: "MID", alt: null, useCruiseAlt: false, dist: 15 }),
+    makeCP({ name: "DEST", alt: 1500, useCruiseAlt: false, dist: 15 }),
+  ];
+
+  const baseline = P.resolveAltitudeProfile(baseCps(), ac, flight);
+  assert.equal(baseline.altWarnings[2], null, "default ROD should fit");
+
+  const cpsSlow = baseCps();
+  cpsSlow[2] = { ...cpsSlow[2], rodDescentOvr: 250 };
+  const slow = P.resolveAltitudeProfile(cpsSlow, ac, flight);
+  // Slower descent doesn't fit in the same distance → "impossível" warning.
+  assert.ok(slow.altWarnings[2], "slow ROD should trigger a warning");
+  assert.match(slow.altWarnings[2], /impossível/);
+});
+
+test("destination's rocClimbOvr shrinks the climb phase across inherit chain", () => {
+  // Two-leg climb 2700 → inherit → 7000 over 25 NM (already comfortable).
+  // Default ROC=500: climbDist ≈ 88·8.6/60 ≈ 12.61 NM. With ROC=1000 → ~6.3 NM.
+  // The inherit WP (at 12 NM into the segment) was previously well into the
+  // climb (frac ≈ 12/12.61 ≈ 0.95) → high alt. With faster ROC the climb ends
+  // by ~6.3 NM, so the inherit WP (still at 12 NM) is past TOC → segToAlt.
+  const flight = makeFlight({ cruiseAlt: 7000 });
+  const cpsBase = [
+    makeOrigin({ alt: 2700 }),
+    makeCP({ name: "MID", alt: null, useCruiseAlt: false, dist: 12 }),
+    makeCP({ name: "TOC", useCruiseAlt: true, dist: 13 }),
+  ];
+  const base = P.resolveAltitudeProfile(cpsBase, ac, flight);
+
+  const cpsFast = cpsBase.slice();
+  cpsFast[2] = { ...cpsFast[2], rocClimbOvr: 1000 };
+  const fast = P.resolveAltitudeProfile(cpsFast, ac, flight);
+
+  // Faster climb means the inherit WP is more likely to be at or near 7000.
+  assert.ok(
+    fast.profile[1] >= base.profile[1],
+    `faster ROC should reach cruise sooner: base=${base.profile[1]}, fast=${fast.profile[1]}`
+  );
+  assert.equal(fast.profile[2], 7000);
+});
