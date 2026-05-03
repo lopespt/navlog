@@ -972,6 +972,10 @@ function NavlogApp() {
     let cumMin = baseMin;
     for (let i = baseIdx + 1; i < computed.length; i++) {
       const cp = computed[i];
+      // Bypassed WPs (skipped via direct-to) don't consume time and don't
+      // belong in the live sequence — the deviation override on the target
+      // leg already accounts for the actual flown distance.
+      if (cp.bypassed) { etas[i] = null; continue; }
       const legStartMin = cumMin;
       let legETE = cp.etePlanned;
 
@@ -1040,7 +1044,9 @@ function NavlogApp() {
       // Actual leg-start time: prefer the ATA of the previous fix when it has been crossed.
       const prevAtaStr = i > 0 ? computed[i - 1].ata : null;
       const legStartActual = prevAtaStr ? parseHHMM(prevAtaStr) : prevEta;
-      if (cp.portions?.length > 1) {
+      // Bypassed legs are not flown — emit the WP itself (so it still renders
+      // greyed-out in the route list) but skip the TOC/TOD/BOD interpolation.
+      if (cp.portions?.length > 1 && !cp.bypassed) {
         let accDist = 0, accETE = 0;
         let prevVirtETE = 0, prevVirtDist = 0;
         // Total leg time from portions (sum of timeMin), used to distribute etePlanned by phase
@@ -1117,6 +1123,9 @@ function NavlogApp() {
     for (let i = 0; i < liveRoute.length; i++) {
       const item = liveRoute[i];
       if (item.isOrigin || item.ata != null) continue;
+      // Direct-to bypass: a WP marked as bypassed is no longer in the active
+      // sequence — the live "next" must skip over to the deviation target.
+      if (item.bypassed) continue;
       if (item.isVirtual) {
         // Pular se o próximo waypoint de usuário já foi cruzado
         const nextUser = liveRoute.slice(i + 1).find(x => !x.isVirtual && !x.isOrigin);
@@ -1213,11 +1222,55 @@ function NavlogApp() {
   }
 
   function setDeviation(dev) {
-    setFlight(function(f) { return Object.assign({}, f, { activeDeviation: dev }); });
+    setFlight(function(f) {
+      var cps = (dev && dev.targetIdx != null)
+        ? applyDirectTo(f.checkpoints, dev.targetIdx)
+        : f.checkpoints;
+      return Object.assign({}, f, { checkpoints: cps, activeDeviation: dev });
+    });
   }
+  // One-tap direct-to from the FlightTab route list. Uses the live estimated
+  // position as the deviation anchor so the pilot doesn't have to drop a pin.
+  function directToWp(targetIdx) {
+    setFlight(function(f) {
+      var target = f.checkpoints[targetIdx];
+      if (!target || target.lat == null || target.lon == null) return f;
+      // Compute estimated position on the same selector the map / big-mode
+      // already use, so all three views agree on "where we are now".
+      var est = estimatedPosition({
+        liveRoute, liveETAs, flight: f,
+        nowMin: nowHHMM(),
+        eobtMin: parseHHMM(f.eobt) ?? 0,
+      });
+      if (!est) {
+        // Fall back to opening the full deviation panel — pilot can drop a pin.
+        return Object.assign({}, f, {});
+      }
+      if (typeof window !== "undefined" && typeof window.confirm === "function") {
+        var ok = window.confirm("Direct to " + (target.name || ("WP " + targetIdx)) + " a partir da posição estimada?");
+        if (!ok) return f;
+      }
+      var dev = {
+        fromLat: Math.round(est.lat * 1e6) / 1e6,
+        fromLon: Math.round(est.lon * 1e6) / 1e6,
+        targetIdx: Number(targetIdx),
+        currentAlt: target.alt != null ? Number(target.alt) : (f.cruiseAlt ?? 7000),
+        currentTas: ac && ac.tasCruise ? ac.tasCruise : 100,
+        startedAt: formatHHMMSS(nowHHMM()),
+      };
+      return Object.assign({}, f, {
+        checkpoints: applyDirectTo(f.checkpoints, targetIdx),
+        activeDeviation: dev,
+      });
+    });
+  }
+  // Manual "Voltar à rota": pilot is reinstating the original plan, so the
+  // bypassed WPs come back into the live sequence. (The auto-clear in setAta
+  // when target ATA is recorded keeps the bypassed flags — at that point those
+  // WPs are genuinely behind the aircraft.)
   function clearDeviation() {
     setFlight(function(f) {
-      var c = Object.assign({}, f);
+      var c = Object.assign({}, f, { checkpoints: clearDirectTo(f.checkpoints) });
       delete c.activeDeviation;
       return c;
     });
@@ -1694,6 +1747,7 @@ function NavlogApp() {
             onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
             onOpenDeviation={() => setDeviationOpen(true)}
             onClearDeviation={clearDeviation}
+            onDirectTo={directToWp}
             prefs={prefs}
           />
         )}
@@ -2662,7 +2716,9 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
 
   const targetOptions = (flight.checkpoints || [])
     .map((cp, i) => ({ cp, i }))
-    .filter(x => x.cp && !x.cp.isOrigin && x.cp.lat != null && x.cp.lon != null && (x.cp.ata == null || (dev && dev.targetIdx === x.i)));
+    .filter(x => x.cp && !x.cp.isOrigin && x.cp.lat != null && x.cp.lon != null
+      && (x.cp.ata == null || (dev && dev.targetIdx === x.i))
+      && (!x.cp.bypassed || (dev && dev.targetIdx === x.i)));
 
   // Init map
   useEffect(() => {
@@ -5733,7 +5789,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation,
+    onOpenDeviation, onClearDeviation, onDirectTo,
     liveFuel, ac, prefs }) {
 
   const dev = flight.activeDeviation || null;
@@ -6275,6 +6331,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
             onEditAta={() => item.isVirtual ? onEditVirtualAta(item.autoKey) : onEditAta(item.userIdx)}
             onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
             onUnmarkVirtual={item.isVirtual ? () => unmarkVirtual(item.autoKey) : null}
+            onDirectTo={onDirectTo}
           />
           );
         })}
@@ -6327,8 +6384,10 @@ function ETACell({ label, value, delta, muted, theme }) {
   );
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, theme, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, onDirectTo, theme, viewMode }) {
+  const bypassed = cp.bypassed === true;
   const ringClass =
+    bypassed             ? "border-zinc-700/40 bg-zinc-900/30 opacity-50" :
     isVirtual && crossed ? "border-cyan-500/30 bg-cyan-500/5" :
     isVirtual && isNext  ? "border-cyan-500/60 bg-cyan-500/5" :
     isVirtual            ? "border-cyan-500/20 bg-transparent" :
@@ -6383,8 +6442,9 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
         </div>
         {/* Nome + badges */}
         <div className="flex-1 min-w-0">
-          <div className={`font-bold truncate ${crossed ? (isVirtual ? theme.cyan : theme.success) : isNext ? (isVirtual ? theme.cyan : theme.accent) : isVirtual ? theme.cyan : theme.fg}`}>
+          <div className={`font-bold truncate ${bypassed ? `${theme.fgFaint} line-through` : crossed ? (isVirtual ? theme.cyan : theme.success) : isNext ? (isVirtual ? theme.cyan : theme.accent) : isVirtual ? theme.cyan : theme.fg}`}>
             {cp.name}
+            {bypassed && <span className={`ml-1 text-[10px] ${theme.cyan} border border-current rounded px-1 no-underline`}>DESVIADO</span>}
             {!isVirtual && cp.windMode === "none"   && <span className={`ml-1 text-[10px] ${theme.cyan} border border-current rounded px-1`}>W=0</span>}
             {!isVirtual && cp.windMode === "custom" && <span className={`ml-1 text-[10px] ${theme.cyan} border border-current rounded px-1`}>W↗</span>}
             {!isVirtual && cp.warnings?.length > 0  && <span className="ml-1 text-[10px] text-amber-400 border border-current rounded px-1">⚠</span>}
@@ -6430,6 +6490,17 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
               </div>
             ) : null}
           </div>
+          {/* Atalho direct-to (só WPs upcoming não-cruzados, não-virtuais, não-bypassed) */}
+          {!isOrigin && !isAuto && !isVirtual && !crossed && !bypassed && onDirectTo && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDirectTo(cp.userIdx); }}
+              className={`mt-0.5 p-1 rounded ${theme.cyan} opacity-70 hover:opacity-100 active:scale-90`}
+              aria-label={`Direct to ${cp.name}`}
+              title={`Direct to ${cp.name}`}
+            >
+              <Navigation className="w-3.5 h-3.5" />
+            </button>
+          )}
           {/* Botão nota (só waypoints manuais) ou botão desfazer virtual */}
           {isVirtual && crossed && onUnmarkVirtual ? (
             <button

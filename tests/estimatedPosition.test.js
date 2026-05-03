@@ -142,6 +142,25 @@ test("estimatedPosition: all WPs crossed → parked at last", () => {
   assert.ok(nearly(r.lon, 2, 1e-6));
 });
 
+test("estimatedPosition: bypassed WP is skipped from prev/next scan", () => {
+  // Route: ORIG → WP1 (bypassed) → WP2.  After ATD, with no ATAs, prevWp
+  // should fall back to origin and nextWp should be WP2 (skipping bypassed).
+  const route = makeRoute();
+  route[1].bypassed = true;
+  const r = P.estimatedPosition({
+    liveRoute: route,
+    liveETAs: [null, null, 60],
+    flight: {
+      atd: "00:00", eobt: "00:00",
+      activeDeviation: { fromLat: 0, fromLon: 0, targetIdx: 2, startedAt: "00:00" },
+    },
+    nowMin: 30, // half of 60-min direct leg from origin to WP2
+  });
+  assert.ok(r);
+  assert.equal(r.devActive, true);
+  assert.equal(r.segment.to.name, "WP2");
+});
+
 test("estimatedPosition: empty / null inputs → null", () => {
   assert.equal(P.estimatedPosition(null), null);
   assert.equal(P.estimatedPosition({ liveRoute: [], nowMin: 0 }), null);
