@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0830";
+const APP_VERSION = "20260429.0850";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -545,9 +545,15 @@ function resolveAltitudeProfile(cps, ac, flight) {
         var wVel2 = cpTo.windMode === "none"   ? 0 :
                     cpTo.windMode === "custom"  ? (cpTo.windVel ?? 0) :
                     (flight.windVel ?? 0);
+        // Altitude-correct the climb/descent TAS using the segment's average
+        // altitude — matches what computeLegPhases will use per leg, so the
+        // resolver's phaseDist stays consistent with the sum of per-leg
+        // descDist/climbDist (otherwise the trailing buffer ends up shorter
+        // than the resolver allocated, causing spurious "perna curta" warnings).
+        var avgSegAlt = (segFromAlt + segToAlt) / 2;
         var acTas2 = isClimb
-          ? (cpTo.tasClimbOvr   ?? ac.vy        ?? 100)
-          : (cpTo.tasDescentOvr ?? ac.vDescent   ?? 90);
+          ? (cpTo.tasClimbOvr   ?? correctTAS(ac.vy ?? 100, avgSegAlt, flight.isaDevC || 0))
+          : (cpTo.tasDescentOvr ?? correctTAS(ac.vDescent ?? 90, avgSegAlt, flight.isaDevC || 0));
         var acRoc2 = isClimb ? (ac.rocClimb ?? 500) : (ac.rodDescent ?? 500);
         var legRes2 = calcLeg(cpTo.tc ?? 0, 1, acTas2, wDir2, wVel2, variation, 0);
         var gsPhase2 = Math.max(1, legRes2.gs);
@@ -4818,13 +4824,24 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   }
                   else if (effMode === "at_fix") wantBefore = 0;
                   else wantBefore = trailingCruise; // asap = whatever cruise comes after the phase
-                  var feasible = trailingCruise >= wantBefore - 0.1;
+                  // Severity:
+                  //   • Severe (red): the climb/descent itself doesn't fit in
+                  //     this leg — phase fills the whole leg, no buffer at all.
+                  //   • Info (faint): phase fits with positive trailing cruise,
+                  //     but the buffer is shorter than requested. Profile is
+                  //     executable, just tighter than ideal.
+                  //   • OK: trailingCruise meets the request.
+                  var phaseFitsWithBuffer = trailingCruise >= wantBefore - 0.1;
+                  var phaseFits = phaseDist <= distLeg - 0.1;
                   var fmt = function(n) { return n < 10 ? n.toFixed(1) : Math.round(n).toString(); };
                   var phaseLbl = isClimbing ? "subida" : "descida";
                   return (
-                    <div className={`mt-2 text-[10px] leading-snug ${feasible || effMode === "asap" || effMode === "at_fix" ? theme.fgFaint : "text-red-400"}`}>
-                      {!feasible && (effMode === "before_nm" || effMode === "before_min") && (
-                        <div className="font-bold mb-0.5">⚠ Perna curta: buffer reduzido para {fmt(trailingCruise)} NM (pediu {fmt(wantBefore)} NM)</div>
+                    <div className={`mt-2 text-[10px] leading-snug ${phaseFitsWithBuffer || phaseFits ? theme.fgFaint : "text-red-400"}`}>
+                      {!phaseFits && (
+                        <div className="font-bold mb-0.5">⚠ Perna curta: {phaseLbl} não cabe ({fmt(phaseDist)} NM em perna de {fmt(distLeg)} NM)</div>
+                      )}
+                      {phaseFits && !phaseFitsWithBuffer && (effMode === "before_nm" || effMode === "before_min") && (
+                        <div className="mb-0.5">Buffer reduzido para {fmt(trailingCruise)} NM (pediu {fmt(wantBefore)} NM) — perfil ainda executável.</div>
                       )}
                       <div className="num">
                         Plano: {fmt(leadingCruise)} NM cruzeiro · {fmt(phaseDist)} NM {phaseLbl} · {fmt(trailingCruise)} NM cruzeiro
