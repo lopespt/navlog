@@ -56,7 +56,8 @@
       Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
       TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation,
-      Search, Star, ClipboardList, RefreshCw
+      Search, Star, ClipboardList, RefreshCw,
+      Maximize2, Minimize2
     } = LucideReact;
 
 function haptic(pattern) {
@@ -5802,6 +5803,17 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     return () => clearInterval(id);
   }, []);
 
+  // Big-mode: head-up minimal display (large readouts only) for in-flight use.
+  const [bigMode, setBigMode] = useState(false);
+
+  // Live position (consumes the same selector the map uses, so what the pilot
+  // sees in big-mode matches the marker on the map).
+  const estPos = useMemo(() => estimatedPosition({
+    liveRoute, liveETAs, flight,
+    nowMin: nowHHMM(),
+    eobtMin: parseHHMM(flight.eobt) ?? 0,
+  }), [tick, liveRoute, liveETAs, flight.atd, flight.activeDeviation, flight.holds, flight.eobt]);
+
   // Cronômetro baseado no ATA mais recente (ou ATD) — sobrevive a edições de ATA e recarregamentos
   const lastAtaMs = useMemo(() => {
     const now = new Date();
@@ -5875,6 +5887,90 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
 
   const anyWpCrossed = computed.some(cp => !cp.isOrigin && cp.ata != null);
 
+  // Big-mode: minimal head-up readouts. Replaces the full FlightTab UI with
+  // jumbo MH/ETE/ETA so the pilot can glance and look up. Same data sources as
+  // the regular mode so numbers stay consistent.
+  if (bigMode && next) {
+    const accent = next._isDeviation ? theme.cyan : isAlert ? theme.danger : theme.accent;
+    const mhStr = next.mh != null ? Math.round(next.mh).toString().padStart(3, "0") + "°" : "—";
+    const eteMin = Math.round(next.eteLeg ?? next.etePlanned ?? 0);
+    const etaStr = liveNext != null ? formatHHMM(liveNext) : "—";
+    const altStr = next.alt != null ? `${next.alt} ft` : "—";
+    const fuelStr = `${Math.round(currentFuel)} gal`;
+    const posStr = estPos
+      ? `${estPos.lat.toFixed(3)}, ${estPos.lon.toFixed(3)}`
+      : "—";
+    return (
+      <div className="px-3 py-3 space-y-3" style={{ minHeight: "calc(100dvh - 8rem)" }}>
+        <div className="flex items-center justify-between">
+          <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Modo head-up</span>
+          <button onClick={() => setBigMode(false)}
+            className={`p-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
+            title="Voltar ao modo normal" aria-label="Sair de modo head-up">
+            <Minimize2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className={`border-2 rounded-lg p-4 ${theme.accentBorder} bg-amber-500/5 text-center`}>
+          <div className={`text-[11px] uppercase tracking-widest ${accent} mb-1`}>
+            {next._isDeviation ? "Correção" : next.isVirtual ? next.name : "Próximo"}
+          </div>
+          <div className={`text-7xl font-black cockpit-glow leading-none ${accent}`}
+            style={{ letterSpacing: "-0.02em" }}>
+            {next.name}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className={`bg-black/30 border-2 ${theme.accentBorder} rounded-lg px-3 py-4 text-center`}>
+            <div className={`text-[11px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>MH</div>
+            <div className={`text-6xl font-black num cockpit-glow leading-none ${accent}`}>{mhStr}</div>
+          </div>
+          <div className={`bg-black/30 border-2 ${theme.accentBorder} rounded-lg px-3 py-4 text-center`}>
+            <div className={`text-[11px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>ETE</div>
+            <div className={`text-6xl font-black num cockpit-glow leading-none ${theme.fg}`}>
+              {eteMin}<span className={`text-2xl font-bold ${theme.fgFaint} ml-1`}>min</span>
+            </div>
+          </div>
+        </div>
+
+        <div className={`bg-black/30 border-2 rounded-lg px-3 py-3 text-center ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
+          <div className={`text-[11px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
+          <div className={`text-5xl font-black num cockpit-glow leading-none ${accent}`}>{etaStr}</div>
+          {deltaMin != null && Math.abs(deltaMin) >= 1 && (
+            <div className={`text-sm num mt-1 ${deltaMin > 0 ? theme.danger : theme.success}`}>
+              {deltaMin > 0 ? "+" : "−"}{Math.abs(Math.round(deltaMin))} min
+            </div>
+          )}
+        </div>
+
+        <div className={`grid grid-cols-3 gap-2 text-center`}>
+          <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-2 py-3`}>
+            <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint}`}>ALT</div>
+            <div className={`text-2xl font-bold num ${theme.fg}`}>{altStr}</div>
+          </div>
+          <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-2 py-3`}>
+            <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint}`}>FUEL</div>
+            <div className={`text-2xl font-bold num ${fuelColor}`}>{fuelStr}</div>
+          </div>
+          <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-2 py-3`}>
+            <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint}`}>POS</div>
+            <div className={`text-[11px] font-bold num ${theme.fg} leading-tight mt-1`}>{posStr}</div>
+            {estPos?.holding && <div className={`text-[10px] ${theme.cyan}`}>HOLD</div>}
+            {estPos?.devActive && <div className={`text-[10px] ${theme.cyan}`}>DESVIO</div>}
+          </div>
+        </div>
+
+        <button
+          onClick={() => next.isVirtual ? markVirtual(next.autoKey) : markCrossed(next.userIdx)}
+          className={`w-full ${isEtaPassed ? "bg-amber-500 animate-pulse" : isAlert ? "bg-red-600" : next.isVirtual ? "bg-cyan-700" : theme.accentBg} ${next.isVirtual ? "text-white" : theme.accentBgFg} font-bold py-8 rounded-lg text-2xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all duration-150`}
+          style={{ minHeight: 96 }}>
+          <CircleCheckBig className="w-7 h-7" /> Agora
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="px-3 py-3 space-y-3">
 
@@ -5925,7 +6021,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
       )}
 
-      {/* Strip de Reposicionamento (Desvio) */}
+      {/* Strip de Reposicionamento (Desvio) + entrada Big-mode */}
       {flight.atd && (
         <div className={`flex items-center gap-2 ${dev ? "border-cyan-500/60 bg-cyan-500/10 border" : ""} rounded-lg ${dev ? "p-2" : ""}`}>
           {dev ? (
@@ -5946,10 +6042,19 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               </button>
             </>
           ) : (
-            <button onClick={onOpenDeviation}
-              className={`w-full text-[11px] uppercase tracking-widest font-bold py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-[0.99] flex items-center justify-center gap-1.5`}>
-              <Navigation className="w-3.5 h-3.5" /> Reposicionar (desvio)
-            </button>
+            <>
+              <button onClick={onOpenDeviation}
+                className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-[0.99] flex items-center justify-center gap-1.5`}>
+                <Navigation className="w-3.5 h-3.5" /> Reposicionar (desvio)
+              </button>
+              {next && (
+                <button onClick={() => setBigMode(true)}
+                  className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
+                  title="Modo head-up (head-up minimal)" aria-label="Activar modo head-up">
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -8508,74 +8613,30 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     ).addTo(map);
   }, [flight.activeDeviation, flight.checkpoints]);
 
-  // Simulated aircraft position
+  // Simulated aircraft position — single source of truth lives in
+  // lib/planning.js (estimatedPosition). This effect only renders the marker.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
     const ov = overlayRef.current;
     if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
 
-    const nowMin = nowHHMM();
-    const eobtMin = parseHHMM(flight.eobt) ?? 0;
-    const origin = liveRoute.find(cp => cp.isOrigin && cp.lat != null);
-    const atdMin = flight.atd ? parseHHMM(flight.atd) : null;
-    const dev = flight.activeDeviation;
+    const est = estimatedPosition({
+      liveRoute, liveETAs, flight,
+      nowMin: nowHHMM(),
+      eobtMin: parseHHMM(flight.eobt) ?? 0,
+    });
+    if (!est) return;
 
-    // Find prev (last crossed, or origin at ATD) and next (first uncrossed) WP with coords
-    let prevWp = null, prevTime = null, nextWp = null;
-
-    // Seed with origin at ATD if departure logged
-    if (origin && atdMin != null) { prevWp = origin; prevTime = atdMin; }
-
-    for (const wp of liveRoute) {
-      if (wp.lat == null || wp.lon == null || wp.isOrigin) continue;
-      if (wp.ata != null) {
-        prevWp = wp; prevTime = parseHHMM(wp.ata); nextWp = null;
-      } else if (!nextWp && prevWp != null) {
-        nextWp = wp;
-      }
-    }
-
-    // If a deviation is active and targets the same fix as nextWp, replace
-    // prevWp with the deviation's start position so the simulated aircraft
-    // moves along the cyan correction leg, not the (now-bypassed) original.
-    let devActiveForLeg = false;
-    if (dev && dev.fromLat != null && dev.fromLon != null && dev.targetIdx != null
-        && nextWp && nextWp.userIdx === dev.targetIdx) {
-      const startMin = parseHHMM(dev.startedAt);
-      if (startMin != null) {
-        prevWp = { lat: dev.fromLat, lon: dev.fromLon, tc: 0, isOrigin: false, etaPlanned: startMin };
-        prevTime = startMin;
-        devActiveForLeg = true;
-      }
-    }
-
-    let simLat, simLon, simTC;
-    if (!nextWp) {
-      // All crossed or no next — park at prevWp
-      if (prevWp && !prevWp.isOrigin) { simLat = prevWp.lat; simLon = prevWp.lon; simTC = prevWp.tc ?? 0; }
-    } else if (prevWp && prevTime != null) {
-      // Planned leg duration: diff between nextWp ETA (adjusted for any deviation
-      // already encoded in liveETAs) and prevWp's planned ETA / deviation start.
-      const prevPlanned = prevWp.isOrigin ? eobtMin : (prevWp.etaPlanned ?? eobtMin);
-      const targetEta = devActiveForLeg
-        ? (liveETAs[nextWp.userIdx] ?? prevPlanned)
-        : (nextWp.etaPlanned ?? 0);
-      const legDuration = targetEta - prevPlanned;
-      if (legDuration > 0) {
-        const frac = Math.min(1, Math.max(0, (nowMin - prevTime) / legDuration));
-        [simLat, simLon] = gcInterpolate(prevWp.lat, prevWp.lon, nextWp.lat, nextWp.lon, frac);
-        simTC = devActiveForLeg
-          ? gcTC(prevWp.lat, prevWp.lon, nextWp.lat, nextWp.lon)
-          : (nextWp.tc ?? 0);
-      }
-    }
-
-    if (simLat != null) {
-      ov.simMarker = window.L.marker([simLat, simLon], { icon: planeIcon(simTC), zIndexOffset: 1000 }).addTo(map);
-      ov.simMarker.bindPopup(devActiveForLeg ? 'Posição estimada (desvio)' : 'Posição estimada');
-    }
-  }, [tick, liveRoute, flight.atd, flight.activeDeviation, liveETAs]);
+    ov.simMarker = window.L.marker([est.lat, est.lon], {
+      icon: planeIcon(est.course || 0),
+      zIndexOffset: 1000,
+    }).addTo(map);
+    const label = est.holding ? 'Posição estimada (hold)'
+      : est.devActive ? 'Posição estimada (desvio)'
+      : 'Posição estimada';
+    ov.simMarker.bindPopup(label);
+  }, [tick, liveRoute, flight.atd, flight.activeDeviation, flight.holds, liveETAs]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
