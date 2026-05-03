@@ -1299,6 +1299,16 @@ function NavlogApp() {
       return c;
     });
   }
+  // Apply a wind suggestion (from E1 back-solve) to the global wind so the
+  // remaining legs re-compute against the real conditions.
+  function applyWind(windDir, windVel) {
+    setFlight(function(f) {
+      return Object.assign({}, f, {
+        windDir: Math.round(windDir),
+        windVel: Math.round(windVel),
+      });
+    });
+  }
 
   function unmark(i) {
     setFlight((f) => {
@@ -1774,6 +1784,7 @@ function NavlogApp() {
             onDirectTo={directToWp}
             onOpenHold={() => setHoldOpen(true)}
             onRemoveHold={removeHold}
+            onApplyWind={applyWind}
             prefs={prefs}
           />
         )}
@@ -5830,7 +5841,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold,
+    onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold, onApplyWind,
     liveFuel, ac, prefs }) {
 
   const dev = flight.activeDeviation || null;
@@ -5910,6 +5921,51 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     nowMin: nowHHMM(),
     eobtMin: parseHHMM(flight.eobt) ?? 0,
   }), [tick, liveRoute, liveETAs, flight.atd, flight.activeDeviation, flight.holds, flight.eobt]);
+
+  // Bingo fuel check (F2): predicted-arrival fuel below the legal reserve →
+  // red banner persists until the situation is resolved.
+  const reserveMin = (prefs && prefs.fuelReserveMin) ?? 30;
+  const bingo = useMemo(() => bingoCheck({
+    liveFuel,
+    fuelInitial: flight.fuelInitial ?? ac.fuelUsable,
+    gphCruise: ac.gphCruise,
+    reserveMin,
+  }), [liveFuel, flight.fuelInitial, ac.fuelUsable, ac.gphCruise, reserveMin]);
+
+  // Wind back-solve (E1): for the most recent crossed leg, compare observed
+  // GS to planned and back-solve the implied wind. Banner appears when the
+  // magnitude or direction is meaningfully off the planned wind.
+  const windSuggestion = useMemo(() => {
+    let lastLeg = null;
+    for (let i = computed.length - 1; i >= 0; i--) {
+      const cp = computed[i];
+      if (!cp || cp.isOrigin || cp.ata == null || cp.gsActual == null || cp.bypassed) continue;
+      lastLeg = cp;
+      break;
+    }
+    if (!lastLeg || lastLeg.tc == null) return null;
+    const planTas = lastLeg.tasEffective ?? lastLeg.avgTas ?? ac.tasCruise;
+    const planTh = lastLeg.th ?? ((lastLeg.mh ?? lastLeg.tc) + (flight.variation ?? 0));
+    const w = solveWindFromGs({ tc: lastLeg.tc, tas: planTas, gs: lastLeg.gsActual, th: planTh });
+    if (!w) return null;
+    const planDir = flight.windDir ?? 0;
+    const planVel = flight.windVel ?? 0;
+    let dirDelta = ((w.windDir - planDir + 540) % 360) - 180;
+    const velDelta = w.windVel - planVel;
+    return {
+      observedDir: Math.round(w.windDir),
+      observedVel: Math.round(w.windVel * 10) / 10,
+      planDir, planVel,
+      dirDelta: Math.round(dirDelta),
+      velDelta: Math.round(velDelta * 10) / 10,
+      legName: lastLeg.name,
+      // Surface the banner only when the difference is large enough to matter.
+      significant: Math.abs(dirDelta) >= 15 || Math.abs(velDelta) >= 5,
+    };
+  }, [computed, flight.windDir, flight.windVel, flight.variation, ac.tasCruise]);
+  // Dismiss state for the wind banner — survives only this render cycle so it
+  // re-appears if the pilot crosses a new leg with a different observed wind.
+  const [windDismissedFor, setWindDismissedFor] = useState(null);
 
   // Cronômetro baseado no ATA mais recente (ou ATD) — sobrevive a edições de ATA e recarregamentos
   const lastAtaMs = useMemo(() => {
@@ -6115,6 +6171,42 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {w}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Bingo fuel alert (F2): predicted arrival below legal reserve */}
+      {flight.atd && bingo && bingo.isBingo && (
+        <div className="bg-red-900/40 border-2 border-red-500 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse">
+          <Fuel className="w-5 h-5 text-red-400 shrink-0" />
+          <div className="flex-1 text-xs">
+            <div className={`font-bold text-red-300`}>BINGO FUEL</div>
+            <div className={`num text-red-200/90`}>
+              previsto chegada {bingo.predictedAtDest.toFixed(1)} gal — reserva legal exige {bingo.requiredAtDest.toFixed(1)} gal ({reserveMin} min)
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wind back-solve suggestion (E1) */}
+      {flight.atd && windSuggestion && windSuggestion.significant && windDismissedFor !== windSuggestion.legName && (
+        <div className="bg-cyan-900/30 border border-cyan-500/60 rounded-lg px-3 py-2 flex items-center gap-2">
+          <Wind className={`w-4 h-4 ${theme.cyan} shrink-0`} />
+          <div className="flex-1 text-xs">
+            <div className={`font-bold ${theme.cyan}`}>Vento estimado em voo</div>
+            <div className={`num ${theme.fgMuted}`}>
+              real {String(windSuggestion.observedDir).padStart(3,"0")}°/{windSuggestion.observedVel} kt vs. plano {String(windSuggestion.planDir).padStart(3,"0")}°/{windSuggestion.planVel} kt
+              {' '}(perna {windSuggestion.legName})
+            </div>
+          </div>
+          <button onClick={() => onApplyWind(windSuggestion.observedDir, windSuggestion.observedVel)}
+            className={`text-[11px] px-2 py-1 rounded border border-cyan-500 ${theme.cyan} font-bold`}>
+            Aplicar
+          </button>
+          <button onClick={() => setWindDismissedFor(windSuggestion.legName)}
+            className={`text-[11px] px-1.5 py-1 rounded ${theme.fgFaint}`}
+            aria-label="Dispensar">
+            <X className="w-3 h-3" />
+          </button>
         </div>
       )}
 
