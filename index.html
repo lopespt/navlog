@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0530";
+const APP_VERSION = "20260429.0610";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2069,6 +2069,7 @@ function NavlogApp() {
           initLat={insertCoords?.[0]}
           initLon={insertCoords?.[1]}
           ac={ac}
+          computed={computed}
           theme={theme}
           pdfOverlays={pdfOverlays}
           userPoints={userPoints}
@@ -3988,7 +3989,7 @@ function ErrorState({ theme, message, onRetry }) {
 // Passos: NOME → ALT → TC → DIST → VENTO → PERF (overrides) → RESUMO
 const WP_STEPS = ["nome", "coord", "alt", "tcdist", "vento", "override", "resumo"];
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, computed, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
   const [finderOpen, setFinderOpen] = useState(false);
   const isNew    = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
@@ -4113,13 +4114,19 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const prevCp = isNew
     ? (insertAfterIdx != null ? flight.checkpoints[insertAfterIdx] : flight.checkpoints[flight.checkpoints.length - 1])
     : flight.checkpoints[editingIdx - 1];
-  // Resolve prev altitude by walking back to the nearest anchor (explicit alt or useCruiseAlt).
-  // Origin without explicit alt falls back to its elevation, then 0.
+  // Resolve prev altitude. The leg ending at this WP starts from the immediately
+  // previous WP's RESOLVED altitude (not the nearest anchor), so inherit WPs
+  // mid-segment yield the correct intermediate altitude — same value
+  // computeLegPhases will use, so the preview matches the planning math.
   const prevAlt = (function() {
-    const startIdx = isNew
+    const prevIdx = isNew
       ? (insertAfterIdx != null ? insertAfterIdx : flight.checkpoints.length - 1)
       : editingIdx - 1;
-    for (let k = startIdx; k >= 0; k--) {
+    if (prevIdx < 0) return null;
+    const resolved = computed && computed[prevIdx] ? computed[prevIdx].alt : null;
+    if (resolved != null) return resolved;
+    // Fallback: walk back to nearest anchor (only used when computed isn't available)
+    for (let k = prevIdx; k >= 0; k--) {
       const wp = flight.checkpoints[k];
       if (!wp) continue;
       if (wp.useCruiseAlt) return cruiseAlt;
@@ -4605,36 +4612,71 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                   </div>
                 )}
                 {(function() {
-                  // Plan preview: shows actual phase distribution given the leg length and aircraft.
+                  // Plan preview: delegates to computeLegPhases so it matches
+                  // the actual planning math exactly (wind correction, altitude
+                  // correction, inherit-resolved prevAlt).
                   var distLeg = Number(cp.dist);
                   if (!distLeg || distLeg <= 0) return null;
                   var altDiff = Math.abs((currentAlt ?? 0) - (prevAlt ?? 0));
                   if (altDiff <= 50) return null;
-                  var roc = (ac && ac.rocClimb) || 500;
-                  var rod = (ac && ac.rodDescent) || 500;
-                  var vy  = (ac && ac.vy) || 80;
-                  var vd  = (ac && ac.vDescent) || 120;
-                  var tasCr = (ac && ac.tasCruise) || 120;
-                  var phaseTime = altDiff / (isClimbing ? roc : rod);
-                  var phaseDist = (isClimbing ? vy : vd) * phaseTime / 60;
+                  // Resolve wind for this cp (matches NavlogApp logic)
+                  var wDir, wVel;
+                  if (cp.windMode === "none") { wDir = 0; wVel = 0; }
+                  else if (cp.windMode === "custom" && cp.windDir != null) {
+                    wDir = Number(cp.windDir);
+                    wVel = Number(cp.windVel ?? 0);
+                  } else {
+                    wDir = flight.windDir;
+                    wVel = flight.windVel;
+                  }
                   var effMode = arrivalMode || contextDefault;
+                  // Build a synthetic cp with the editor's currently-selected
+                  // arrivalMode applied (computeLegPhases reads cp.arrivalMode).
+                  var syntheticCp = Object.assign({}, cp, {
+                    arrivalMode: effMode,
+                    arrivalValue: arrivalValue,
+                  });
+                  var legRes = computeLegPhases(
+                    prevAlt ?? 0, currentAlt ?? 0, distLeg, syntheticCp, ac,
+                    flight.isaDevC || 0, wDir, wVel, flight.variation
+                  );
+                  var portions = legRes.portions || [];
+                  // Find the climb/descent portion to compute "wanted vs got" buffer
+                  var phaseKey = isClimbing ? "SUBIDA" : "DESCIDA";
+                  var phaseDist = portions.reduce(function(s, p) { return p.phase === phaseKey ? s + p.dist : s; }, 0);
+                  // Buffer = trailing CRUZEIRO portion (the leveled cruise after
+                  // the climb/descent reaches the target altitude before the fix)
+                  var trailingCruise = 0;
+                  for (var pi = portions.length - 1; pi >= 0; pi--) {
+                    if (portions[pi].phase === "CRUZEIRO") trailingCruise = portions[pi].dist;
+                    else break;
+                  }
+                  var leadingCruise = 0;
+                  for (var pj = 0; pj < portions.length; pj++) {
+                    if (portions[pj].phase === "CRUZEIRO") leadingCruise = portions[pj].dist;
+                    else break;
+                  }
                   var wantBefore;
                   if (effMode === "before_nm") wantBefore = arrivalValue;
-                  else if (effMode === "before_min") wantBefore = arrivalValue * tasCr / 60;
+                  else if (effMode === "before_min") {
+                    // Match computeLegPhases: tas at the level-off altitude
+                    // (cruise tas at currentAlt for descent, at thisAlt for climb)
+                    var tasCorr = correctTAS(ac.tasCruise, currentAlt ?? 0, flight.isaDevC || 0);
+                    var gsLow = Math.max(1, calcLeg(cp.tc ?? 0, 1, tasCorr, wDir, wVel, flight.variation || 0, 0).gs);
+                    wantBefore = arrivalValue * gsLow / 60;
+                  }
                   else if (effMode === "at_fix") wantBefore = 0;
-                  else wantBefore = Math.max(0, distLeg - phaseDist); // asap = level after climb, buffer = leftover
-                  var safeBefore = Math.max(0, Math.min(wantBefore, distLeg - phaseDist));
-                  var cruiseFirst = Math.max(0, distLeg - phaseDist - safeBefore);
-                  var feasible = safeBefore >= wantBefore - 0.1;
+                  else wantBefore = trailingCruise; // asap = whatever cruise comes after the phase
+                  var feasible = trailingCruise >= wantBefore - 0.1;
                   var fmt = function(n) { return n < 10 ? n.toFixed(1) : Math.round(n).toString(); };
                   var phaseLbl = isClimbing ? "subida" : "descida";
                   return (
                     <div className={`mt-2 text-[10px] leading-snug ${feasible || effMode === "asap" || effMode === "at_fix" ? theme.fgFaint : "text-red-400"}`}>
                       {!feasible && (effMode === "before_nm" || effMode === "before_min") && (
-                        <div className="font-bold mb-0.5">⚠ Perna curta: buffer reduzido para {fmt(safeBefore)} NM</div>
+                        <div className="font-bold mb-0.5">⚠ Perna curta: buffer reduzido para {fmt(trailingCruise)} NM (pediu {fmt(wantBefore)} NM)</div>
                       )}
                       <div className="num">
-                        Plano: {fmt(cruiseFirst)} NM cruzeiro · {fmt(phaseDist)} NM {phaseLbl} · {fmt(safeBefore)} NM cruzeiro
+                        Plano: {fmt(leadingCruise)} NM cruzeiro · {fmt(phaseDist)} NM {phaseLbl} · {fmt(trailingCruise)} NM cruzeiro
                       </div>
                     </div>
                   );
