@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0345";
+const APP_VERSION = "20260429.0410";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -923,10 +923,26 @@ const themes = {
   },
 };
 
+// Synchronous localStorage read so initial state is correct on the first
+// render — avoids the race where the auto-save effect overwrites the saved
+// value with the in-memory default before the async load effect resolves.
+function loadNavlogLS(key, fallback) {
+  try {
+    const r = localStorage.getItem("navlog_" + key);
+    if (r != null) return JSON.parse(r);
+  } catch {}
+  return fallback;
+}
+
 // ================= APP =================
 function NavlogApp() {
   const [tab, setTab] = useState("setup"); // setup | flight | fuel | log
-  const [flight, setFlight] = useState(DEFAULT_FLIGHT);
+  const [flight, setFlight] = useState(() => {
+    const loaded = loadNavlogLS("flight", null);
+    if (!loaded) return DEFAULT_FLIGHT;
+    if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
+    return { ...DEFAULT_FLIGHT, ...loaded };
+  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
   const [insertAfterIdx, setInsertAfterIdx] = useState(null);
@@ -934,12 +950,15 @@ function NavlogApp() {
   const [pdfOverlays, setPdfOverlays] = useState([]); // PDF map overlays
   const [pdfLoaded, setPdfLoaded] = useState(false);    // gates IDB cleanup until initial load is done
   const [routesOpen, setRoutesOpen] = useState(false);
-  const [savedRoutes, setSavedRoutes] = useState([]);
+  const [savedRoutes, setSavedRoutes] = useState(() => loadNavlogLS("routes", []));
   const [ataEditOpen, setAtaEditOpen] = useState(false);
   const [ataEditIdx, setAtaEditIdx] = useState(null);
   const [virtualAtaEditKey, setVirtualAtaEditKey] = useState(null);
   const [atdEditOpen, setAtdEditOpen] = useState(false);
-  const [prefs, setPrefs] = useState(DEFAULT_PREFS);
+  const [prefs, setPrefs] = useState(() => {
+    const loaded = loadNavlogLS("prefs", null);
+    return loaded ? { ...DEFAULT_PREFS, ...loaded } : DEFAULT_PREFS;
+  });
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [viewMode, setViewMode] = useState("leg");
@@ -1741,6 +1760,7 @@ function NavlogApp() {
   function savePrefs(p) {
     setPrefs(p);
     try { if (window.storage) window.storage.set("prefs", JSON.stringify(p)); } catch {}
+    try { localStorage.setItem("navlog_prefs", JSON.stringify(p)); } catch {}
   }
 
   // ----- Wake lock -----
@@ -1851,12 +1871,14 @@ function NavlogApp() {
   }, []);
 
   useEffect(() => {
+    if (!pdfLoaded) return; // skip until async load completes — avoids overwriting artifact storage with the in-memory default
     store.set("flight", JSON.stringify(flight));
-  }, [flight]);
+  }, [flight, pdfLoaded]);
 
   useEffect(() => {
+    if (!pdfLoaded) return;
     store.set("routes", JSON.stringify(savedRoutes));
-  }, [savedRoutes]);
+  }, [savedRoutes, pdfLoaded]);
 
   useEffect(() => {
     // Don't sync to IDB until the initial load has populated pdfOverlays —
