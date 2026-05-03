@@ -57,7 +57,7 @@
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
       TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation,
       Search, Star, ClipboardList, RefreshCw,
-      Maximize2, Minimize2
+      Maximize2, Minimize2, Pause
     } = LucideReact;
 
 function haptic(pattern) {
@@ -625,6 +625,7 @@ function NavlogApp() {
   const [notesIdx, setNotesIdx] = useState(null);
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const [deviationOpen, setDeviationOpen] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
   const [userPoints, setUserPoints] = useState([]);
   // Map center+zoom is preserved across tab switches (Leaflet otherwise
   // re-initialises and re-fits-bounds whenever the MapTab remounts).
@@ -1028,8 +1029,11 @@ function NavlogApp() {
       cumMin = legStartMin + legETE;
       etas[i] = cumMin;
     }
-    return etas;
-  }, [computed, flight.atd, flight.autoWpATAs, flight.activeDeviation, flight.windDir, flight.windVel, flight.variation, ac, legVirtualsMap]);
+    // Apply any active holds AFTER the deviation/virtual cascade so the delays
+    // are layered on top of an already-resolved baseline. applyHolds is a no-op
+    // when flight.holds is empty/undefined.
+    return applyHolds(etas, flight.holds || []);
+  }, [computed, flight.atd, flight.autoWpATAs, flight.activeDeviation, flight.windDir, flight.windVel, flight.variation, flight.holds, ac, legVirtualsMap]);
 
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
@@ -1272,6 +1276,26 @@ function NavlogApp() {
     setFlight(function(f) {
       var c = Object.assign({}, f, { checkpoints: clearDirectTo(f.checkpoints) });
       delete c.activeDeviation;
+      return c;
+    });
+  }
+
+  function addHold(hold) {
+    setFlight(function(f) {
+      var entry = {
+        atIdx: Number(hold.atIdx),
+        startMin: nowHHMM(),
+        durationMin: Number(hold.durationMin) || 0,
+        note: hold.note || "",
+      };
+      return Object.assign({}, f, { holds: ((f.holds || []).concat([entry])) });
+    });
+  }
+  function removeHold(idx) {
+    setFlight(function(f) {
+      var holds = (f.holds || []).filter(function(_, i) { return i !== idx; });
+      var c = Object.assign({}, f, { holds: holds });
+      if (holds.length === 0) delete c.holds;
       return c;
     });
   }
@@ -1748,6 +1772,8 @@ function NavlogApp() {
             onOpenDeviation={() => setDeviationOpen(true)}
             onClearDeviation={clearDeviation}
             onDirectTo={directToWp}
+            onOpenHold={() => setHoldOpen(true)}
+            onRemoveHold={removeHold}
             prefs={prefs}
           />
         )}
@@ -1904,6 +1930,21 @@ function NavlogApp() {
           onApply={setDeviation}
           onClear={clearDeviation}
           onClose={() => setDeviationOpen(false)}
+        />
+      )}
+
+      {/* HOLD */}
+      {holdOpen && (
+        <HoldModal
+          flight={flight} computed={computed} theme={theme}
+          lastCrossedIdx={(function() {
+            for (let i = computed.length - 1; i >= 0; i--) {
+              if (computed[i] && computed[i].ata != null) return i;
+            }
+            return null;
+          })()}
+          onApply={addHold}
+          onClose={() => setHoldOpen(false)}
         />
       )}
 
@@ -5789,7 +5830,7 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation, onDirectTo,
+    onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold,
     liveFuel, ac, prefs }) {
 
   const dev = flight.activeDeviation || null;
@@ -6103,6 +6144,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                 className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-[0.99] flex items-center justify-center gap-1.5`}>
                 <Navigation className="w-3.5 h-3.5" /> Reposicionar (desvio)
               </button>
+              <button onClick={onOpenHold}
+                className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
+                title="Adicionar hold" aria-label="Adicionar hold">
+                <Pause className="w-4 h-4" />
+              </button>
               {next && (
                 <button onClick={() => setBigMode(true)}
                   className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
@@ -6112,6 +6158,26 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Active holds — chips with × to remove */}
+      {flight.atd && Array.isArray(flight.holds) && flight.holds.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {flight.holds.map((h, i) => {
+            const cp = computed[h.atIdx];
+            const label = cp ? (cp.name || ('WP ' + h.atIdx)) : ('WP ' + h.atIdx);
+            return (
+              <span key={i}
+                className={`inline-flex items-center gap-1.5 text-[11px] num px-2 py-1 rounded-lg border border-cyan-500/60 ${theme.cyan} bg-cyan-500/10`}>
+                <Pause className="w-3 h-3" />
+                {label} +{h.durationMin}min{h.note ? ` · ${h.note}` : ""}
+                <button onClick={() => onRemoveHold(i)} aria-label="Remover hold" className="ml-1 opacity-70 hover:opacity-100">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -6871,6 +6937,104 @@ function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
 }
 
 // --------- EDITOR DE NOTAS ---------
+// Hold modal — ATC clears "hold here for 10 min" or "hold at FIX X +EFC".
+// Captures atIdx (last-crossed for "Aqui", or any uncrossed WP for "Em WP")
+// and a duration. Note is optional (e.g. "EFC 1235Z").
+function HoldModal({ flight, computed, lastCrossedIdx, theme, onApply, onClose }) {
+  // Available targets: last-crossed (Aqui) plus every uncrossed non-bypassed WP.
+  const upcoming = computed
+    .map((cp, i) => ({ cp, i }))
+    .filter(x => !x.cp.isOrigin && !x.cp.bypassed && x.cp.ata == null);
+  const defaultIdx = lastCrossedIdx != null ? lastCrossedIdx : (upcoming[0] ? upcoming[0].i : null);
+  const [where, setWhere] = useState(lastCrossedIdx != null ? "here" : "wp");
+  const [atIdx, setAtIdx] = useState(defaultIdx);
+  const [duration, setDuration] = useState(10);
+  const [note, setNote] = useState("");
+
+  const effectiveIdx = where === "here" ? lastCrossedIdx : Number(atIdx);
+  const canApply = effectiveIdx != null && Number(duration) > 0;
+  const targetCp = effectiveIdx != null ? computed[effectiveIdx] : null;
+
+  return (
+    <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-3`}>
+        <div className="flex items-center justify-between">
+          <h3 className={`text-sm uppercase tracking-widest ${theme.cyan} font-bold flex items-center gap-2`}>
+            <Pause className="w-4 h-4" /> Hold
+          </h3>
+          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+        </div>
+
+        <div className={`grid grid-cols-2 gap-2`}>
+          <button onClick={() => setWhere("here")}
+            disabled={lastCrossedIdx == null}
+            className={`py-2 rounded-lg border text-sm font-bold ${
+              where === "here"
+                ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10`
+                : `${theme.panelBorder} ${theme.fgFaint}`
+            } ${lastCrossedIdx == null ? "opacity-40" : ""}`}>
+            Aqui
+          </button>
+          <button onClick={() => setWhere("wp")}
+            className={`py-2 rounded-lg border text-sm font-bold ${
+              where === "wp"
+                ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10`
+                : `${theme.panelBorder} ${theme.fgFaint}`
+            }`}>
+            Em WP
+          </button>
+        </div>
+
+        {where === "wp" && (
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>WP</span>
+            <select value={atIdx ?? ""}
+              onChange={(e) => setAtIdx(e.target.value === "" ? null : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none focus:ring-2 focus:ring-amber-500/30`}>
+              {upcoming.length === 0 && <option value="">Sem WPs upcoming</option>}
+              {upcoming.map(({ cp, i }) => (
+                <option key={i} value={i}>{cp.name || ('WP ' + i)}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Duração (min)</span>
+            <input type="number" inputMode="numeric" min="1" max="120" value={duration}
+              onChange={(e) => setDuration(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Nota (EFC, etc.)</span>
+            <input type="text" value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="Opcional"
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+        </div>
+
+        {targetCp && (
+          <div className={`text-center text-xs num ${theme.cyan}`}>
+            Atrasa pernas a partir de {targetCp.name || ('WP ' + effectiveIdx)} em +{Number(duration) || 0} min
+          </div>
+        )}
+
+        <button onClick={() => { onApply({ atIdx: effectiveIdx, durationMin: Number(duration), note }); onClose(); }}
+          disabled={!canApply}
+          className={`w-full py-3 rounded-xl font-bold text-base ${
+            canApply
+              ? `${theme.accentBg} ${theme.accentBgFg ?? "text-black"}`
+              : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Aplicar hold
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NotesEditor({ checkpoint, theme, onSave, onClose }) {
   const [text, setText] = useState(checkpoint.notes || "");
   return (
