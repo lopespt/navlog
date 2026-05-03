@@ -99,7 +99,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260429.0410";
+const APP_VERSION = "20260429.0510";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -1981,6 +1981,7 @@ function NavlogApp() {
             fleet={fleet}
             onManageFleet={() => setFleetOpen(true)}
             computed={computed}
+            liveRoute={liveRoute}
             userPoints={userPoints}
             onAddUserPoint={addUserPoint}
             onDeleteUserPoint={deleteUserPoint}
@@ -3176,7 +3177,7 @@ function AiracBadge({ theme }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, liveRoute, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -3345,8 +3346,30 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           {flight.checkpoints.map((cp, i) => {
             const isDragging = dragIdx === i;
             const isOver = dragOverIdx === i && dragIdx != null && dragIdx !== i;
+            // Virtual TOC/TOD/BOC/BOD rows that fall WITHIN the leg ending at `i`.
+            // liveRoute computes these from cp.portions transitions, so they're
+            // surfaced here for the planning view too.
+            const virtuals = (liveRoute || []).filter(v => v.isVirtual && v.userIdx === i);
             return (
-            <div key={i} data-wp-idx={i}
+            <React.Fragment key={i}>
+            {virtuals.map(v => (
+              <div key={v.autoKey}
+                className={`flex items-stretch gap-1 rounded ${theme.panel} border border-dashed border-cyan-500/30 px-3 py-1.5 opacity-90`}>
+                <div className="w-5 shrink-0" />
+                <div className="flex-1 flex items-center gap-2 min-w-0">
+                  <div className={`text-[11px] font-bold ${theme.cyan}`}>
+                    {v.name === "TOC" ? "↗ TOC" :
+                     v.name === "TOD" ? "↘ TOD" :
+                     v.name === "BOC" ? "↗ BOC" :
+                     v.name === "BOD" ? "↘ BOD" : v.name}
+                  </div>
+                  <div className={`text-[10px] ${theme.fgFaint} num`}>
+                    {v.alt} ft · +{v.dist} NM
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div data-wp-idx={i}
               className={`flex items-stretch gap-1 rounded transition-all duration-150 ${isDragging ? "opacity-50 scale-[0.98]" : ""} ${isOver ? `ring-2 ${theme.accentBorder} bg-amber-500/10` : ""}`}>
               {/* Alça de arrasto — apenas para waypoints manuais não-origem */}
               {!cp.isOrigin && !cp.isAuto ? (
@@ -3415,6 +3438,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
                 </button>
               )}
             </div>
+            </React.Fragment>
             );
           })}
           <button onClick={onAddCp}
@@ -3945,7 +3969,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
   const cruiseAlt = flight.cruiseAlt ?? 7000;
   const initial = isNew
-    ? { name: "", alt: null, useCruiseAlt: true, tc: null, dist: null, windDir: null, windVel: null,
+    ? { name: "", alt: null,
+        // When inserting between existing WPs, default to "inherit" so the
+        // new WP follows the climb/descent gradient instead of becoming a
+        // cruise-alt anchor that ends the climb at this fix. When appending
+        // at the end of the route, default to cruise alt as before.
+        useCruiseAlt: insertAfterIdx == null,
+        tc: null, dist: null, windDir: null, windVel: null,
         lat: initLat ?? null, lon: initLon ?? null, notes: "" }
     : { ...flight.checkpoints[editingIdx] };
 
