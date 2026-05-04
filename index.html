@@ -8950,7 +8950,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, ac, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null, vector: null, vectorTrigger: null, vectorThen: null });
