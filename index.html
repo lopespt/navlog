@@ -57,7 +57,7 @@
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
       TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation,
       Search, Star, ClipboardList, RefreshCw,
-      Maximize2, Minimize2, Pause, Compass
+      Maximize2, Minimize2, Pause, Compass, ArrowUpDown
     } = LucideReact;
 
 function haptic(pattern) {
@@ -627,6 +627,7 @@ function NavlogApp() {
   const [deviationOpen, setDeviationOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [vectorOpen, setVectorOpen] = useState(false);
+  const [altOpen, setAltOpen] = useState(false);
   const [userPoints, setUserPoints] = useState([]);
   // Map center+zoom is preserved across tab switches (Leaflet otherwise
   // re-initialises and re-fits-bounds whenever the MapTab remounts).
@@ -1301,6 +1302,62 @@ function NavlogApp() {
     });
   }
 
+  // ATC altitude change: pilot was cleared to a new altitude. We model this
+  // as a "permanent + recompute" change — flight.cruiseAlt becomes the new
+  // target so all downstream `useCruiseAlt: true` WPs inherit it (the planning
+  // code already handles climb/descent phases per leg). To preserve history,
+  // past WPs that were inheriting cruiseAlt get their alt locked to the old
+  // value (turning useCruiseAlt off for them). flight.activeAlt tracks the
+  // in-progress climb/descent for banner / big-mode display.
+  function setActiveAlt(targetAlt) {
+    setFlight(function(f) {
+      var oldCruise = Number(f.cruiseAlt) || 7000;
+      var target = Number(targetAlt);
+      // Determine current ALT (= the start of the new transition).
+      var fromAlt = oldCruise;
+      if (f.activeAlt) {
+        var prev = altTransitionState({
+          activeAlt: f.activeAlt, nowMin: nowHHMM(), ac: ac,
+        });
+        if (prev && prev.currentAlt != null) fromAlt = prev.currentAlt;
+      }
+      var est = estimatedPosition({
+        liveRoute, liveETAs, flight: f,
+        nowMin: nowHHMM(),
+        eobtMin: parseHHMM(f.eobt) ?? 0,
+      });
+      var fromLat = est ? Math.round(est.lat * 1e6) / 1e6 : null;
+      var fromLon = est ? Math.round(est.lon * 1e6) / 1e6 : null;
+      // Lock past WPs (with ATA) to the old cruiseAlt so the historical log
+      // doesn't retroactively reflect the new altitude.
+      var cps = f.checkpoints.map(function(cp) {
+        if (cp.ata != null && cp.useCruiseAlt) {
+          return Object.assign({}, cp, { useCruiseAlt: false, alt: oldCruise });
+        }
+        return cp;
+      });
+      var aa = {
+        targetAlt: target,
+        fromAlt: fromAlt,
+        startedAt: formatHHMMSS(nowHHMM()),
+      };
+      if (fromLat != null) aa.fromLat = fromLat;
+      if (fromLon != null) aa.fromLon = fromLon;
+      return Object.assign({}, f, {
+        checkpoints: cps,
+        cruiseAlt: target,
+        activeAlt: aa,
+      });
+    });
+  }
+  function clearActiveAlt() {
+    setFlight(function(f) {
+      var c = Object.assign({}, f);
+      delete c.activeAlt;
+      return c;
+    });
+  }
+
   function addHold(hold) {
     setFlight(function(f) {
       var entry = {
@@ -1430,6 +1487,7 @@ function NavlogApp() {
       };
       delete next.activeDeviation;
       delete next.activeVector;
+      delete next.activeAlt;
       delete next.holds;
       return next;
     });
@@ -1862,6 +1920,8 @@ function NavlogApp() {
             onRemoveHold={removeHold}
             onOpenVector={() => setVectorOpen(true)}
             onClearVector={clearVector}
+            onOpenAlt={() => setAltOpen(true)}
+            onClearAlt={clearActiveAlt}
             onApplyWind={applyWind}
             prefs={prefs}
           />
@@ -2051,6 +2111,15 @@ function NavlogApp() {
           })()}
           onApply={setVector}
           onClose={() => setVectorOpen(false)}
+        />
+      )}
+
+      {/* ALT change */}
+      {altOpen && (
+        <AltModal
+          flight={flight} ac={ac} theme={theme}
+          onApply={setActiveAlt}
+          onClose={() => setAltOpen(false)}
         />
       )}
 
@@ -5937,7 +6006,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
     onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold,
-    onOpenVector, onClearVector, onApplyWind,
+    onOpenVector, onClearVector, onOpenAlt, onClearAlt, onApplyWind,
     liveFuel, ac, prefs }) {
 
   const dev = flight.activeDeviation || null;
@@ -6144,7 +6213,15 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     const mhStr = next.mh != null ? Math.round(next.mh).toString().padStart(3, "0") + "°" : "—";
     const eteMin = Math.round(next.eteLeg ?? next.etePlanned ?? 0);
     const etaStr = liveNext != null ? formatHHMM(liveNext) : "—";
-    const altStr = next.alt != null ? `${next.alt} ft` : "—";
+    const ats = flight.activeAlt
+      ? altTransitionState({ activeAlt: flight.activeAlt, nowMin: nowHHMM(), ac })
+      : null;
+    const altStr = ats && !ats.reached
+      ? `${ats.currentAlt} → ${flight.activeAlt.targetAlt}`
+      : (next.alt != null ? `${next.alt} ft` : "—");
+    const altSubLabel = ats && !ats.reached
+      ? (ats.phase === "climb" ? "↗ subindo" : "↘ descendo")
+      : null;
     const fuelStr = `${Math.round(currentFuel)} gal`;
     const posStr = estPos
       ? `${estPos.lat.toFixed(3)}, ${estPos.lon.toFixed(3)}`
@@ -6194,9 +6271,10 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
 
         <div className={`grid grid-cols-3 gap-2 text-center`}>
-          <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-2 py-3`}>
+          <div className={`bg-black/30 border ${altSubLabel ? "border-cyan-500/60" : theme.panelBorder} rounded-lg px-2 py-3`}>
             <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint}`}>ALT</div>
-            <div className={`text-2xl font-bold num ${theme.fg}`}>{altStr}</div>
+            <div className={`${altSubLabel ? "text-lg" : "text-2xl"} font-bold num ${altSubLabel ? theme.cyan : theme.fg}`}>{altStr}</div>
+            {altSubLabel && <div className={`text-[10px] ${theme.cyan}`}>{altSubLabel}</div>}
           </div>
           <div className={`bg-black/30 border ${theme.panelBorder} rounded-lg px-2 py-3`}>
             <div className={`text-[10px] uppercase tracking-wider ${theme.fgFaint}`}>FUEL</div>
@@ -6306,6 +6384,42 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
       )}
 
+      {/* ALT ATIVA — banner durante transição + ao nível depois de atingida */}
+      {flight.atd && flight.activeAlt && (() => {
+        const aa = flight.activeAlt;
+        const ats = altTransitionState({ activeAlt: aa, nowMin: nowHHMM(), ac });
+        const climbing = aa.targetAlt > aa.fromAlt;
+        const arrow = climbing ? "↗" : (aa.targetAlt < aa.fromAlt ? "↘" : "→");
+        const sec = ats ? Math.round(ats.secondsRemaining) : 0;
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return (
+          <div className="flex items-center gap-2 border border-cyan-500/60 bg-cyan-500/10 rounded-lg p-2 flex-wrap">
+            <span className={`text-[10px] uppercase tracking-widest font-bold ${theme.cyan} flex items-center gap-1`}>
+              <ArrowUpDown className="w-3.5 h-3.5" /> ALT
+            </span>
+            <span className={`text-[11px] num font-bold ${theme.cyan}`}>
+              {ats ? ats.currentAlt : aa.fromAlt} {arrow} {aa.targetAlt} ft
+            </span>
+            {ats && !ats.reached && (
+              <span className={`text-[10px] num ${theme.fgFaint}`}>
+                · {m > 0 ? `${m}m${String(s).padStart(2,"0")}s` : `${s}s`} restante
+              </span>
+            )}
+            {ats && ats.reached && (
+              <span className={`text-[10px] num ${theme.fgFaint}`}>· nível</span>
+            )}
+            <button onClick={onOpenAlt}
+              className={`ml-auto text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+              Editar
+            </button>
+            <button onClick={onClearAlt}
+              className="text-[10px] px-2 py-1 rounded border border-red-500 text-red-400 font-bold">
+              Dismiss
+            </button>
+          </div>
+        );
+      })()}
+
       {/* VECTOR ATIVO — substitui a strip de desvio enquanto vector está activo */}
       {flight.atd && flight.activeVector && (() => {
         const v = flight.activeVector;
@@ -6328,8 +6442,13 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                 → DCT {targetCp.name || ('WP ' + v.thenDirectIdx)}
               </span>
             )}
+            <button onClick={onOpenAlt}
+              className={`ml-auto p-1.5 rounded border ${theme.panelBorder} ${theme.fgMuted}`}
+              title="ATC altitude change" aria-label="ATC altitude change">
+              <ArrowUpDown className="w-3.5 h-3.5" />
+            </button>
             <button onClick={onOpenVector}
-              className={`ml-auto text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+              className={`text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
               Editar
             </button>
             <button onClick={onClearVector}
@@ -6370,6 +6489,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
                 className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
                 title="ATC vector (heading)" aria-label="ATC vector">
                 <Compass className="w-4 h-4" />
+              </button>
+              <button onClick={onOpenAlt}
+                className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
+                title="ATC altitude change" aria-label="ATC altitude change">
+                <ArrowUpDown className="w-4 h-4" />
               </button>
               <button onClick={onOpenHold}
                 className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
@@ -7414,6 +7538,80 @@ function VectorModal({ flight, ac, computed, fromPoint, theme, onApply, onClose 
               : `${theme.panel} ${theme.fgFaint} opacity-40`
           }`}>
           Aplicar vector
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AltModal({ flight, ac, theme, onApply, onClose }) {
+  const cruise = Number(flight.cruiseAlt) || 7000;
+  // Pre-fill with the most relevant "round" target. If pilot most likely got
+  // a step climb/descent, +/- 1000 ft is a useful default; for now seed with
+  // current cruise so they can punch in the cleared value.
+  const [target, setTarget] = useState(cruise);
+  const targetNum = Number(target);
+  const valid = Number.isFinite(targetNum) && targetNum >= 0;
+  const delta = valid ? (targetNum - cruise) : 0;
+  const phase = delta > 0 ? "climb" : (delta < 0 ? "descent" : "level");
+  const rate = phase === "climb"
+    ? Number(ac.rocClimb || 500)
+    : Number(ac.rodDescent || 500);
+  const minutes = valid && phase !== "level" ? (Math.abs(delta) / rate) : 0;
+  return (
+    <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-3`}>
+        <div className="flex items-center justify-between">
+          <h3 className={`text-sm uppercase tracking-widest ${theme.cyan} font-bold flex items-center gap-2`}>
+            <ArrowUpDown className="w-4 h-4" /> ATC Altitude
+          </h3>
+          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+        </div>
+
+        <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} text-center`}>
+          Cleared to
+        </div>
+        <input type="number" inputMode="numeric" min="0" step="100" value={target}
+          onChange={(e) => setTarget(e.target.value === "" ? "" : Number(e.target.value))}
+          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-3 text-3xl font-bold rounded-xl num text-center focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+
+        <div className={`grid grid-cols-3 gap-2 text-center text-xs num`}>
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Atual</div>
+            <div className={theme.fg}>{cruise} ft</div>
+          </div>
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Δ</div>
+            <div className={delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : theme.fgFaint}>
+              {delta > 0 ? "+" : ""}{delta} ft
+            </div>
+          </div>
+          <div>
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Tempo</div>
+            <div className={theme.fg}>
+              {phase === "level" ? "—" : (minutes < 1 ? `${Math.round(minutes * 60)}s` : `${minutes.toFixed(1)}m`)}
+            </div>
+          </div>
+        </div>
+
+        <div className={`grid grid-cols-4 gap-1`}>
+          {[-2000, -1000, 1000, 2000].map(d => (
+            <button key={d} onClick={() => setTarget(Math.max(0, cruise + d))}
+              className={`py-1.5 rounded-lg border text-xs ${theme.panelBorder} ${theme.fgMuted}`}>
+              {d > 0 ? "+" : ""}{d}
+            </button>
+          ))}
+        </div>
+
+        <button onClick={() => { onApply(targetNum); onClose(); }}
+          disabled={!valid || delta === 0}
+          className={`w-full py-3 rounded-xl font-bold text-base ${
+            valid && delta !== 0
+              ? `${theme.accentBg} ${theme.accentBgFg ?? "text-black"}`
+              : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Aplicar {phase === "climb" ? "subida" : phase === "descent" ? "descida" : "ALT"}
         </button>
       </div>
     </div>
@@ -9301,12 +9499,20 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       icon: planeIcon(est.course || 0),
       zIndexOffset: 1000,
     }).addTo(map);
-    const label = est.vectoring ? 'Posição estimada (vector)'
+    let label = est.vectoring ? 'Posição estimada (vector)'
       : est.holding ? 'Posição estimada (hold)'
       : est.devActive ? 'Posição estimada (desvio)'
       : 'Posição estimada';
+    if (flight.activeAlt) {
+      const ats = altTransitionState({ activeAlt: flight.activeAlt, nowMin: nowHHMM(), ac });
+      if (ats && !ats.reached) {
+        label += ` · ${ats.phase === "climb" ? "↗" : "↘"} ${ats.currentAlt} → ${flight.activeAlt.targetAlt} ft`;
+      } else if (ats && ats.reached) {
+        label += ` · nível ${flight.activeAlt.targetAlt} ft`;
+      }
+    }
     ov.simMarker.bindPopup(label);
-  }, [tick, liveRoute, flight.atd, flight.activeDeviation, flight.activeVector, flight.holds, liveETAs]);
+  }, [tick, liveRoute, flight.atd, flight.activeDeviation, flight.activeVector, flight.activeAlt, flight.holds, liveETAs]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
