@@ -57,7 +57,7 @@
       Download, Upload, ChevronDown, ChevronUp, GripVertical,
       TrendingUp, TrendingDown, Minus, Map: MapIcon, Navigation,
       Search, Star, ClipboardList, RefreshCw,
-      Maximize2, Minimize2, Pause
+      Maximize2, Minimize2, Pause, Compass
     } = LucideReact;
 
 function haptic(pattern) {
@@ -626,6 +626,7 @@ function NavlogApp() {
   const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const [deviationOpen, setDeviationOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
+  const [vectorOpen, setVectorOpen] = useState(false);
   const [userPoints, setUserPoints] = useState([]);
   // Map center+zoom is preserved across tab switches (Leaflet otherwise
   // re-initialises and re-fits-bounds whenever the MapTab remounts).
@@ -1280,6 +1281,26 @@ function NavlogApp() {
     });
   }
 
+  // ATC vector ("fly heading X" until further / for N NM / for N min, then DCT Y)
+  // is mutually exclusive with activeDeviation: entering one clears the other.
+  // The vector lives off the planned route, so estimatedPosition treats it as
+  // an override and dead-reckons from its from-point along the heading.
+  function setVector(vector) {
+    setFlight(function(f) {
+      var c = Object.assign({}, f, { activeVector: vector });
+      delete c.activeDeviation;
+      c.checkpoints = clearDirectTo(f.checkpoints);
+      return c;
+    });
+  }
+  function clearVector() {
+    setFlight(function(f) {
+      var c = Object.assign({}, f);
+      delete c.activeVector;
+      return c;
+    });
+  }
+
   function addHold(hold) {
     setFlight(function(f) {
       var entry = {
@@ -1299,6 +1320,55 @@ function NavlogApp() {
       return c;
     });
   }
+  // Vector limit-reached auto-trigger: when the active vector hits its NM/min
+  // limit, either auto-fire direct-to (if thenDirectIdx is set) or alarm and
+  // wait for the pilot. Runs at 1 Hz only while a vector is active; the alarm
+  // is deduped per vector via vectorAlarmFiredFor (keyed by startedAt).
+  const [vectorTick, setVectorTick] = useState(0);
+  useEffect(() => {
+    if (!flight.activeVector) return;
+    const id = setInterval(() => setVectorTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [flight.activeVector ? "on" : "off"]);
+  const vectorAlarmFiredFor = useRef(null);
+  useEffect(() => {
+    const v = flight.activeVector;
+    if (!v) { vectorAlarmFiredFor.current = null; return; }
+    const vp = vectorPosition({
+      vector: v, nowMin: nowHHMM(),
+      windDir: flight.windDir, windVel: flight.windVel,
+      variation: flight.variation, tas: v.currentTas,
+    });
+    if (!vp || !vp.limitReached) return;
+    if (v.thenDirectIdx != null) {
+      const target = flight.checkpoints[v.thenDirectIdx];
+      if (!target || target.lat == null || target.lon == null) return;
+      const dev = {
+        fromLat: Math.round(vp.lat * 1e6) / 1e6,
+        fromLon: Math.round(vp.lon * 1e6) / 1e6,
+        targetIdx: Number(v.thenDirectIdx),
+        currentAlt: v.currentAlt != null ? v.currentAlt : (flight.cruiseAlt ?? 7000),
+        currentTas: v.currentTas != null ? v.currentTas : (ac && ac.tasCruise ? ac.tasCruise : 100),
+        startedAt: formatHHMMSS(nowHHMM()),
+      };
+      setFlight(function(f) {
+        var c = Object.assign({}, f, {
+          checkpoints: applyDirectTo(f.checkpoints, Number(v.thenDirectIdx)),
+          activeDeviation: dev,
+        });
+        delete c.activeVector;
+        return c;
+      });
+      haptic([60, 30, 60]);
+      return;
+    }
+    if (vectorAlarmFiredFor.current !== v.startedAt) {
+      vectorAlarmFiredFor.current = v.startedAt;
+      haptic([100, 50, 100, 50, 100]);
+      try { playAlarm(); } catch (e) {}
+    }
+  }, [vectorTick, flight.activeVector, flight.checkpoints, flight.windDir, flight.windVel, flight.variation, flight.cruiseAlt, ac]);
+
   // Apply a wind suggestion (from E1 back-solve) to the global wind so the
   // remaining legs re-compute against the real conditions.
   function applyWind(windDir, windVel) {
@@ -1348,15 +1418,21 @@ function NavlogApp() {
   }
 
   function resetFlight() {
-    setFlight((f) => ({
-      ...f,
-      atd: null,
-      autoWpATAs: {},
-      windVel: 0,
-      checkpoints: f.checkpoints.map((cp) =>
-        cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null }
-      ),
-    }));
+    setFlight((f) => {
+      const next = {
+        ...f,
+        atd: null,
+        autoWpATAs: {},
+        windVel: 0,
+        checkpoints: f.checkpoints.map((cp) =>
+          cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null, bypassed: false }
+        ),
+      };
+      delete next.activeDeviation;
+      delete next.activeVector;
+      delete next.holds;
+      return next;
+    });
     setLegTimerStart(null);
   }
 
@@ -1784,6 +1860,8 @@ function NavlogApp() {
             onDirectTo={directToWp}
             onOpenHold={() => setHoldOpen(true)}
             onRemoveHold={removeHold}
+            onOpenVector={() => setVectorOpen(true)}
+            onClearVector={clearVector}
             onApplyWind={applyWind}
             prefs={prefs}
           />
@@ -1956,6 +2034,23 @@ function NavlogApp() {
           })()}
           onApply={addHold}
           onClose={() => setHoldOpen(false)}
+        />
+      )}
+
+      {/* VECTOR */}
+      {vectorOpen && (
+        <VectorModal
+          flight={flight} ac={ac} computed={computed} theme={theme}
+          fromPoint={(function() {
+            const est = estimatedPosition({
+              liveRoute, liveETAs, flight,
+              nowMin: nowHHMM(),
+              eobtMin: parseHHMM(flight.eobt) ?? 0,
+            });
+            return est ? { lat: est.lat, lon: est.lon } : null;
+          })()}
+          onApply={setVector}
+          onClose={() => setVectorOpen(false)}
         />
       )}
 
@@ -5841,7 +5936,8 @@ function StepResumo({ theme, cp, setCp, isNew, isOrigin, windMode, cruiseAlt, pr
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold, onApplyWind,
+    onOpenDeviation, onClearDeviation, onDirectTo, onOpenHold, onRemoveHold,
+    onOpenVector, onClearVector, onApplyWind,
     liveFuel, ac, prefs }) {
 
   const dev = flight.activeDeviation || null;
@@ -6210,8 +6306,42 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
         </div>
       )}
 
+      {/* VECTOR ATIVO — substitui a strip de desvio enquanto vector está activo */}
+      {flight.atd && flight.activeVector && (() => {
+        const v = flight.activeVector;
+        const vp = estPos && estPos.vector ? estPos.vector : null;
+        const targetCp = v.thenDirectIdx != null ? computed[v.thenDirectIdx] : null;
+        const headingStr = String(Math.round(v.heading)).padStart(3, "0") + "°" + (v.headingType || "M");
+        let progress = "";
+        if (v.mode === "open") progress = "aberto";
+        else if (v.mode === "distance" && vp) progress = `${vp.distFlown.toFixed(1)} / ${Number(v.limitDist).toFixed(1)} NM`;
+        else if (v.mode === "time" && vp) progress = `${vp.timeFlown.toFixed(1)} / ${Number(v.limitMin).toFixed(1)} min`;
+        return (
+          <div className="flex items-center gap-2 border border-cyan-500/60 bg-cyan-500/10 rounded-lg p-2 flex-wrap">
+            <span className={`text-[10px] uppercase tracking-widest font-bold ${theme.cyan} flex items-center gap-1`}>
+              <Compass className="w-3.5 h-3.5" /> VECTOR
+            </span>
+            <span className={`text-[11px] num font-bold ${theme.cyan}`}>{headingStr}</span>
+            <span className={`text-[10px] num ${theme.fgFaint}`}>{progress}</span>
+            {targetCp && (
+              <span className={`text-[10px] num ${theme.fgFaint}`}>
+                → DCT {targetCp.name || ('WP ' + v.thenDirectIdx)}
+              </span>
+            )}
+            <button onClick={onOpenVector}
+              className={`ml-auto text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
+              Editar
+            </button>
+            <button onClick={onClearVector}
+              className="text-[10px] px-2 py-1 rounded border border-red-500 text-red-400 font-bold">
+              Resume own nav
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Strip de Reposicionamento (Desvio) + entrada Big-mode */}
-      {flight.atd && (
+      {flight.atd && !flight.activeVector && (
         <div className={`flex items-center gap-2 ${dev ? "border-cyan-500/60 bg-cyan-500/10 border" : ""} rounded-lg ${dev ? "p-2" : ""}`}>
           {dev ? (
             <>
@@ -6235,6 +6365,11 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
               <button onClick={onOpenDeviation}
                 className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-[0.99] flex items-center justify-center gap-1.5`}>
                 <Navigation className="w-3.5 h-3.5" /> Reposicionar (desvio)
+              </button>
+              <button onClick={onOpenVector}
+                className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
+                title="ATC vector (heading)" aria-label="ATC vector">
+                <Compass className="w-4 h-4" />
               </button>
               <button onClick={onOpenHold}
                 className={`px-3 py-2 rounded-lg border ${theme.panelBorder} ${theme.fgMuted} active:scale-95`}
@@ -7121,6 +7256,164 @@ function HoldModal({ flight, computed, lastCrossedIdx, theme, onApply, onClose }
               : `${theme.panel} ${theme.fgFaint} opacity-40`
           }`}>
           Aplicar hold
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VectorModal({ flight, ac, computed, fromPoint, theme, onApply, onClose }) {
+  const upcoming = computed
+    .map((cp, i) => ({ cp, i }))
+    .filter(x => !x.cp.isOrigin && !x.cp.bypassed && x.cp.ata == null);
+
+  const [heading, setHeading] = useState(90);
+  const [headingType, setHeadingType] = useState("M");
+  const [mode, setMode] = useState("open");
+  const [limitDist, setLimitDist] = useState(5);
+  const [limitMin, setLimitMin] = useState(5);
+  const [thenDirectIdx, setThenDirectIdx] = useState(upcoming[0] ? upcoming[0].i : null);
+  const [currentTas, setCurrentTas] = useState(ac && ac.tasCruise ? ac.tasCruise : 100);
+  const [currentAlt, setCurrentAlt] = useState(flight.cruiseAlt ?? 7000);
+
+  const headingNum = Number(heading);
+  const headingValid = Number.isFinite(headingNum) && headingNum >= 0 && headingNum < 360;
+  const limitValid = mode === "open"
+    || (mode === "distance" && Number(limitDist) > 0)
+    || (mode === "time" && Number(limitMin) > 0);
+  const fromValid = fromPoint && fromPoint.lat != null && fromPoint.lon != null;
+  const canApply = headingValid && limitValid && fromValid;
+
+  function build() {
+    const v = {
+      heading: ((headingNum % 360) + 360) % 360,
+      headingType,
+      mode,
+      fromLat: Math.round(fromPoint.lat * 1e6) / 1e6,
+      fromLon: Math.round(fromPoint.lon * 1e6) / 1e6,
+      startedAt: formatHHMMSS(nowHHMM()),
+      currentTas: Number(currentTas) || (ac && ac.tasCruise) || 100,
+      currentAlt: Number(currentAlt) || (flight.cruiseAlt ?? 7000),
+    };
+    if (mode === "distance") v.limitDist = Number(limitDist);
+    if (mode === "time") v.limitMin = Number(limitMin);
+    if (mode !== "open" && thenDirectIdx != null && upcoming.some(u => u.i === Number(thenDirectIdx))) {
+      v.thenDirectIdx = Number(thenDirectIdx);
+    }
+    return v;
+  }
+
+  return (
+    <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-3`}>
+        <div className="flex items-center justify-between">
+          <h3 className={`text-sm uppercase tracking-widest ${theme.cyan} font-bold flex items-center gap-2`}>
+            <Navigation className="w-4 h-4" /> ATC Vector
+          </h3>
+          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 items-end">
+          <label className="block space-y-0.5 col-span-2">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Heading</span>
+            <input type="number" inputMode="numeric" min="0" max="359" value={heading}
+              onChange={(e) => setHeading(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-2 text-2xl font-bold rounded num text-center focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+          <div className="grid grid-cols-2 gap-1">
+            <button onClick={() => setHeadingType("M")}
+              className={`py-2 rounded-lg border text-xs font-bold ${
+                headingType === "M"
+                  ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10`
+                  : `${theme.panelBorder} ${theme.fgFaint}`
+              }`}>MAG</button>
+            <button onClick={() => setHeadingType("T")}
+              className={`py-2 rounded-lg border text-xs font-bold ${
+                headingType === "T"
+                  ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10`
+                  : `${theme.panelBorder} ${theme.fgFaint}`
+              }`}>TRUE</button>
+          </div>
+        </div>
+
+        <div className={`grid grid-cols-3 gap-2`}>
+          {[
+            { v: "open",     label: "Aberto" },
+            { v: "distance", label: "Por NM" },
+            { v: "time",     label: "Por min" },
+          ].map(opt => (
+            <button key={opt.v} onClick={() => setMode(opt.v)}
+              className={`py-2 rounded-lg border text-sm font-bold ${
+                mode === opt.v
+                  ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10`
+                  : `${theme.panelBorder} ${theme.fgFaint}`
+              }`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "distance" && (
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Distância (NM)</span>
+            <input type="number" inputMode="decimal" min="0.1" step="0.1" value={limitDist}
+              onChange={(e) => setLimitDist(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+        )}
+        {mode === "time" && (
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Tempo (min)</span>
+            <input type="number" inputMode="decimal" min="0.5" step="0.5" value={limitMin}
+              onChange={(e) => setLimitMin(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+        )}
+
+        {mode !== "open" && (
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>Depois DCT</span>
+            <select value={thenDirectIdx ?? ""}
+              onChange={(e) => setThenDirectIdx(e.target.value === "" ? null : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded focus:outline-none focus:ring-2 focus:ring-amber-500/30`}>
+              <option value="">— sem DCT (esperar nova instrução) —</option>
+              {upcoming.map(({ cp, i }) => (
+                <option key={i} value={i}>{cp.name || ('WP ' + i)}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>TAS (kt)</span>
+            <input type="number" inputMode="numeric" min="40" max="500" value={currentTas}
+              onChange={(e) => setCurrentTas(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+          <label className="block space-y-0.5">
+            <span className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>ALT (ft)</span>
+            <input type="number" inputMode="numeric" min="0" step="100" value={currentAlt}
+              onChange={(e) => setCurrentAlt(e.target.value === "" ? "" : Number(e.target.value))}
+              className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-2 py-1.5 text-sm rounded num focus:outline-none focus:ring-2 focus:ring-amber-500/30`} />
+          </label>
+        </div>
+
+        {!fromValid && (
+          <div className={`text-center text-xs ${theme.danger}`}>
+            Sem posição estimada — defina ATD antes de aplicar vector.
+          </div>
+        )}
+
+        <button onClick={() => { onApply(build()); onClose(); }}
+          disabled={!canApply}
+          className={`w-full py-3 rounded-xl font-bold text-base ${
+            canApply
+              ? `${theme.accentBg} ${theme.accentBgFg ?? "text-black"}`
+              : `${theme.panel} ${theme.fgFaint} opacity-40`
+          }`}>
+          Aplicar vector
         </button>
       </div>
     </div>
@@ -8462,7 +8755,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
 function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
-  const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
+  const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null, vector: null, vectorTrigger: null, vectorThen: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
   const [tick, setTick] = useState(0);
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
@@ -8940,6 +9233,55 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     ).addTo(map);
   }, [flight.activeDeviation, flight.checkpoints]);
 
+  // Active vector overlay: cyan solid line from-point → projected end (or full
+  // limit point if the vector has one), plus an optional dotted continuation
+  // to the thenDirect target when configured.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.L) return;
+    const ov = overlayRef.current;
+    if (ov.vector)        { map.removeLayer(ov.vector);        ov.vector = null; }
+    if (ov.vectorTrigger) { map.removeLayer(ov.vectorTrigger); ov.vectorTrigger = null; }
+    if (ov.vectorThen)    { map.removeLayer(ov.vectorThen);    ov.vectorThen = null; }
+    const v = flight.activeVector;
+    if (!v || v.fromLat == null || v.fromLon == null) return;
+    const vp = vectorPosition({
+      vector: v, nowMin: nowHHMM(),
+      windDir: flight.windDir, windVel: flight.windVel,
+      variation: flight.variation, tas: v.currentTas,
+    });
+    if (!vp) return;
+    // Project the full track for the painted vector polyline. For limited
+    // modes, paint from from-point to the trigger point regardless of how
+    // much has been flown so the pilot sees the planned end of the segment.
+    let endLat, endLon;
+    if (v.mode === "distance" && v.limitDist != null) {
+      [endLat, endLon] = projectDest(v.fromLat, v.fromLon, vp.course, Number(v.limitDist));
+    } else if (v.mode === "time" && v.limitMin != null) {
+      [endLat, endLon] = projectDest(v.fromLat, v.fromLon, vp.course, (vp.gs * Number(v.limitMin)) / 60);
+    } else {
+      [endLat, endLon] = projectDest(v.fromLat, v.fromLon, vp.course, 30);
+    }
+    ov.vector = window.L.polyline(
+      [[v.fromLat, v.fromLon], [endLat, endLon]],
+      { color: '#22d3ee', weight: 4, opacity: 0.95, pane: 'routePane' }
+    ).addTo(map);
+    if (v.mode !== "open") {
+      ov.vectorTrigger = window.L.circleMarker([endLat, endLon], {
+        radius: 5, color: '#22d3ee', fillColor: '#0e1116', fillOpacity: 1, weight: 2, pane: 'routePane',
+      }).addTo(map);
+      if (v.thenDirectIdx != null) {
+        const target = (flight.checkpoints || [])[v.thenDirectIdx];
+        if (target && target.lat != null && target.lon != null) {
+          ov.vectorThen = window.L.polyline(
+            [[endLat, endLon], [target.lat, target.lon]],
+            { color: '#22d3ee', weight: 3, opacity: 0.7, dashArray: '6,6', pane: 'routePane' }
+          ).addTo(map);
+        }
+      }
+    }
+  }, [tick, flight.activeVector, flight.checkpoints, flight.windDir, flight.windVel, flight.variation]);
+
   // Simulated aircraft position — single source of truth lives in
   // lib/planning.js (estimatedPosition). This effect only renders the marker.
   useEffect(() => {
@@ -8959,11 +9301,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       icon: planeIcon(est.course || 0),
       zIndexOffset: 1000,
     }).addTo(map);
-    const label = est.holding ? 'Posição estimada (hold)'
+    const label = est.vectoring ? 'Posição estimada (vector)'
+      : est.holding ? 'Posição estimada (hold)'
       : est.devActive ? 'Posição estimada (desvio)'
       : 'Posição estimada';
     ov.simMarker.bindPopup(label);
-  }, [tick, liveRoute, flight.atd, flight.activeDeviation, flight.holds, liveETAs]);
+  }, [tick, liveRoute, flight.atd, flight.activeDeviation, flight.activeVector, flight.holds, liveETAs]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
