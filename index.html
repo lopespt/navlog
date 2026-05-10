@@ -46,6 +46,7 @@
        Node and reused by the babel block as bare globals). MUST load
        synchronously before the babel block below. -->
   <script src="lib/planning.js"></script>
+  <script src="lib/airspaces.js"></script>
 
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo, useRef } = React;
@@ -7848,6 +7849,75 @@ async function userPtsDelete(id) {
     tx.objectStore('points').delete(id);
   } catch (_) {}
 }
+
+// ── IndexedDB helpers for SBP/SBR/SBD airspaces (GEOAISWEB WFS cache) ────────
+function _airspacesDb() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open('navlog_airspaces', 1);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      db.createObjectStore('areas', { keyPath: 'id' });
+      db.createObjectStore('meta',  { keyPath: 'k' });
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function() { reject(req.error); };
+  });
+}
+async function airspacesAll() {
+  try {
+    var db = await _airspacesDb();
+    return new Promise(function(resolve) {
+      var tx = db.transaction('areas', 'readonly');
+      var req = tx.objectStore('areas').getAll();
+      req.onsuccess = function(e) { resolve(e.target.result || []); };
+      req.onerror = function() { resolve([]); };
+    });
+  } catch (_) { return []; }
+}
+async function airspacesPutMany(items) {
+  if (!items || !items.length) return 0;
+  try {
+    var db = await _airspacesDb();
+    return await new Promise(function(resolve) {
+      var tx = db.transaction('areas', 'readwrite');
+      var store = tx.objectStore('areas');
+      for (var i = 0; i < items.length; i++) store.put(items[i]);
+      tx.oncomplete = function() { resolve(items.length); };
+      tx.onerror    = function() { resolve(0); };
+      tx.onabort    = function() { resolve(0); };
+    });
+  } catch (_) { return 0; }
+}
+async function airspacesClear() {
+  try {
+    var db = await _airspacesDb();
+    return await new Promise(function(resolve) {
+      var tx = db.transaction('areas', 'readwrite');
+      tx.objectStore('areas').clear();
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror    = function() { resolve(false); };
+    });
+  } catch (_) { return false; }
+}
+async function airspacesMeta() {
+  try {
+    var db = await _airspacesDb();
+    return await new Promise(function(resolve) {
+      var tx = db.transaction('meta', 'readonly');
+      var req = tx.objectStore('meta').get('last');
+      req.onsuccess = function(e) { resolve(e.target.result || null); };
+      req.onerror   = function() { resolve(null); };
+    });
+  } catch (_) { return null; }
+}
+async function airspacesMetaSet(meta) {
+  try {
+    var db = await _airspacesDb();
+    var tx = db.transaction('meta', 'readwrite');
+    tx.objectStore('meta').put(Object.assign({ k: 'last' }, meta));
+  } catch (_) {}
+}
+
 async function renderPdfFromHandle(handle) {
   if (!handle) return null;
   try {
