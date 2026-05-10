@@ -519,11 +519,10 @@ const DEFAULT_PREFS = {
   wakeLock: false,
   showFuelInFlight: true,
   alertEtaDeltaMin: 5, // minutos de desvio para alertar
-  // Map overlay zoom-fade: above the threshold, opacity drops linearly with
-  // each zoom step at fadeRate per step (so rate 0.3 + threshold 12 → fully
-  // transparent around zoom 15.3). Tuned in PdfLayersPanel.
+  // Map overlay zoom-fade: opacity goes linearly from full at overlayFadeZoom
+  // to 0 at overlayFadeEndZoom. start >= end disables the fade.
   overlayFadeZoom: 12,
-  overlayFadeRate: 0.3,
+  overlayFadeEndZoom: 15,
 };
 
 // Tokens de tema. Cada um define classes Tailwind para os elementos principais.
@@ -8140,13 +8139,20 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
 }
 
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
-function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, onAddNew, onStartCalibration, onClose }) {
-  const fadeZoom = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
-  const fadeRate = (prefs && prefs.overlayFadeRate != null) ? prefs.overlayFadeRate : 0.3;
-  function setFadeZoom(v) { if (savePrefs) savePrefs({ ...prefs, overlayFadeZoom: Number(v) }); }
-  function setFadeRate(v) { if (savePrefs) savePrefs({ ...prefs, overlayFadeRate: Number(v) }); }
-  // Zoom level at which the linear fade reaches zero (rate × (z − threshold) = 1).
-  const fadeFloor = fadeRate > 0 ? fadeZoom + 1 / fadeRate : null;
+function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoom, onAddNew, onStartCalibration, onClose }) {
+  const fadeStart = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
+  const fadeEnd = (prefs && prefs.overlayFadeEndZoom != null) ? prefs.overlayFadeEndZoom : 15;
+  function setFadeStart(v) {
+    var n = Number(v);
+    var nextEnd = Math.max(fadeEnd, n + 0.5);
+    if (savePrefs) savePrefs({ ...prefs, overlayFadeZoom: n, overlayFadeEndZoom: nextEnd });
+  }
+  function setFadeEnd(v) {
+    var n = Number(v);
+    var nextStart = Math.min(fadeStart, n - 0.5);
+    if (savePrefs) savePrefs({ ...prefs, overlayFadeEndZoom: n, overlayFadeZoom: nextStart });
+  }
+  const zoomReadout = mapZoom != null ? mapZoom.toFixed(1) : "—";
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
@@ -8162,29 +8168,32 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, onAddN
       {/* Global zoom-fade controls — apply to every overlay */}
       {savePrefs && (
         <div className={`px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0 space-y-2`}>
-          <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
-            Esmaecer ao aproximar zoom
+          <div className="flex items-center justify-between">
+            <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+              Esmaecer ao aproximar zoom
+            </div>
+            <div className={`text-[10px] num ${theme.cyan}`}>zoom actual {zoomReadout}</div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] ${theme.fgFaint} w-20`}>Threshold</span>
+            <span className={`text-[10px] ${theme.fgFaint} w-24`}>Inicia (100%)</span>
             <input type="range" min="5" max="18" step="0.5"
-              value={fadeZoom}
-              onChange={e => setFadeZoom(e.target.value)}
+              value={fadeStart}
+              onChange={e => setFadeStart(e.target.value)}
               className="flex-1" />
-            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>z {fadeZoom}</span>
+            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>z {fadeStart}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] ${theme.fgFaint} w-20`}>Velocidade</span>
-            <input type="range" min="0" max="1" step="0.05"
-              value={fadeRate}
-              onChange={e => setFadeRate(e.target.value)}
+            <span className={`text-[10px] ${theme.fgFaint} w-24`}>Termina (0%)</span>
+            <input type="range" min="5" max="18" step="0.5"
+              value={fadeEnd}
+              onChange={e => setFadeEnd(e.target.value)}
               className="flex-1" />
-            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>{fadeRate.toFixed(2)}</span>
+            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>z {fadeEnd}</span>
           </div>
           <div className={`text-[10px] num ${theme.fgFaint} text-right`}>
-            {fadeRate <= 0
-              ? "desligado"
-              : `0% a partir de z ${fadeFloor.toFixed(1)}`}
+            {fadeEnd <= fadeStart
+              ? "desligado (inicia ≥ termina)"
+              : `linear de z ${fadeStart} a z ${fadeEnd}`}
           </div>
         </div>
       )}
@@ -8555,16 +8564,14 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       // can see what is underneath without losing it altogether.
       if (calibratingId === ov.id && calibStep === "pickMap") return 0.25;
       var base = ov.opacity != null ? ov.opacity : 0.7;
-      // Zoom-IN fade: as the user zooms past overlayFadeZoom, opacity drops
-      // linearly at overlayFadeRate per zoom step. Below the threshold the
-      // overlay shows at its configured base opacity.
-      var threshold = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
-      var rate = (prefs && prefs.overlayFadeRate != null) ? prefs.overlayFadeRate : 0.3;
-      if (rate > 0 && mapZoom > threshold) {
-        var factor = Math.max(0, 1 - rate * (mapZoom - threshold));
-        return base * factor;
-      }
-      return base;
+      // Zoom-IN fade: from `start` (full base opacity) linearly to `end`
+      // (fully transparent). Below `start` overlay shows at base; above `end`
+      // it's invisible. start >= end disables the fade entirely.
+      var start = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
+      var end = (prefs && prefs.overlayFadeEndZoom != null) ? prefs.overlayFadeEndZoom : 15;
+      if (end <= start || mapZoom <= start) return base;
+      if (mapZoom >= end) return 0;
+      return base * (1 - (mapZoom - start) / (end - start));
     }
 
     function makeLayer(ov) {
@@ -8579,7 +8586,10 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       var currentBounds = bounds;
       return {
         remove: function() { layer.remove(); },
-        setOverlay: function(newOv) {
+        // Pass the freshly-computed opacity in from the caller — the closure
+        // here would otherwise capture the FIRST mount's `mapZoom`/`prefs` and
+        // never honour live zoom changes (#fade not updating until tab swap).
+        setOverlay: function(newOv, opacityValue) {
           var nu = chooseUrl(newOv);
           var nb = chooseBounds(newOv);
           if (nu && nu !== currentUrl) { try { layer.setUrl(nu); } catch (_) {} currentUrl = nu; }
@@ -8589,7 +8599,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             try { layer.setBounds(window.L.latLngBounds(nb[0], nb[1])); } catch (_) {}
             currentBounds = nb;
           }
-          layer.setOpacity(chooseOpacity(newOv));
+          layer.setOpacity(opacityValue != null ? opacityValue : chooseOpacity(newOv));
           if (newOv.visible) layer.addTo(map); else layer.remove();
         }
       };
@@ -8604,12 +8614,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     });
     pdfOverlays.forEach(function(ov) {
       if (pdfLayerRefs.current[ov.id]) {
-        pdfLayerRefs.current[ov.id].setOverlay(ov);
+        pdfLayerRefs.current[ov.id].setOverlay(ov, chooseOpacity(ov));
       } else {
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
     });
-  }, [pdfOverlays, mapZoom, calibratingId, calibStep, prefs && prefs.overlayFadeZoom, prefs && prefs.overlayFadeRate]);
+  }, [pdfOverlays, mapZoom, calibratingId, calibStep, prefs && prefs.overlayFadeZoom, prefs && prefs.overlayFadeEndZoom]);
 
   // Lazy hi-res rendering: when the user zooms past HIRES_ZOOM, schedule a
   // background re-render of every visible overlay that doesn't yet have
@@ -8881,6 +8891,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           setOverlays={setPdfOverlays}
           prefs={prefs}
           savePrefs={savePrefs}
+          mapZoom={mapZoom}
           onAddNew={() => { setLayersOpen(false); setGeorefActive(true); }}
           onStartCalibration={startCalibration}
           onClose={() => setLayersOpen(false)}
