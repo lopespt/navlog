@@ -390,6 +390,57 @@ async function airacAirport(icao) {
   } catch (_) { return null; }
 }
 
+// Pin the first checkpoint to the departure airport / the last one to the
+// destination airport. Used by the Identificação inputs (on blur) so the route
+// always opens at the typed origin and ends at the typed destination — pilot
+// doesn't have to maintain those WPs by hand.
+//
+// When the ICAO is found in AIRAC the WP picks up coordinates + elevation.
+// When it's not found we still update the name and clear coords so the pilot
+// can drag the WP into place on the map; per-pilot decision in PR #59.
+function syncAirportCheckpoint(flight, role, icao, ap) {
+  const cps = (flight.checkpoints || []).slice();
+  const lat = ap && ap.latitude  != null ? Number(ap.latitude)  : null;
+  const lon = ap && ap.longitude != null ? Number(ap.longitude) : null;
+  const elev = ap && ap.elevation_ft != null ? Number(ap.elevation_ft) : null;
+
+  if (role === "origin") {
+    if (cps.length === 0) {
+      cps.push({
+        name: icao || "ORIG",
+        alt: elev != null ? elev : 0,
+        tc: null, dist: 0, ata: null, gsActual: null,
+        isOrigin: true, lat, lon,
+      });
+    } else {
+      cps[0] = Object.assign({}, cps[0], {
+        name: icao || cps[0].name,
+        lat, lon,
+        alt: elev != null ? elev : cps[0].alt,
+      });
+    }
+    return Object.assign({}, flight, { origin: icao, checkpoints: cps });
+  }
+
+  // destination
+  const lastIdx = cps.length - 1;
+  if (lastIdx <= 0 || cps[lastIdx].isOrigin) {
+    cps.push({
+      name: icao || "DEST",
+      alt: elev != null ? elev : 0,
+      tc: 0, dist: 0, ata: null, gsActual: null,
+      lat, lon,
+    });
+  } else {
+    cps[lastIdx] = Object.assign({}, cps[lastIdx], {
+      name: icao || cps[lastIdx].name,
+      lat, lon,
+      alt: elev != null ? elev : cps[lastIdx].alt,
+    });
+  }
+  return Object.assign({}, flight, { destination: icao, checkpoints: cps });
+}
+
 async function airacProcedures(icao) {
   if (!icao) return null;
   const code = String(icao).toUpperCase().trim();
@@ -3015,12 +3066,24 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           <div>
             <label className={labelClass}>Origem</label>
             <input className={fieldClass} value={flight.origin}
-              onChange={(e) => set("origin", e.target.value.toUpperCase())} />
+              onChange={(e) => set("origin", e.target.value.toUpperCase())}
+              onBlur={async (e) => {
+                const icao = (e.target.value || "").toUpperCase().trim();
+                const ap = await airacAirport(icao);
+                setFlight(f => syncAirportCheckpoint(f, "origin", icao, ap));
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
           </div>
           <div>
             <label className={labelClass}>Destino</label>
             <input className={fieldClass} value={flight.destination}
-              onChange={(e) => set("destination", e.target.value.toUpperCase())} />
+              onChange={(e) => set("destination", e.target.value.toUpperCase())}
+              onBlur={async (e) => {
+                const icao = (e.target.value || "").toUpperCase().trim();
+                const ap = await airacAirport(icao);
+                setFlight(f => syncAirportCheckpoint(f, "destination", icao, ap));
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
           </div>
           <div>
             <label className={labelClass}>Alternado</label>
