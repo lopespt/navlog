@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v6";
+const CACHE_NAME = "navlog-v7";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
