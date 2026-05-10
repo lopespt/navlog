@@ -8247,35 +8247,55 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
   }
   const zoomReadout = mapZoom != null ? mapZoom.toFixed(1) : "—";
 
-  // Drag-and-drop reorder. Canonical state array: index 0 = bottom of z-stack,
-  // index N-1 = top. UI lists in reverse so the top of the list = top of map
-  // ("most preferred" wins visually). After a drop we splice in the displayed
-  // (reversed) frame, re-reverse, then assign sequential `order` values.
+  // Reorder via Pointer Events — works for mouse AND touch (HTML5 drag-and-drop
+  // doesn't fire on touch). Canonical state array: index 0 = bottom of z-stack,
+  // index N-1 = top. UI lists in reverse so top of the list = top of map ("most
+  // preferred" wins visually). On drop we splice in the displayed (reversed)
+  // frame, re-reverse, then assign sequential `order` values.
   const [draggingId, setDraggingId] = React.useState(null);
   const [dragOverId, setDragOverId] = React.useState(null);
   const displayed = React.useMemo(() => overlays.slice().reverse(), [overlays]);
-  function handleDragStart(e, id) {
+  // Refs mirror state so pointermove (fires many times per render) reads fresh
+  // values without depending on closure.
+  const draggingIdRef = React.useRef(null);
+  const dragOverIdRef = React.useRef(null);
+  React.useEffect(() => { draggingIdRef.current = draggingId; }, [draggingId]);
+  React.useEffect(() => { dragOverIdRef.current = dragOverId; }, [dragOverId]);
+  // Map of overlay id → row DOM element for hit-testing during drag.
+  const rowRefs = React.useRef(new Map());
+  function setRowRef(id, el) {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  }
+  function hitTestY(y) {
+    for (var entry of rowRefs.current) {
+      var rect = entry[1].getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom) return entry[0];
+    }
+    return null;
+  }
+  function handlePointerDown(e, id) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
     setDraggingId(id);
-    try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
-    try { e.dataTransfer.setData('text/plain', String(id)); } catch (_) {}
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
   }
-  function handleDragOver(e, id) {
-    e.preventDefault();
-    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    if (id !== dragOverId) setDragOverId(id);
+  function handlePointerMove(e) {
+    if (draggingIdRef.current == null) return;
+    var hit = hitTestY(e.clientY);
+    if (hit !== dragOverIdRef.current) setDragOverId(hit);
   }
-  function handleDragLeave(id) { if (id === dragOverId) setDragOverId(null); }
-  function handleDragEnd() { setDraggingId(null); setDragOverId(null); }
-  function handleDrop(e, targetId) {
-    e.preventDefault();
-    var srcId = draggingId;
+  function handlePointerUp(e) {
+    var srcId = draggingIdRef.current;
+    var tgtId = dragOverIdRef.current;
     setDraggingId(null);
     setDragOverId(null);
-    if (srcId == null || srcId === targetId) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (srcId == null || tgtId == null || srcId === tgtId) return;
     setOverlays(prev => {
       var disp = prev.slice().reverse();
       var srcIdx = disp.findIndex(o => o.id === srcId);
-      var tgtIdx = disp.findIndex(o => o.id === targetId);
+      var tgtIdx = disp.findIndex(o => o.id === tgtId);
       if (srcIdx < 0 || tgtIdx < 0) return prev;
       var moved = disp.splice(srcIdx, 1)[0];
       disp.splice(tgtIdx, 0, moved);
@@ -8283,6 +8303,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
       return canonical.map((o, i) => ({ ...o, order: i }));
     });
   }
+  function handlePointerCancel() { setDraggingId(null); setDragOverId(null); }
 
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
@@ -8342,9 +8363,7 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
         {displayed.map(ov => (
           <div
             key={ov.id}
-            onDragOver={e => handleDragOver(e, ov.id)}
-            onDragLeave={() => handleDragLeave(ov.id)}
-            onDrop={e => handleDrop(e, ov.id)}
+            ref={el => setRowRef(ov.id, el)}
             className={`${theme.panel} border rounded-xl p-3 transition-all duration-100 ${
               dragOverId === ov.id && draggingId !== ov.id ? 'border-amber-400 ring-2 ring-amber-400/40'
               : draggingId === ov.id ? 'border-amber-500/40 opacity-50'
@@ -8353,12 +8372,13 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
           >
             <div className="flex items-center gap-3">
               <span
-                draggable={true}
-                onDragStart={e => handleDragStart(e, ov.id)}
-                onDragEnd={handleDragEnd}
+                onPointerDown={e => handlePointerDown(e, ov.id)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
                 title="Arrastar para reordenar"
                 aria-label="Arrastar para reordenar"
-                className={`select-none ${theme.fgFaint} text-base leading-none px-1`}
+                className={`select-none ${theme.fgFaint} text-base leading-none px-1 py-2`}
                 style={{ cursor: 'grab', touchAction: 'none' }}
               >⋮⋮</span>
               {ov.dataUrl
