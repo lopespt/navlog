@@ -8317,6 +8317,10 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // Stable ref so map listeners always call the latest reporter
   const onViewChangeRef = useRef(onViewChange);
   useEffect(() => { onViewChangeRef.current = onViewChange; }, [onViewChange]);
+  // Last reported view kept in a ref instead of state — moveend / zoomend
+  // would otherwise trigger setState on every pan and re-render App + every
+  // tab content. We only push the view back to App on unmount (tab switch).
+  const lastViewRef = useRef(null);
 
   // Calibration: replace one of the existing 3 control points by clicking on
   // the chart (where the user sees the feature) and then on the map (where the
@@ -8473,9 +8477,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
     function reportView() {
       try {
-        if (!onViewChangeRef.current) return;
         var c = map.getCenter();
-        onViewChangeRef.current({ center: [c.lat, c.lng], zoom: map.getZoom() });
+        lastViewRef.current = { center: [c.lat, c.lng], zoom: map.getZoom() };
       } catch (_) {}
     }
 
@@ -8519,6 +8522,10 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     return () => {
       if (zoomDebounce) clearTimeout(zoomDebounce);
       if (moveDebounce) clearTimeout(moveDebounce);
+      // Flush the last view to App so tab-switch restores correctly.
+      if (lastViewRef.current && onViewChangeRef.current) {
+        try { onViewChangeRef.current(lastViewRef.current); } catch (_) {}
+      }
       map.remove();
       mapRef.current = null;
     };
@@ -8626,21 +8633,28 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   // dataUrlHi. Each overlay is rendered at most once at a time; the result
   // gets pushed back into the overlay state and the layer-sync effect picks it
   // up automatically.
+  // Hi-res rendering is heavy (PDF re-render @ scale 5 + warp). Wait until the
+  // user has settled — defer the work 400 ms after the last zoom or overlay
+  // change, and abort if another change comes in. The base resolution shows
+  // meanwhile; the hi-res quietly arrives once the gesture stops.
   useEffect(() => {
     if (!mapRef.current) return;
     if (mapZoom < HIRES_ZOOM) return;
-    pdfOverlays.forEach(function(ov) {
-      if (!ov || !ov.visible || ov.dataUrlHi) return;
-      if (hiRenderingRef.current.has(ov.id)) return;
-      hiRenderingRef.current.add(ov.id);
-      renderPdfHiRes(ov, mapRef.current, { scale: 5 }).then(function(hiUrl) {
-        hiRenderingRef.current.delete(ov.id);
-        if (!hiUrl) return;
-        setPdfOverlays(function(os) {
-          return os.map(function(o) { return o.id === ov.id ? Object.assign({}, o, { dataUrlHi: hiUrl }) : o; });
-        });
-      }).catch(function() { hiRenderingRef.current.delete(ov.id); });
-    });
+    var timer = setTimeout(function() {
+      pdfOverlays.forEach(function(ov) {
+        if (!ov || !ov.visible || ov.dataUrlHi) return;
+        if (hiRenderingRef.current.has(ov.id)) return;
+        hiRenderingRef.current.add(ov.id);
+        renderPdfHiRes(ov, mapRef.current, { scale: 5 }).then(function(hiUrl) {
+          hiRenderingRef.current.delete(ov.id);
+          if (!hiUrl) return;
+          setPdfOverlays(function(os) {
+            return os.map(function(o) { return o.id === ov.id ? Object.assign({}, o, { dataUrlHi: hiUrl }) : o; });
+          });
+        }).catch(function() { hiRenderingRef.current.delete(ov.id); });
+      });
+    }, 400);
+    return function() { clearTimeout(timer); };
   }, [mapZoom, pdfOverlays]);
 
   // Custom icon factory
@@ -8786,27 +8800,38 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
   // Simulated aircraft position — single source of truth lives in
   // lib/planning.js (estimatedPosition). This effect only renders the marker.
+  // Updates the existing marker in place via setLatLng/setIcon to avoid the
+  // periodic stutter that came from removing + re-adding it on every tick.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
     const ov = overlayRef.current;
-    if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
 
     const est = estimatedPosition({
       liveRoute, liveETAs, flight,
       nowMin: nowHHMM(),
       eobtMin: parseHHMM(flight.eobt) ?? 0,
     });
-    if (!est) return;
+    if (!est) {
+      if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
+      return;
+    }
 
-    ov.simMarker = window.L.marker([est.lat, est.lon], {
-      icon: planeIcon(est.course || 0),
-      zIndexOffset: 1000,
-    }).addTo(map);
     const label = est.holding ? 'Posição estimada (hold)'
       : est.devActive ? 'Posição estimada (desvio)'
       : 'Posição estimada';
-    ov.simMarker.bindPopup(label);
+    const icon = planeIcon(est.course || 0);
+
+    if (!ov.simMarker) {
+      ov.simMarker = window.L.marker([est.lat, est.lon], {
+        icon, zIndexOffset: 1000,
+      }).addTo(map);
+      ov.simMarker.bindPopup(label);
+    } else {
+      ov.simMarker.setLatLng([est.lat, est.lon]);
+      ov.simMarker.setIcon(icon);
+      ov.simMarker.setPopupContent(label);
+    }
   }, [tick, liveRoute, flight.atd, flight.activeDeviation, liveETAs]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
