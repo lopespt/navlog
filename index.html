@@ -1661,8 +1661,20 @@ function NavlogApp() {
         // Load PDF overlays from IndexedDB (stores warped dataUrl + bounds)
         var idbOverlays = await getAllPdfOverlaysIdb();
         if (idbOverlays.length > 0) {
-          // Use stored data directly — warped image and bounds are already in IndexedDB
-          setPdfOverlays(idbOverlays.filter(function(r) { return r.dataUrl && r.bounds; }));
+          // Filter to records with usable warped data + bounds.
+          var valid = idbOverlays.filter(function(r) { return r.dataUrl && r.bounds; });
+          // Sort by stored `order` ASC (bottom-to-top in z-stack); fall back to
+          // `id` (creation timestamp) for legacy records without `order`. Mixed
+          // datasets (some new, some legacy) get re-normalized below so values
+          // can't end up comparing 0..N against billion-scale timestamps.
+          valid.sort(function(a, b) {
+            var ao = (a.order != null) ? a.order : a.id;
+            var bo = (b.order != null) ? b.order : b.id;
+            return ao - bo;
+          });
+          // Re-assign sequential orders so the canonical array index always
+          // matches the persisted `order` after load. Sync effect writes back.
+          setPdfOverlays(valid.map(function(o, i) { return Object.assign({}, o, { order: i }); }));
         }
       } catch {}
       // Mark the initial load as complete so the cleanup effect can run safely.
@@ -7648,6 +7660,7 @@ async function savePdfOverlayIdb(ov, handle) {
       pdfPts: ov.pdfPts, mapPts: ov.mapPts,
       opacity: ov.opacity, visible: ov.visible,
       calibration: ov.calibration || null,
+      order: (ov.order != null) ? ov.order : null,
     });
   } catch(e) {}
 }
@@ -8233,6 +8246,44 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
     if (savePrefs) savePrefs({ ...prefs, overlayFadeEndZoom: n, overlayFadeZoom: nextStart });
   }
   const zoomReadout = mapZoom != null ? mapZoom.toFixed(1) : "—";
+
+  // Drag-and-drop reorder. Canonical state array: index 0 = bottom of z-stack,
+  // index N-1 = top. UI lists in reverse so the top of the list = top of map
+  // ("most preferred" wins visually). After a drop we splice in the displayed
+  // (reversed) frame, re-reverse, then assign sequential `order` values.
+  const [draggingId, setDraggingId] = React.useState(null);
+  const [dragOverId, setDragOverId] = React.useState(null);
+  const displayed = React.useMemo(() => overlays.slice().reverse(), [overlays]);
+  function handleDragStart(e, id) {
+    setDraggingId(id);
+    try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+    try { e.dataTransfer.setData('text/plain', String(id)); } catch (_) {}
+  }
+  function handleDragOver(e, id) {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    if (id !== dragOverId) setDragOverId(id);
+  }
+  function handleDragLeave(id) { if (id === dragOverId) setDragOverId(null); }
+  function handleDragEnd() { setDraggingId(null); setDragOverId(null); }
+  function handleDrop(e, targetId) {
+    e.preventDefault();
+    var srcId = draggingId;
+    setDraggingId(null);
+    setDragOverId(null);
+    if (srcId == null || srcId === targetId) return;
+    setOverlays(prev => {
+      var disp = prev.slice().reverse();
+      var srcIdx = disp.findIndex(o => o.id === srcId);
+      var tgtIdx = disp.findIndex(o => o.id === targetId);
+      if (srcIdx < 0 || tgtIdx < 0) return prev;
+      var moved = disp.splice(srcIdx, 1)[0];
+      disp.splice(tgtIdx, 0, moved);
+      var canonical = disp.reverse();
+      return canonical.map((o, i) => ({ ...o, order: i }));
+    });
+  }
+
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
@@ -8288,9 +8339,28 @@ function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, mapZoo
             </button>
           </div>
         )}
-        {overlays.map(ov => (
-          <div key={ov.id} className={`${theme.panel} border ${theme.panelBorder} rounded-xl p-3`}>
+        {displayed.map(ov => (
+          <div
+            key={ov.id}
+            onDragOver={e => handleDragOver(e, ov.id)}
+            onDragLeave={() => handleDragLeave(ov.id)}
+            onDrop={e => handleDrop(e, ov.id)}
+            className={`${theme.panel} border rounded-xl p-3 transition-all duration-100 ${
+              dragOverId === ov.id && draggingId !== ov.id ? 'border-amber-400 ring-2 ring-amber-400/40'
+              : draggingId === ov.id ? 'border-amber-500/40 opacity-50'
+              : theme.panelBorder
+            }`}
+          >
             <div className="flex items-center gap-3">
+              <span
+                draggable={true}
+                onDragStart={e => handleDragStart(e, ov.id)}
+                onDragEnd={handleDragEnd}
+                title="Arrastar para reordenar"
+                aria-label="Arrastar para reordenar"
+                className={`select-none ${theme.fgFaint} text-base leading-none px-1`}
+                style={{ cursor: 'grab', touchAction: 'none' }}
+              >⋮⋮</span>
               {ov.dataUrl
                 ? <img src={ov.dataUrl} alt="" style={{ width: 48, height: 36, objectFit: 'contain',
                     background: '#222', borderRadius: 4, flexShrink: 0 }} />
@@ -9010,8 +9080,12 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           pdfOverlays={pdfOverlays}
           setPdfOverlays={setPdfOverlays}
           onDone={(overlay, handle) => {
-            setPdfOverlays(os => [...os, overlay]);
-            savePdfOverlayIdb(overlay, handle || null).catch(() => {});
+            // New overlay lands on top of the z-stack — `order` = current count
+            // means it's last in the canonical (ASC) array, addedTo last in
+            // Leaflet, and shows first in the reversed UI list.
+            var withOrder = { ...overlay, order: pdfOverlays.length };
+            setPdfOverlays(os => [...os, withOrder]);
+            savePdfOverlayIdb(withOrder, handle || null).catch(() => {});
             setGeorefActive(false);
           }}
           onCancel={() => setGeorefActive(false)}
