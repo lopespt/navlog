@@ -519,6 +519,11 @@ const DEFAULT_PREFS = {
   wakeLock: false,
   showFuelInFlight: true,
   alertEtaDeltaMin: 5, // minutos de desvio para alertar
+  // Map overlay zoom-fade: above the threshold, opacity drops linearly with
+  // each zoom step at fadeRate per step (so rate 0.3 + threshold 12 → fully
+  // transparent around zoom 15.3). Tuned in PdfLayersPanel.
+  overlayFadeZoom: 12,
+  overlayFadeRate: 0.3,
 };
 
 // Tokens de tema. Cada um define classes Tailwind para os elementos principais.
@@ -1762,6 +1767,7 @@ function NavlogApp() {
             flight={flight} computed={computed} liveRoute={liveRoute}
             liveETAs={liveETAs} ac={ac} theme={theme}
             pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
+            prefs={prefs} savePrefs={savePrefs}
             initialView={mapView} onViewChange={setMapView}
             onInsertWaypoint={(afterIdx, lat, lon) => {
               setInsertAfterIdx(afterIdx);
@@ -7555,6 +7561,7 @@ async function savePdfOverlayIdb(ov, handle) {
     var tx = db.transaction('handles', 'readwrite');
     tx.objectStore('handles').put({
       id: ov.id, handle: handle || null,
+      name: ov.name || null,
       dataUrl: ov.dataUrl || null,
       dataUrlHi: ov.dataUrlHi || null,
       width: ov.width, height: ov.height,
@@ -7783,6 +7790,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
   const [zoom, setZoom] = useState(1);
   const [opacity, setOpacity] = useState(0.7);
   const [fileHandle, setFileHandle] = useState(null);
+  const [fileName, setFileName] = useState(null);
   const fileRef = useRef(null);
   const canvasRef = useRef(null);
   const pickModeRef = useRef(false); // map pick mode flag
@@ -7875,6 +7883,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
       return; // handled by onChange below
     }
     setFileHandle(handle);
+    setFileName(file && file.name ? file.name : null);
     setPhase('loading');
     try {
       var result = await renderPdfToImage(file, 4);
@@ -7891,6 +7900,7 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     var file = e.target.files[0];
     if (!file) return;
     setFileHandle(null);
+    setFileName(file && file.name ? file.name : null);
     setPhase('loading');
     try {
       var result = await renderPdfToImage(file, 4);
@@ -7920,8 +7930,13 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
     try {
       var warped = await computeWarpedImage(imgData, { pdfPts, mapPts }, mapRef.current);
       if (!warped) { alert('Pontos colineares — escolhe pontos não alinhados'); setPhase('map'); return; }
+      // Default name: PDF filename without extension; falls back to time stamp.
+      var defaultName = fileName
+        ? fileName.replace(/\.pdf$/i, "")
+        : null;
       onDone({
         id: Date.now(),
+        name: defaultName,
         dataUrl: warped.dataUrl,
         width: warped.width,
         height: warped.height,
@@ -8125,7 +8140,13 @@ function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdf
 }
 
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
-function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibration, onClose }) {
+function PdfLayersPanel({ theme, overlays, setOverlays, prefs, savePrefs, onAddNew, onStartCalibration, onClose }) {
+  const fadeZoom = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
+  const fadeRate = (prefs && prefs.overlayFadeRate != null) ? prefs.overlayFadeRate : 0.3;
+  function setFadeZoom(v) { if (savePrefs) savePrefs({ ...prefs, overlayFadeZoom: Number(v) }); }
+  function setFadeRate(v) { if (savePrefs) savePrefs({ ...prefs, overlayFadeRate: Number(v) }); }
+  // Zoom level at which the linear fade reaches zero (rate × (z − threshold) = 1).
+  const fadeFloor = fadeRate > 0 ? fadeZoom + 1 / fadeRate : null;
   return (
     <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
       {/* Header com botão de adicionar */}
@@ -8137,6 +8158,36 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
         </button>
         <button onClick={onClose} className="text-zinc-400 text-xl px-2 leading-none">✕</button>
       </div>
+
+      {/* Global zoom-fade controls — apply to every overlay */}
+      {savePrefs && (
+        <div className={`px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0 space-y-2`}>
+          <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>
+            Esmaecer ao aproximar zoom
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] ${theme.fgFaint} w-20`}>Threshold</span>
+            <input type="range" min="5" max="18" step="0.5"
+              value={fadeZoom}
+              onChange={e => setFadeZoom(e.target.value)}
+              className="flex-1" />
+            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>z {fadeZoom}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] ${theme.fgFaint} w-20`}>Velocidade</span>
+            <input type="range" min="0" max="1" step="0.05"
+              value={fadeRate}
+              onChange={e => setFadeRate(e.target.value)}
+              className="flex-1" />
+            <span className={`text-[10px] num ${theme.fg} w-10 text-right`}>{fadeRate.toFixed(2)}</span>
+          </div>
+          <div className={`text-[10px] num ${theme.fgFaint} text-right`}>
+            {fadeRate <= 0
+              ? "desligado"
+              : `0% a partir de z ${fadeFloor.toFixed(1)}`}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {overlays.length === 0 && (
@@ -8159,9 +8210,13 @@ function PdfLayersPanel({ theme, overlays, setOverlays, onAddNew, onStartCalibra
                     fontSize: 18 }}>📄</div>
               }
               <div className="flex-1 min-w-0">
-                <div className={`text-sm font-bold ${theme.fg} truncate`}>
-                  Carta {new Date(ov.id).toLocaleTimeString()}
-                </div>
+                <input
+                  type="text"
+                  value={ov.name != null ? ov.name : ""}
+                  placeholder={`Carta ${new Date(ov.id).toLocaleTimeString()}`}
+                  onChange={e => setOverlays(os => os.map(o => o.id === ov.id ? { ...o, name: e.target.value } : o))}
+                  className={`w-full bg-transparent text-sm font-bold ${theme.fg} truncate focus:outline-none focus:ring-1 focus:ring-amber-500/40 rounded px-1 -mx-1`}
+                />
                 {ov.dataUrl
                   ? <div className={`text-[10px] ${theme.fgFaint}`}>{ov.pdfPts.length} pts PDF · {ov.mapPts.length} pts mapa</div>
                   : <div className="text-[10px] text-amber-400">PDF não disponível</div>
@@ -8228,7 +8283,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
@@ -8499,7 +8554,17 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       // While the user is picking the "real" map location, fade the chart so they
       // can see what is underneath without losing it altogether.
       if (calibratingId === ov.id && calibStep === "pickMap") return 0.25;
-      return ov.opacity;
+      var base = ov.opacity != null ? ov.opacity : 0.7;
+      // Zoom-IN fade: as the user zooms past overlayFadeZoom, opacity drops
+      // linearly at overlayFadeRate per zoom step. Below the threshold the
+      // overlay shows at its configured base opacity.
+      var threshold = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
+      var rate = (prefs && prefs.overlayFadeRate != null) ? prefs.overlayFadeRate : 0.3;
+      if (rate > 0 && mapZoom > threshold) {
+        var factor = Math.max(0, 1 - rate * (mapZoom - threshold));
+        return base * factor;
+      }
+      return base;
     }
 
     function makeLayer(ov) {
@@ -8544,7 +8609,7 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
         pdfLayerRefs.current[ov.id] = makeLayer(ov);
       }
     });
-  }, [pdfOverlays, mapZoom, calibratingId, calibStep]);
+  }, [pdfOverlays, mapZoom, calibratingId, calibStep, prefs && prefs.overlayFadeZoom, prefs && prefs.overlayFadeRate]);
 
   // Lazy hi-res rendering: when the user zooms past HIRES_ZOOM, schedule a
   // background re-render of every visible overlay that doesn't yet have
@@ -8814,6 +8879,8 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           theme={theme}
           overlays={pdfOverlays}
           setOverlays={setPdfOverlays}
+          prefs={prefs}
+          savePrefs={savePrefs}
           onAddNew={() => { setLayersOpen(false); setGeorefActive(true); }}
           onStartCalibration={startCalibration}
           onClose={() => setLayersOpen(false)}
