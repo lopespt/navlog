@@ -8442,6 +8442,141 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
+// ── AirspaceLibraryPanel ────────────────────────────────────────────────────
+// Library of SBP / SBR / SBD areas fetched from GEOAISWEB. V1 is data-only:
+// Atualizar button → fetch from WFS → cache in IDB. Map render lands in #62.
+function AirspaceLibraryPanel({ theme, areas, setAreas, meta, setMeta, onClose }) {
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState(null); // {kind:'ok'|'err'|'info', msg}
+  const [filter, setFilter] = React.useState("ALL"); // ALL | P | R | D
+
+  const counts = React.useMemo(() => {
+    const c = { P: 0, R: 0, D: 0 };
+    for (const a of areas) if (a.type && c[a.type] != null) c[a.type] += 1;
+    return c;
+  }, [areas]);
+
+  const visible = React.useMemo(() => {
+    const list = filter === "ALL" ? areas : areas.filter(a => a.type === filter);
+    return list.slice().sort((a, b) => (a.id || "").localeCompare(b.id || ""));
+  }, [areas, filter]);
+
+  async function doRefresh() {
+    if (busy) return;
+    setBusy(true);
+    setStatus({ kind: "info", msg: "A buscar do GEOAISWEB…" });
+    try {
+      const out = await fetchAirspacesFromWFS();
+      await airspacesClear();
+      const n = await airspacesPutMany(out.items);
+      const newMeta = { fetchedAt: out.fetchedAt, count: n,
+                        countP: out.items.filter(a => a.type === "P").length,
+                        countR: out.items.filter(a => a.type === "R").length,
+                        countD: out.items.filter(a => a.type === "D").length };
+      await airspacesMetaSet(newMeta);
+      setAreas(out.items);
+      setMeta(newMeta);
+      setStatus({ kind: "ok", msg: `${n} áreas atualizadas.` });
+    } catch (e) {
+      const m = String(e && e.message || e);
+      setStatus({ kind: "err", msg: /CORS|fail/i.test(m)
+        ? "Falha de rede (possivelmente CORS). Tenta novamente noutra rede." : m });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doClear() {
+    if (busy) return;
+    if (!confirm(`Apagar as ${areas.length} áreas guardadas?`)) return;
+    await airspacesClear();
+    await airspacesMetaSet({ fetchedAt: null, count: 0, countP: 0, countR: 0, countD: 0 });
+    setAreas([]);
+    setMeta(null);
+    setStatus({ kind: "ok", msg: "Biblioteca limpa." });
+  }
+
+  const fetchedLabel = meta && meta.fetchedAt
+    ? new Date(meta.fetchedAt).toLocaleString()
+    : "nunca";
+
+  const statusColor = status && status.kind === "err" ? "text-red-400"
+    : status && status.kind === "ok" ? "text-emerald-400"
+    : "text-zinc-400";
+
+  return (
+    <div className="absolute inset-0 z-[8000] flex flex-col" style={{ background: 'rgba(0,0,0,0.92)' }}>
+      <div className={`flex items-center gap-2 px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
+        <div className={`font-bold ${theme.fg} flex-1`}>⚠ Áreas P/R/D</div>
+        <button onClick={onClose} className="text-zinc-400 text-xl px-2 leading-none">✕</button>
+      </div>
+
+      <div className={`px-3 py-3 border-b ${theme.panelBorder} ${theme.panel} shrink-0 space-y-2`}>
+        <div className="flex items-center gap-2">
+          <button onClick={doRefresh} disabled={busy}
+            className="flex-1 px-4 py-2.5 bg-amber-500 text-black rounded-xl font-bold text-sm active:scale-95 transition-transform duration-100 disabled:opacity-50">
+            {busy ? "A atualizar…" : "Atualizar do GEOAISWEB"}
+          </button>
+        </div>
+        <div className={`text-[10px] ${theme.fgFaint} flex justify-between`}>
+          <span>Última: <span className="num">{fetchedLabel}</span></span>
+          <span className="num">P {counts.P} · R {counts.R} · D {counts.D}</span>
+        </div>
+        {status && <div className={`text-[11px] ${statusColor}`}>{status.msg}</div>}
+      </div>
+
+      <div className={`flex gap-1 px-3 py-2 border-b ${theme.panelBorder} ${theme.panel} shrink-0`}>
+        {[["ALL","Todas"],["P","Proibidas"],["R","Restritas"],["D","Perigosas"]].map(([key, label]) => (
+          <button key={key} onClick={() => setFilter(key)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+              filter === key ? `${theme.accentBorder} ${theme.accent} bg-amber-500/10` : `${theme.panelBorder} ${theme.fgFaint}`
+            }`}>
+            {label}{key !== "ALL" && counts[key] != null ? ` (${counts[key]})` : ""}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        {visible.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <div className="text-sm text-zinc-400 text-center">
+              {areas.length === 0 ? "Sem áreas guardadas. Toca em \"Atualizar\" para descarregar do GEOAISWEB." : "Nenhuma área neste filtro."}
+            </div>
+          </div>
+        )}
+        {visible.map(a => (
+          <div key={a.id} className={`${theme.panel} border ${theme.panelBorder} rounded-lg px-3 py-2 flex items-center gap-2`}>
+            <span className={`num text-[10px] font-bold w-5 text-center rounded ${
+              a.type === "P" ? "bg-red-600/30 text-red-300" :
+              a.type === "R" ? "bg-orange-500/30 text-orange-300" :
+              a.type === "D" ? "bg-yellow-500/30 text-yellow-300" : "bg-zinc-700 text-zinc-300"
+            }`}>{a.type || "?"}</span>
+            <div className="flex-1 min-w-0">
+              <div className={`text-xs font-bold ${theme.fg} truncate`}>
+                <span className="num">{a.id}</span> · <span className="font-normal">{a.name}</span>
+              </div>
+              <div className={`text-[10px] ${theme.fgFaint} num`}>
+                {a.lowerFt != null ? `${a.lowerFt} ft` : "SFC"} – {a.upperFt != null ? `${a.upperFt} ft` : "UNL"}
+                {a.fir ? ` · FIR ${a.fir}` : ""}
+                {a.efetivacao ? ` · ${a.efetivacao}` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {areas.length > 0 && (
+        <div className={`px-3 py-2 border-t ${theme.panelBorder} ${theme.panel} shrink-0`}>
+          <button onClick={doClear} disabled={busy}
+            className={`w-full px-3 py-2 text-[11px] uppercase tracking-widest border ${theme.panelBorder} ${theme.fgMuted} rounded-lg disabled:opacity-50`}>
+            Limpar tudo
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
@@ -8450,6 +8585,19 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const [tick, setTick] = useState(0);
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
   const [layersOpen, setLayersOpen] = useState(false);
+  const [airspacesOpen, setAirspacesOpen] = useState(false);
+  const [airspaces, setAirspaces] = useState([]);
+  const [airspacesMetaState, setAirspacesMetaState] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [a, m] = await Promise.all([airspacesAll(), airspacesMeta()]);
+      if (!alive) return;
+      setAirspaces(a || []);
+      setAirspacesMetaState(m || null);
+    })();
+    return () => { alive = false; };
+  }, []);
   const [georefActive, setGeorefActive] = useState(false);
   const [mapZoom, setMapZoom] = useState(8);
   // Leaflet layers for PDF overlays — keyed by overlay id
@@ -9013,6 +9161,13 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
             }`}>
             🗺 Cartas{pdfOverlays.length > 0 ? ` (${pdfOverlays.length})` : ''}
           </button>
+          <button
+            onClick={() => setAirspacesOpen(true)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+              airspaces.length > 0 ? `border-red-500 text-red-300 bg-red-500/20` : `border-sky-600 text-sky-400`
+            }`}>
+            ⚠ P/R/D{airspaces.length > 0 ? ` (${airspaces.length})` : ''}
+          </button>
         </div>
       </div>
 
@@ -9070,6 +9225,17 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
           onAddNew={() => { setLayersOpen(false); setGeorefActive(true); }}
           onStartCalibration={startCalibration}
           onClose={() => setLayersOpen(false)}
+        />
+      )}
+
+      {airspacesOpen && (
+        <AirspaceLibraryPanel
+          theme={theme}
+          areas={airspaces}
+          setAreas={setAirspaces}
+          meta={airspacesMetaState}
+          setMeta={setAirspacesMetaState}
+          onClose={() => setAirspacesOpen(false)}
         />
       )}
 
