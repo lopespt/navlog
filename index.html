@@ -7557,9 +7557,26 @@ function _pdfHandleDb() {
 async function savePdfOverlayIdb(ov, handle) {
   try {
     var db = await _pdfHandleDb();
+    // Preserve the existing handle when the caller passed null — the routine
+    // sync effect in App calls this on every overlay state change (rename,
+    // opacity tweak, hi-res arrival, etc.) and would otherwise wipe the
+    // FileSystemFileHandle saved at creation, forcing the user to re-pick the
+    // PDF on every calibration.
+    var preservedHandle = handle || null;
+    if (!handle) {
+      try {
+        var existing = await new Promise(function(resolve) {
+          var t = db.transaction('handles', 'readonly');
+          var r = t.objectStore('handles').get(ov.id);
+          r.onsuccess = function(e) { resolve(e.target.result || null); };
+          r.onerror = function() { resolve(null); };
+        });
+        if (existing && existing.handle) preservedHandle = existing.handle;
+      } catch (_) {}
+    }
     var tx = db.transaction('handles', 'readwrite');
     tx.objectStore('handles').put({
-      id: ov.id, handle: handle || null,
+      id: ov.id, handle: preservedHandle,
       name: ov.name || null,
       dataUrl: ov.dataUrl || null,
       dataUrlHi: ov.dataUrlHi || null,
