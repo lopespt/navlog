@@ -8,11 +8,12 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2304";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2306";
 
 
-import { useTheme, useDerived } from "../context/app-context.jsx?v=20260517.2304";
-function PointFinderMapTab({ flight, pdfOverlays, userPoints, onConfirm, onSave }) {
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
+function PointFinderMapTab({ pdfOverlays, userPoints, onConfirm, onSave }) {
+  const { flight } = useFlight();
   const theme = useTheme();
   const mapDivRef = useRef(null);
   const pickedMarkerRef = useRef(null);
@@ -94,7 +95,8 @@ function PointFinderMapTab({ flight, pdfOverlays, userPoints, onConfirm, onSave 
   );
 }
 
-function PointFinder({ flight, ac, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
+function PointFinder({ userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
+  const { flight, ac } = useFlight();
   const theme = useTheme();
   const initialTab = initialSource && initialSource.kind === "radial" ? "radial"
     : initialSource && initialSource.kind === "intersection" ? "intersect"
@@ -642,8 +644,7 @@ function PointFinder({ flight, ac, userPoints, onAddUserPoint, onDeleteUserPoint
         )}
 
         {tab === "map" && (
-          <PointFinderMapTab
-            flight={flight} pdfOverlays={pdfOverlays}
+          <PointFinderMapTab pdfOverlays={pdfOverlays}
             userPoints={userPoints}
             onConfirm={chooseAndConfirm}
             onSave={saveToLib}
@@ -659,7 +660,6 @@ function PointFinder({ flight, ac, userPoints, onAddUserPoint, onDeleteUserPoint
         const slotInitialQuery = slotSource && slotSource.kind === "search" ? slotSource.id : "";
         return (
           <PointFinder
-            flight={flight} ac={ac}
             userPoints={userPoints}
             onAddUserPoint={onAddUserPoint}
             onDeleteUserPoint={onDeleteUserPoint}
@@ -866,7 +866,8 @@ function StepOverride({ cp, setCp, onNext }) {
   );
 }
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, ac, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function WaypointEditor({ editingIdx, insertAfterIdx, initLat, initLon, onClose, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+  const { flight, setFlight, ac } = useFlight();
   const { computed } = useDerived();
   const theme = useTheme();
   const [finderOpen, setFinderOpen] = useState(false);
@@ -1735,7 +1736,6 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
 
       {finderOpen && (
         <PointFinder
-          flight={flight} ac={ac}
           userPoints={userPoints}
           onAddUserPoint={onAddUserPoint}
           onDeleteUserPoint={onDeleteUserPoint}

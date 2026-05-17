@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived } from "../context/app-context.jsx?v=20260517.2304";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -187,9 +187,10 @@ CheckpointRow = React.memo(CheckpointRow, function(a, b) {
   );
 });
 
-function FlightTab({ flight, markVirtual, unmarkVirtual, markCrossed, depart,
+function FlightTab({ markVirtual, unmarkVirtual, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation, onDirectTo, ac,  }) {
+    onOpenDeviation, onClearDeviation, onDirectTo,  }) {
+  const { flight, ac } = useFlight();
   const { computed, nextIdx, liveETAs, liveRoute, nextLiveIdx, liveFuel } = useDerived();
   const { prefs } = usePrefs();
   const theme = useTheme();

@@ -12,19 +12,19 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2304";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2304";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2304";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2304";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2304";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2304";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2304";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2304";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2304";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2304";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2304";
-import { AppProvider } from "./context/app-context.jsx?v=20260517.2304";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2304";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2306";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2306";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2306";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2306";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2306";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2306";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2306";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2306";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2306";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2306";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2306";
+import { AppProvider } from "./context/app-context.jsx?v=20260517.2306";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2306";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -102,7 +102,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2304";
+const APP_VERSION = "20260517.2306";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -498,7 +498,6 @@ function NavlogApp() {
 
   return (
     <AppProvider
-      flight={flight} setFlight={setFlight} ac={ac}
       actions={actions}
       derived={derived}
     >
@@ -562,7 +561,6 @@ function NavlogApp() {
         {tab === "setup" && (
           <ErrorBoundary name="Setup" theme={theme}>
             <SetupTab
-              flight={flight} setFlight={setFlight} ac={ac}
               onEditCp={(i) => { setEditingIdx(i); setEditorOpen(true); }}
               onAddCp={() => { setEditingIdx(null); setEditorOpen(true); }}
               onNewBlank={newBlankRoute}
@@ -589,10 +587,9 @@ function NavlogApp() {
         {tab === "flight" && (
           <ErrorBoundary name="Em Voo" theme={theme}>
             <FlightTab
-              flight={flight}
               markVirtual={markVirtual} unmarkVirtual={unmarkVirtual} markCrossed={markCrossed} unmark={unmark}
               depart={depart}
-              resetFlight={resetFlight} ac={ac}
+              resetFlight={resetFlight}
               viewMode={viewMode} setViewMode={setViewMode}
               onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
               onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
@@ -606,18 +603,17 @@ function NavlogApp() {
         )}
         {tab === "fuel" && (
           <ErrorBoundary name="Combustível" theme={theme}>
-            <FuelTab flight={flight} ac={ac} />
+            <FuelTab />
           </ErrorBoundary>
         )}
         {tab === "log" && (
           <ErrorBoundary name="Diário" theme={theme}>
-            <LogTab flight={flight} ac={ac} />
+            <LogTab />
           </ErrorBoundary>
         )}
         {tab === "map" && (
           <ErrorBoundary name="Mapa" theme={theme}>
             <MapTab
-              flight={flight} ac={ac}
               pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
               initialView={mapView} onViewChange={setMapView}
               onInsertWaypoint={(afterIdx, lat, lon) => {
@@ -651,12 +647,10 @@ function NavlogApp() {
       {editorOpen && (
         <ErrorBoundary name="Editor de Waypoint" theme={theme}>
           <WaypointEditor
-            flight={flight} setFlight={setFlight}
             editingIdx={editingIdx}
             insertAfterIdx={insertAfterIdx}
             initLat={insertCoords?.[0]}
             initLon={insertCoords?.[1]}
-            ac={ac}
             pdfOverlays={pdfOverlays}
             userPoints={userPoints}
             onAddUserPoint={addUserPoint}
@@ -746,7 +740,6 @@ function NavlogApp() {
       {/* DEVIAÇÃO / REPOSICIONAMENTO */}
       {deviationOpen && (
         <DeviationPanel
-          flight={flight} ac={ac}
           pdfOverlays={pdfOverlays}
           defaultTargetIdx={(function() {
             // Resolve default to the next user waypoint not yet crossed.

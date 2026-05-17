@@ -30,7 +30,7 @@ export function AppProvider({
   return (
     <ThemeContext.Provider value={theme}>
       <PrefsContext.Provider value={{ prefs, savePrefs }}>
-        <FlightContext.Provider value={{ flight, setFlight, ac, actions }}>
+        <FlightContext.Provider value={{ flight, setFlight, ac, ...actions }}>
           <DerivedContext.Provider value={derived}>
             {children}
           </DerivedContext.Provider>
