@@ -40,6 +40,24 @@ No npm dependencies — uses Node's built-in `node:test` runner (Node 18+).
   24h wrap, malformed input.
 - `affine.test.js` — calibration transform identity, scale+translate,
   inverse, collinear/degenerate edge cases.
+- `themes.test.js` — structural shape of the night/day/red palettes
+  (every theme exposes the same Tailwind-class keys).
+- `fleet.test.js` — structural shape of the five built-in aircraft
+  profiles (perf and fuel numbers present, positive, ordered).
+- `feedback.test.js` — `haptic`/`warmUpAudio`/`playAlarm` no-op
+  cleanly under Node's missing `navigator.vibrate` / `AudioContext`.
+- `components-audit.test.js` — static audit of every
+  `app/components/*.jsx`. Catches the failure modes that recurred
+  through the esm.sh migration:
+    1. JSX element `<Foo />` referenced but not imported / local
+    2. bare call to a `main.jsx` top-level helper that's invisible
+       once the component lives in its own ES module
+    3. data reference (`themes`, `FLEET_DEFAULTS`, `APP_VERSION`,
+       …) that crosses module scope
+    4. top-level reassignment (`Foo = React.memo(Foo)`) whose
+       function moved out but the wrapper got left behind
+  Pure regex, zero npm deps. Strips line comments first so a stray
+  `lib/*` token doesn't trick the block-comment matcher.
 
 ## Adding tests
 
