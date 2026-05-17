@@ -12,16 +12,17 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2201";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2201";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2201";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2201";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2201";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2201";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2201";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2201";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2201";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2201";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2207";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2207";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2207";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2207";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2207";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2207";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2207";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2207";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2207";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2207";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2207";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -48,6 +49,7 @@ import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.
     "calcLeg", "gcDist", "gcTC", "gcInterpolate", "projectDest", "projectSource",
     "estimatedPosition", "nextAutoKey", "portionTransitionLabel",
     "resolveAltitudeProfile", "computeLegPhases", "validateLeg",
+    "applyDirectTo", "clearDirectTo",
     "affineFrom3Points", "invertAffine", "applyAffinePt",
     "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
     "airacGetCurrent", "airacSearch", "airacAirport",
@@ -98,7 +100,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2201";
+const APP_VERSION = "20260517.2207";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -369,177 +371,16 @@ function NavlogApp() {
   // computed, nextIdx, legVirtualsMap, liveETAs, liveRoute, nextLiveIdx
   // are derived in useDerivedFlight (called above).
 
-  function markVirtual(key) {
-    haptic([40]); warmUpAudio();
-    const now = nowHHMM();
-    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMMSS(now) } }));
-  }
-  function unmarkVirtual(key) {
-    setFlight((f) => { const m = { ...(f.autoWpATAs || {}) }; delete m[key]; return { ...f, autoWpATAs: m }; });
-  }
-  function setVirtualAta(key, ataStr) {
-    setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: ataStr } }));
-  }
-
-  // liveFuel is derived in useDerivedFlight (called above).
-
-  // Marca checkpoint como cruzado (registra ATA = agora UTC, calcula GS real)
-  function markCrossed(i) {
-    haptic([60]); warmUpAudio();
-    const now = nowHHMM();
-    setAta(i, formatHHMMSS(now));
-  }
-
-  // Salvar nota de um waypoint
-  function saveNote(i, text) {
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-      cps[i] = { ...cps[i], notes: text };
-      return { ...f, checkpoints: cps };
-    });
-  }
-
-  // Define ATA manualmente (string "hh:mm"); calcula GS real automaticamente
-  function setAta(i, ataStr) {
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-      const ataMin = parseHHMM(ataStr);
-      if (ataMin == null) {
-        cps[i] = { ...cps[i], ata: null, gsActual: null };
-        return { ...f, checkpoints: cps };
-      }
-      // Acha tempo do checkpoint anterior (ATA real, ou ATD/EOBT se for o primeiro depois da origem)
-      const prev = cps[i - 1];
-      let prevTime;
-      if (prev.isOrigin) {
-        prevTime = parseHHMM(f.atd ?? f.eobt);
-      } else {
-        prevTime = prev.ata != null ? parseHHMM(prev.ata) : null;
-      }
-      let gsActual = null;
-      if (prevTime != null && cps[i].dist > 0) {
-        let elapsed = ataMin - prevTime;
-        if (elapsed < 0) elapsed += 1440;
-        if (elapsed > 0) gsActual = (cps[i].dist / elapsed) * 60;
-      }
-      cps[i] = { ...cps[i], ata: ataStr, gsActual };
-      // Auto-clear an active deviation when its target gets a real ATA — the
-      // adjustment leg has been consumed and the original plan resumes.
-      var nextDev = f.activeDeviation;
-      if (ataStr != null && nextDev && nextDev.targetIdx === i) nextDev = null;
-      return { ...f, checkpoints: cps, activeDeviation: nextDev };
-    });
-  }
-
-  function setDeviation(dev) {
-    setFlight(function(f) {
-      var cps = (dev && dev.targetIdx != null)
-        ? applyDirectTo(f.checkpoints, dev.targetIdx)
-        : f.checkpoints;
-      return Object.assign({}, f, { checkpoints: cps, activeDeviation: dev });
-    });
-  }
-  // One-tap direct-to from the FlightTab route list. Uses the live estimated
-  // position as the deviation anchor so the pilot doesn't have to drop a pin.
-  function directToWp(targetIdx) {
-    setFlight(function(f) {
-      var target = f.checkpoints[targetIdx];
-      if (!target || target.lat == null || target.lon == null) return f;
-      // Compute estimated position on the same selector the map / big-mode
-      // already use, so all three views agree on "where we are now".
-      var est = estimatedPosition({
-        liveRoute, liveETAs, flight: f,
-        nowMin: nowHHMM(),
-        eobtMin: parseHHMM(f.eobt) ?? 0,
-      });
-      if (!est) {
-        // Fall back to opening the full deviation panel — pilot can drop a pin.
-        return Object.assign({}, f, {});
-      }
-      if (typeof window !== "undefined" && typeof window.confirm === "function") {
-        var ok = window.confirm("Direct to " + (target.name || ("WP " + targetIdx)) + " a partir da posição estimada?");
-        if (!ok) return f;
-      }
-      var dev = {
-        fromLat: Math.round(est.lat * 1e6) / 1e6,
-        fromLon: Math.round(est.lon * 1e6) / 1e6,
-        targetIdx: Number(targetIdx),
-        currentAlt: target.alt != null ? Number(target.alt) : (f.cruiseAlt ?? 7000),
-        currentTas: ac && ac.tasCruise ? ac.tasCruise : 100,
-        startedAt: formatHHMMSS(nowHHMM()),
-      };
-      return Object.assign({}, f, {
-        checkpoints: applyDirectTo(f.checkpoints, targetIdx),
-        activeDeviation: dev,
-      });
-    });
-  }
-  // Manual "Voltar à rota": pilot is reinstating the original plan, so the
-  // bypassed WPs come back into the live sequence. (The auto-clear in setAta
-  // when target ATA is recorded keeps the bypassed flags — at that point those
-  // WPs are genuinely behind the aircraft.)
-  function clearDeviation() {
-    setFlight(function(f) {
-      var c = Object.assign({}, f, { checkpoints: clearDirectTo(f.checkpoints) });
-      delete c.activeDeviation;
-      return c;
-    });
-  }
-
-  function unmark(i) {
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-      cps[i] = { ...cps[i], ata: null, gsActual: null };
-      return { ...f, checkpoints: cps };
-    });
-  }
-
-  function moveUp(i) {
-    if (i <= 1) return;
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-      [cps[i - 1], cps[i]] = [cps[i], cps[i - 1]];
-      return { ...f, checkpoints: cps };
-    });
-  }
-
-  function reorder(fromIdx, toIdx) {
-    if (fromIdx === toIdx || fromIdx <= 0 || toIdx <= 0) return;
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-      const [item] = cps.splice(fromIdx, 1);
-      cps.splice(toIdx, 0, item);
-      return { ...f, checkpoints: cps };
-    });
-  }
-
-  function moveDown(i) {
-    setFlight((f) => {
-      if (i >= f.checkpoints.length - 1) return f;
-      if (i === 0) return f;
-      const cps = [...f.checkpoints];
-      [cps[i], cps[i + 1]] = [cps[i + 1], cps[i]];
-      return { ...f, checkpoints: cps };
-    });
-  }
-
-  function resetFlight() {
-    setFlight((f) => ({
-      ...f,
-      atd: null,
-      autoWpATAs: {},
-      windVel: 0,
-      checkpoints: f.checkpoints.map((cp) =>
-        cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null }
-      ),
-    }));
-  }
-
-  function depart() {
-    haptic([50, 30, 50, 30, 80]); warmUpAudio();
-    const now = nowHHMM();
-    setFlight((f) => ({ ...f, atd: formatHHMMSS(now) }));
-  }
+  // Flight mutations (markCrossed/setAta/moveUp/.../depart) live in
+  // app/hooks/use-flight-actions.jsx — destructured below.
+  const {
+    markVirtual, unmarkVirtual, setVirtualAta,
+    setAta, markCrossed, unmark,
+    saveNote,
+    setDeviation, directToWp, clearDeviation,
+    moveUp, moveDown, reorder,
+    resetFlight, depart,
+  } = useFlightActions({ flight, setFlight, ac, liveRoute, liveETAs });
 
   // ----- Rotas salvas -----
   function newBlankRoute() {
