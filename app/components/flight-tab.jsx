@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260517.2303";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -191,7 +191,8 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
     nextIdx, markCrossed, depart,
     resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMode, setViewMode,
     onOpenDeviation, onClearDeviation, onDirectTo,
-    liveFuel, ac, prefs }) {
+    liveFuel, ac,  }) {
+  const { prefs } = usePrefs();
   const theme = useTheme();
 
   const dev = flight.activeDeviation || null;

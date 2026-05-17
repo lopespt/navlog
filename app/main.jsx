@@ -12,19 +12,19 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2301";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2301";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2301";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2301";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2301";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2301";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2301";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2301";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2301";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2301";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2301";
-import { AppProvider } from "./context/app-context.jsx?v=20260517.2301";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2301";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2303";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2303";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2303";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2303";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2303";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2303";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2303";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2303";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2303";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2303";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2303";
+import { AppProvider } from "./context/app-context.jsx?v=20260517.2303";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2303";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -102,7 +102,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2301";
+const APP_VERSION = "20260517.2303";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -498,7 +498,6 @@ function NavlogApp() {
 
   return (
     <AppProvider
-      prefs={prefs} savePrefs={savePrefs}
       flight={flight} setFlight={setFlight} ac={ac}
       actions={actions}
       derived={derived}
@@ -606,7 +605,6 @@ function NavlogApp() {
               onOpenDeviation={() => setDeviationOpen(true)}
               onClearDeviation={clearDeviation}
               onDirectTo={directToWp}
-              prefs={prefs}
             />
           </ErrorBoundary>
         )}
@@ -626,7 +624,6 @@ function NavlogApp() {
               flight={flight} computed={computed} liveRoute={liveRoute}
               liveETAs={liveETAs} ac={ac}
               pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
-              prefs={prefs} savePrefs={savePrefs}
               initialView={mapView} onViewChange={setMapView}
               onInsertWaypoint={(afterIdx, lat, lon) => {
                 setInsertAfterIdx(afterIdx);
@@ -747,7 +744,6 @@ function NavlogApp() {
       {/* PREFERÊNCIAS */}
       {prefsOpen && (
         <PrefsPanel
-          prefs={prefs} savePrefs={savePrefs}
           appVersion={APP_VERSION}
           onClose={() => setPrefsOpen(false)}
         />

@@ -8,9 +8,10 @@
 import React from "react";
 
 
-import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260517.2303";
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
-function PdfLayersPanel({ overlays, setOverlays, prefs, savePrefs, mapZoom, onAddNew, onStartCalibration, onClose }) {
+function PdfLayersPanel({ overlays, setOverlays, mapZoom, onAddNew, onStartCalibration, onClose }) {
+  const { prefs, savePrefs } = usePrefs();
   const theme = useTheme();
   const fadeStart = (prefs && prefs.overlayFadeZoom != null) ? prefs.overlayFadeZoom : 12;
   const fadeEnd = (prefs && prefs.overlayFadeEndZoom != null) ? prefs.overlayFadeEndZoom : 15;
