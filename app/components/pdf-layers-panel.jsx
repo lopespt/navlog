@@ -2,9 +2,8 @@
 // / recalibrate panel + global zoom-fade prefs. Extracted from app/main.jsx.
 // Uses React.* fully qualified for hooks (legacy pattern from the original
 // inline definition). Consumes window globals from lib/storage.js and
-// lib/pdf.js: renderPdfFromHandle, savePdfHandle (legacy no-op shim), and
-// the known dead `getPdfHandle` reference in the "Recarregar" button (a
-// pre-existing bug not in scope to fix here).
+// lib/pdf.js: getPdfHandle / savePdfHandle for the "Recarregar" path and
+// renderPdfFromHandle to actually rasterize the PDF.
 
 import React from "react";
 

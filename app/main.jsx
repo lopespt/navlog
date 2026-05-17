@@ -18,14 +18,14 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.1636";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1636";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1636";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1636";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1636";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.1636";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1636";
-import { Section, Loading, Empty, ErrorState, TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1636";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.1841";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1841";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1841";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1841";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1841";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.1841";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1841";
+import { Section, Loading, Empty, ErrorState, TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1841";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -54,7 +54,7 @@ import { Section, Loading, Empty, ErrorState, TabButton, LiveClock } from "./com
     "affineFrom3Points", "invertAffine", "applyAffinePt",
     "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
     "airacGetCurrent", "airacSearch", "airacAirport",
-    "savePdfOverlayIdb", "getAllPdfOverlaysIdb",
+    "savePdfOverlayIdb", "getAllPdfOverlaysIdb", "getPdfHandle", "savePdfHandle",
     "userPtsAll", "userPtsPut", "userPtsDelete",
     "renderPdfToImage", "computeWarpedImage", "applyOverlayCalibration",
     "pickPdfFile", "renderPdfHiRes", "renderPdfFromHandle",
@@ -101,7 +101,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1636";
+const APP_VERSION = "20260517.1841";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -236,13 +236,11 @@ function NavlogApp() {
   const [viewMode, setViewMode] = useState("leg");
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesIdx, setNotesIdx] = useState(null);
-  const [legTimerStart, setLegTimerStart] = useState(null); // timestamp em ms
   const [deviationOpen, setDeviationOpen] = useState(false);
   const [userPoints, setUserPoints] = useState([]);
   // Map center+zoom is preserved across tab switches (Leaflet otherwise
   // re-initialises and re-fits-bounds whenever the MapTab remounts).
   const [mapView, setMapView] = useState(null);
-  const [pointFinderOpen, setPointFinderOpen] = useState(false);
   const wakeLockRef = useRef(null);
 
   // Load user points library from IndexedDB on mount
@@ -758,7 +756,6 @@ function NavlogApp() {
     haptic([40]); warmUpAudio();
     const now = nowHHMM();
     setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: formatHHMMSS(now) } }));
-    setLegTimerStart(Date.now());
   }
   function unmarkVirtual(key) {
     setFlight((f) => { const m = { ...(f.autoWpATAs || {}) }; delete m[key]; return { ...f, autoWpATAs: m }; });
@@ -795,7 +792,6 @@ function NavlogApp() {
     haptic([60]); warmUpAudio();
     const now = nowHHMM();
     setAta(i, formatHHMMSS(now));
-    setLegTimerStart(Date.now()); // inicia cronômetro de perna
   }
 
   // Salvar nota de um waypoint
@@ -941,14 +937,12 @@ function NavlogApp() {
         cp.isOrigin ? cp : { ...cp, ata: null, gsActual: null }
       ),
     }));
-    setLegTimerStart(null);
   }
 
   function depart() {
     haptic([50, 30, 50, 30, 80]); warmUpAudio();
     const now = nowHHMM();
     setFlight((f) => ({ ...f, atd: formatHHMMSS(now) }));
-    setLegTimerStart(Date.now());
   }
 
   // ----- Rotas salvas -----
@@ -1001,122 +995,6 @@ function NavlogApp() {
     try {
       if (window.storage) await window.storage.set("routes", JSON.stringify(next));
     } catch (e) { _warn('deleteRoute', e); }
-  }
-
-  // ----- Calcular TOC/TOD automaticamente -----
-  function calcTOCTOD() {
-    setFlight((f) => {
-      const cps = [...f.checkpoints];
-
-      // ── 1. Reconstruir rota limpa ──────────────────────────────────────────
-      // Remove TOC/TOD e colapsa as pernas que foram divididas na iteração anterior.
-      // Uma perna foi dividida se dois checkpoints consecutivos têm o mesmo TC.
-      // Estratégia: primeiro filtrar TOC/TOD, depois fundir consecutivos com TC igual.
-      const noTOCTOD = cps.filter((cp, i) => i === 0 || (cp.name !== "TOC" && cp.name !== "TOD"));
-
-      // Fundir consecutivos com TC igual (fragmentos de perna dividida)
-      const merged = [noTOCTOD[0]];
-      for (let i = 1; i < noTOCTOD.length; i++) {
-        const prev = merged[merged.length - 1];
-        const cur = noTOCTOD[i];
-        // Dois fragmentos têm o mesmo TC e um deles foi a "segunda metade" (não tem nome especial)
-        if (
-          !prev.isOrigin &&
-          prev.tc === cur.tc &&
-          prev.name !== cur.name // nomes diferentes = dois WP reais, não fundir
-        ) {
-          // Fundir: o ponto "real" é o cur (tem o nome original), dist somada
-          merged[merged.length - 1] = {
-            ...cur,
-            dist: Math.round((prev.dist + cur.dist) * 10) / 10,
-          };
-        } else {
-          merged.push(cur);
-        }
-      }
-
-      const cleaned = merged;
-      if (cleaned.length < 2) {
-        alert("Adicione pelo menos um waypoint além da origem antes de calcular TOC/TOD.");
-        return f;
-      }
-
-      // ── 2. Calcular distâncias de subida e descida ─────────────────────────
-      const origElev = Number(f.freqs?.origin?.elev) || 0;
-      const destElev = Number(f.freqs?.destination?.elev) || 0;
-      const cruiseAlt = Number(f.cruiseAlt) || 7000;
-      const ac = FLEET_DEFAULTS[f.aircraftKey];
-
-      const climbDist = Math.round(
-        ((ac.vy + 10) / 60) * ((cruiseAlt - origElev) / ac.rocClimb) * 10
-      ) / 10;
-      const descDist = Math.round(
-        (ac.vDescent / 60) * ((cruiseAlt - destElev) / ac.rodDescent) * 10
-      ) / 10;
-
-      const routeDist = cleaned.slice(1).reduce((s, cp) => s + (cp.dist || 0), 0);
-
-      if (climbDist + descDist > routeDist) {
-        alert(
-          `Rota muito curta para subir até ${cruiseAlt} ft.\n` +
-          `Subida: ${climbDist.toFixed(1)} NM · Descida: ${descDist.toFixed(1)} NM\n` +
-          `Total necessário: ${(climbDist + descDist).toFixed(1)} NM · Rota: ${routeDist.toFixed(1)} NM`
-        );
-        return f;
-      }
-
-      // ── 3. Inserir TOC e TOD na rota limpa ────────────────────────────────
-      const todAt = routeDist - descDist; // dist acumulada onde TOD ocorre
-      const out = [cleaned[0]];
-      let acc = 0;
-      let tocInserted = false;
-      let todInserted = false;
-
-      for (let i = 1; i < cleaned.length; i++) {
-        const cp = cleaned[i];
-        const legStart = acc;
-        const legEnd = acc + (cp.dist || 0);
-        const SNAP = 0.5; // NM mínimos para inserir ponto separado
-
-        // TOC cai nesta perna?
-        if (!tocInserted && climbDist > legStart && climbDist <= legEnd) {
-          const dToTOC   = Math.round((climbDist - legStart) * 10) / 10;
-          const dFromTOC = Math.round((legEnd - climbDist) * 10) / 10;
-          if (dToTOC >= SNAP && dFromTOC >= SNAP) {
-            out.push({ name: "TOC", phase: "SUBIDA",   tc: cp.tc, dist: dToTOC,   ata: null, gsActual: null });
-            out.push({ ...cp,       phase: "CRUZEIRO",             dist: dFromTOC });
-          } else {
-            // Muito próximo de um extremo: sobe TOC para o WP vizinho mais próximo
-            out.push({ ...cp, phase: dToTOC < SNAP ? "SUBIDA" : "CRUZEIRO" });
-          }
-          tocInserted = true;
-          acc = legEnd;
-          continue;
-        }
-
-        // TOD cai nesta perna?
-        if (tocInserted && !todInserted && todAt > legStart && todAt <= legEnd) {
-          const dToTOD   = Math.round((todAt - legStart) * 10) / 10;
-          const dFromTOD = Math.round((legEnd - todAt) * 10) / 10;
-          if (dToTOD >= SNAP && dFromTOD >= SNAP) {
-            out.push({ name: "TOD", phase: "CRUZEIRO", tc: cp.tc, dist: dToTOD,   ata: null, gsActual: null });
-            out.push({ ...cp,       phase: "DESCIDA",              dist: dFromTOD });
-          } else {
-            out.push({ ...cp, phase: dToTOD < SNAP ? "CRUZEIRO" : "DESCIDA" });
-          }
-          todInserted = true;
-          acc = legEnd;
-          continue;
-        }
-
-        // Waypoint normal: atribui fase pelo posicionamento
-        const phase = !tocInserted ? "SUBIDA" : !todInserted ? "CRUZEIRO" : "DESCIDA";
-        out.push({ ...cp, phase });
-        acc = legEnd;
-      }
-
-      return { ...f, checkpoints: out };
-    });
   }
 
   // ----- Preferências -----
