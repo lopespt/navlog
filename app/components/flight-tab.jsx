@@ -2,7 +2,7 @@
 // componente de app/main.jsx" for the audit recipe used to verify the
 // imports below match every JSX element + bare-identifier call.
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -149,6 +149,25 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
     </Wrapper>
   );
 }
+// Per-tick re-renders in the parent (every 1 s while ATD is set) only need to
+// reach a row whose live ETA / crossed-state actually moved. Skip the rest.
+CheckpointRow = React.memo(CheckpointRow, function(a, b) {
+  return (
+    a.cp === b.cp &&
+    a.index === b.index &&
+    a.isNext === b.isNext &&
+    a.etaPlanned === b.etaPlanned &&
+    a.etaLive === b.etaLive &&
+    a.crossed === b.crossed &&
+    a.isOrigin === b.isOrigin &&
+    a.isVirtual === b.isVirtual &&
+    a.hasLiveBase === b.hasLiveBase &&
+    a.departDelay === b.departDelay &&
+    a.viewMode === b.viewMode &&
+    a.theme === b.theme &&
+    a.etaOriginLabel === b.etaOriginLabel
+  );
+});
 
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,

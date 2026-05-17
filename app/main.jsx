@@ -97,7 +97,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1442";
+const APP_VERSION = "20260517.1523";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -2918,25 +2918,8 @@ function ETACell({ label, value, delta, muted, theme }) {
     </div>
   );
 }
-// Per-tick re-renders in the parent (every 1 s while ATD is set) only need to
-// reach a row whose live ETA / crossed-state actually moved. Skip the rest.
-CheckpointRow = React.memo(CheckpointRow, function(a, b) {
-  return (
-    a.cp === b.cp &&
-    a.index === b.index &&
-    a.isNext === b.isNext &&
-    a.etaPlanned === b.etaPlanned &&
-    a.etaLive === b.etaLive &&
-    a.crossed === b.crossed &&
-    a.isOrigin === b.isOrigin &&
-    a.isVirtual === b.isVirtual &&
-    a.hasLiveBase === b.hasLiveBase &&
-    a.departDelay === b.departDelay &&
-    a.viewMode === b.viewMode &&
-    a.theme === b.theme &&
-    a.etaOriginLabel === b.etaOriginLabel
-  );
-});
+// CheckpointRow + React.memo wrapper moved to app/components/flight-tab.jsx
+// alongside FlightTab.
 
 // --------- TAB COMBUSTÍVEL ---------
 
