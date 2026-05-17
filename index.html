@@ -182,13 +182,25 @@ const FLEET_DEFAULTS = {
 
 // Magnetic declination from NOAA WMM — returns degrees (E positive, W negative).
 // Returns null when library not loaded or coords missing → caller uses flight.variation.
+//
+// Results are bucketed into a module-scope cache: 0.1° lat/lon (~11 km, well
+// below WMM spatial gradient — typically 1-2°/100 km) and 1000-ft altitude.
+// The WMM lookup goes through esm.sh-loaded native code; the per-render
+// computed pipeline hits this once per WP, so on a 10-WP route this saves
+// 10 expensive calls per re-render. Only non-null results are cached so the
+// first call after WMM finishes loading still returns the real value.
+const _declCache = new Map();
 function getDecl(lat, lon, altFt) {
+  if (window._geomagnetism == null || lat == null || lon == null) return null;
+  const key = Math.round(lat * 10) + '_' + Math.round(lon * 10) + '_' + Math.round((altFt || 0) / 1000);
+  const cached = _declCache.get(key);
+  if (cached !== undefined) return cached;
   try {
-    if (window._geomagnetism != null && lat != null && lon != null) {
-      var altKm = (altFt ?? 0) / 3280.84;
-      var result = window._geomagnetism.model().point([lat, lon, altKm]);
-      return result.decl ?? 0;
-    }
+    var altKm = (altFt ?? 0) / 3280.84;
+    var result = window._geomagnetism.model().point([lat, lon, altKm]);
+    var decl = result.decl ?? 0;
+    _declCache.set(key, decl);
+    return decl;
   } catch(e) { _warn('getDecl', e); }
   return null;
 }
