@@ -4,10 +4,43 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Eye, Moon, Sun, Type, X,
+  Eye, Moon, Sun, Type, X, RefreshCw,
 } from "lucide-react";
 
+// Nuclear cache reset: unregister every Service Worker for this scope,
+// delete every Cache Storage entry, then bounce the page with a unique
+// query string so the browser HTTP cache layer also misses. Useful when
+// GH Pages has deployed a new APP_VERSION but the user's still seeing
+// the previous build because some intermediate cache (SW, HTTP, or
+// esm.sh edge) is being sticky.
+async function forceUpdate() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister().catch(() => {})));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k).catch(() => {})));
+    }
+  } catch (_) {
+    // Best effort — even if something throws, fall through to the reload.
+  }
+  // Cache-buster reload — bypasses the browser HTTP cache because the URL
+  // is unique. location.reload(true) is non-standard / deprecated.
+  const sep = location.pathname.includes("?") ? "&" : "?";
+  location.href = location.pathname + sep + "_=" + Date.now();
+}
+
 function PrefsPanel({ prefs, savePrefs, theme, appVersion, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const onForceUpdate = async () => {
+    if (busy) return;
+    if (!confirm("Forçar atualização?\n\nIsso vai desregistrar o Service Worker, limpar todos os caches do app e recarregar do servidor. As rotas e preferências salvas (localStorage) ficam.")) return;
+    setBusy(true);
+    await forceUpdate();
+  };
+
   return (
     <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
@@ -93,8 +126,16 @@ function PrefsPanel({ prefs, savePrefs, theme, appVersion, onClose }) {
           className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold`}>
           Fechar
         </button>
-        <div className={`text-center text-[10px] ${theme.fgFaint} pt-2 border-t ${theme.panelBorder}`}>
-          Navlog v{appVersion}
+        <div className={`pt-2 border-t ${theme.panelBorder} flex items-center justify-between gap-3`}>
+          <div className={`text-[10px] ${theme.fgFaint}`}>
+            Navlog v{appVersion}
+          </div>
+          <button onClick={onForceUpdate} disabled={busy}
+            className={`text-[10px] uppercase tracking-widest px-3 py-1.5 rounded border ${theme.panelBorder} ${theme.fgMuted} inline-flex items-center gap-1.5 active:scale-95 disabled:opacity-50`}
+            title="Desregistra Service Worker, limpa caches, recarrega do servidor">
+            <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+            {busy ? "Atualizando…" : "Forçar atualização"}
+          </button>
         </div>
       </div>
     </div>
