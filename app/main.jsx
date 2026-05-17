@@ -12,18 +12,19 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2210";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2210";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2210";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2210";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2210";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2210";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2210";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2210";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2210";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2210";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2210";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2210";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2256";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2256";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2256";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2256";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2256";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2256";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2256";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2256";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2256";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2256";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2256";
+import { AppProvider } from "./context/app-context.jsx?v=20260517.2256";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2256";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -101,7 +102,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2210";
+const APP_VERSION = "20260517.2256";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -482,7 +483,27 @@ function NavlogApp() {
   const glowStyle = theme.glow ? "text-shadow: 0 0 8px currentColor;" : "";
 
   // Estilos compartilhados — paleta cockpit dark
+  // Espelha os retornos dos 3 hooks nos 4 contexts. Consumidores ainda
+  // recebem via props nesta fase; migração por aba acontece em commits
+  // separados. Não muda comportamento hoje, só habilita o canal.
+  const actions = {
+    markVirtual, unmarkVirtual, setVirtualAta,
+    setAta, markCrossed, unmark,
+    saveNote,
+    setDeviation, directToWp, clearDeviation,
+    moveUp, moveDown, reorder,
+    resetFlight, depart,
+  };
+  const derived = { computed, nextIdx, legVirtualsMap, liveETAs, liveRoute, nextLiveIdx, liveFuel };
+
   return (
+    <AppProvider
+      theme={theme}
+      prefs={prefs} savePrefs={savePrefs}
+      flight={flight} setFlight={setFlight} ac={ac}
+      actions={actions}
+      derived={derived}
+    >
     <div className={`min-h-screen ${theme.bg} ${theme.fg} font-mono`}
          style={{ fontSize: `${fontScale}rem` }}>
       <style>{`:root { --amber: #ffb13b; --cyan: #4ddbff; --green: #4ade80; --red: #ef4444; }
@@ -807,6 +828,7 @@ function NavlogApp() {
         />
       )}
     </div>
+    </AppProvider>
   );
 }
 
