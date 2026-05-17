@@ -30,13 +30,11 @@ Não há `package.json` — tudo vem por CDN.
 ## Layout de arquivos
 
 ```
-index.html         shell HTML + bloco React/Babel (artefato de produção, ~420KB)
-navlog.jsx         fonte React original/referência (~112KB)
+index.html         shell HTML + bloco React/Babel (artefato de produção)
 lib/planning.js    matemática pura de planejamento de voo (testável)
 lib/coords.js      parsing/formatação de coordenadas (decimal/DDM/DMS)
 manifest.json      manifesto PWA
-sw.js              service worker (cache versionado, ex: navlog-v7)
-patch_map.py       utilitário Python que injetou as features de mapa no index
+sw.js              service worker (cache versionado, ex: navlog-v8)
 tests/             suíte node:test
 icon-192.png, icon-512.png
 README.md          guia em português (deploy GitHub Pages / Vercel)
@@ -113,9 +111,6 @@ python -m http.server 8000
 # Rodar testes
 node --test tests/*.test.js
 node --test --test-reporter=spec tests/*.test.js   # verbose
-
-# Utilitário histórico de patching (raramente necessário)
-python patch_map.py
 ```
 
 ## Convenções
@@ -127,12 +122,16 @@ python patch_map.py
   `makeFlight`, `makeCP`, `nearly`, `phaseDistSum`, `totalDist`). Defaults
   são PA-28 com números redondos (ROC=500, ROD=500, vy=80, vDescent=90,
   tasCruise=110).
-- **`index.html` é o artefato de deploy**; `navlog.jsx` é referência.
-  Mudanças relevantes para produção precisam refletir no `index.html`
-  (o `patch_map.py` é um exemplo histórico desse fluxo).
-- **Service Worker tem cache versionado** (ex: `navlog-v7`). Bump da versão
-  ao alterar assets locais ou URLs de CDN, senão clientes ficam presos em
-  cache antigo.
+- **`index.html` é o artefato de deploy** — toda mudança de produção mora
+  aqui (ou nos módulos `lib/` que ele importa).
+- **Service Worker tem cache versionado** (ex: `navlog-v8`, constante
+  `CACHE_NAME` em `sw.js`). Bump da versão ao alterar assets locais ou
+  URLs de CDN, senão clientes ficam presos em cache antigo.
+- **`APP_VERSION` em `index.html` deve subir a cada mudança publicada.**
+  Formato: `YYYYMMDD.HHMM` em UTC (ex: `20260517.1430`). Aparece no
+  rodapé do app e ajuda o piloto a confirmar que pegou o build novo
+  depois de uma atualização. Bumpar junto com o `CACHE_NAME` do SW
+  quando os dois precisarem subir.
 - **UI em pt-BR.** Manter rótulos em português ao adicionar telas.
 - **Sem npm.** Não introduzir bundlers ou `package.json` sem alinhamento
   prévio — preserva o fluxo "sobe os arquivos e funciona".
