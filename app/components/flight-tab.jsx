@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2310";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2347";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
