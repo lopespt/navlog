@@ -23,6 +23,7 @@ const path = require("node:path");
 
 const COMPONENTS_DIR = path.join(__dirname, "..", "app", "components");
 const HOOKS_DIR = path.join(__dirname, "..", "app", "hooks");
+const CONTEXT_DIR = path.join(__dirname, "..", "app", "context");
 const LIB_DIR = path.join(__dirname, "..", "lib");
 const MAIN_JSX = path.join(__dirname, "..", "app", "main.jsx");
 
@@ -234,6 +235,18 @@ const hookFiles = fs.existsSync(HOOKS_DIR)
 for (const file of hookFiles) {
   test(`hooks/${file}: passes static audit`, () => {
     const code = fs.readFileSync(path.join(HOOKS_DIR, file), "utf8");
+    const issues = auditFile(file, code);
+    assert.deepEqual(issues, [], `audit issues in ${file}:\n  ${issues.join("\n  ")}`);
+  });
+}
+
+// And on app/context/*.jsx — same reasoning.
+const contextFiles = fs.existsSync(CONTEXT_DIR)
+  ? fs.readdirSync(CONTEXT_DIR).filter((f) => f.endsWith(".jsx"))
+  : [];
+for (const file of contextFiles) {
+  test(`context/${file}: passes static audit`, () => {
+    const code = fs.readFileSync(path.join(CONTEXT_DIR, file), "utf8");
     const issues = auditFile(file, code);
     assert.deepEqual(issues, [], `audit issues in ${file}:\n  ${issues.join("\n  ")}`);
   });
