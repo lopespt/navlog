@@ -49,7 +49,7 @@
   <script src="lib/coords.js"></script>
 
   <script type="text/babel" data-presets="react">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
     const {
       Plane, Settings, Fuel, ChevronRight, ChevronLeft,
       MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
@@ -8404,7 +8404,6 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
   const [tileMode, setTileMode] = useState('osm'); // 'osm' | 'sat'
-  const [tick, setTick] = useState(0);
   const [pickMode, setPickMode] = useState(false); // waiting for user to tap map to place WP
   const [layersOpen, setLayersOpen] = useState(false);
   const [georefActive, setGeorefActive] = useState(false);
@@ -8525,14 +8524,16 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
     cancelCalibration();
   }
 
-  // Re-render simulated position every second
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t+1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
   const flightRef = useRef(flight);
   useEffect(() => { flightRef.current = flight; }, [flight]);
+
+  // Latest live data, kept in refs so the imperative 1 Hz sim-marker updater
+  // (effect below) can read fresh values without re-binding the interval and
+  // without forcing the whole MapTab subtree to re-render every second.
+  const liveRouteRef = useRef(liveRoute);
+  const liveETAsRef = useRef(liveETAs);
+  useEffect(() => { liveRouteRef.current = liveRoute; }, [liveRoute]);
+  useEffect(() => { liveETAsRef.current = liveETAs; }, [liveETAs]);
 
   // When pickMode is active, the next Leaflet click places the waypoint
   const pickModeRef = useRef(false);
@@ -8906,18 +8907,25 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
   }, [flight.activeDeviation, flight.checkpoints]);
 
   // Simulated aircraft position — single source of truth lives in
-  // lib/planning.js (estimatedPosition). This effect only renders the marker.
-  // Updates the existing marker in place via setLatLng/setIcon to avoid the
-  // periodic stutter that came from removing + re-adding it on every tick.
-  useEffect(() => {
+  // lib/planning.js (estimatedPosition). Runs imperatively (setLatLng/
+  // setIcon on the existing Leaflet marker) so the 1 Hz update doesn't
+  // re-render the whole MapTab subtree. Triggered by:
+  //   (a) the 1 Hz wall-clock timer (so the marker drifts smoothly along the
+  //       leg between React state changes), and
+  //   (b) React deps below (so it reacts immediately to ATA marks, deviations,
+  //       route edits — without waiting up to a second for the next tick).
+  const updateSimMarker = useCallback(() => {
     const map = mapRef.current;
     if (!map || !window.L) return;
     const ov = overlayRef.current;
 
+    const f = flightRef.current;
     const est = estimatedPosition({
-      liveRoute, liveETAs, flight,
+      liveRoute: liveRouteRef.current,
+      liveETAs: liveETAsRef.current,
+      flight: f,
       nowMin: nowHHMM(),
-      eobtMin: parseHHMM(flight.eobt) ?? 0,
+      eobtMin: parseHHMM(f.eobt) ?? 0,
     });
     if (!est) {
       if (ov.simMarker) { map.removeLayer(ov.simMarker); ov.simMarker = null; }
@@ -8939,7 +8947,19 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
       ov.simMarker.setIcon(icon);
       ov.simMarker.setPopupContent(label);
     }
-  }, [tick, liveRoute, flight.atd, flight.activeDeviation, liveETAs]);
+  }, []);
+
+  // 1 Hz drift updater — no React state involved, no re-render triggered.
+  useEffect(() => {
+    const id = setInterval(updateSimMarker, 1000);
+    return () => clearInterval(id);
+  }, [updateSimMarker]);
+
+  // Re-run on React data changes (ATA marks, deviations, route edits) so the
+  // marker doesn't lag behind by up to one second waiting for the next tick.
+  useEffect(() => {
+    updateSimMarker();
+  }, [liveRoute, liveETAs, flight.atd, flight.activeDeviation, updateSimMarker]);
 
   const hasCoords = liveRoute.some(cp => cp.lat != null && cp.lon != null);
 
