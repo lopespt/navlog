@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v20";
+const CACHE_NAME = "navlog-v21";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -12,6 +12,7 @@ const STATIC = [
   "/navlog/app/components/map-tab.jsx",
   "/navlog/app/components/pdf-georeferencer.jsx",
   "/navlog/app/components/pdf-layers-panel.jsx",
+  "/navlog/app/components/waypoint-editor.jsx",
   "/navlog/manifest.json",
   // CDN assets — esm.sh hosts the JS modules now (no more babel-standalone).
   "https://cdn.tailwindcss.com",
@@ -26,6 +27,7 @@ const STATIC = [
   "https://esm.sh/gh/lopespt/navlog@main/app/components/map-tab.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-georeferencer.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-layers-panel.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/waypoint-editor.jsx",
 ];
 
 // Instala: pré-cacheia assets estáticos
