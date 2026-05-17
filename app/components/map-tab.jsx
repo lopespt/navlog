@@ -17,10 +17,10 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
-import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.2303";
-import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.2303";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.2304";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.2304";
 
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260517.2303";
+import { useTheme, usePrefs, useDerived } from "../context/app-context.jsx?v=20260517.2304";
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // Flat-earth distance from point P to segment A→B (in degrees, approximate)
 function ptSegDist(px, py, ax, ay, bx, by) {
@@ -32,7 +32,8 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
+function MapTab({ flight, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
+  const { computed, liveETAs, liveRoute } = useDerived();
   const { prefs, savePrefs } = usePrefs();
   const theme = useTheme();
   const mapDivRef = useRef(null);

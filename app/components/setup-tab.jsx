@@ -11,10 +11,10 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2303";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2304";
 
 
-import { useTheme } from "../context/app-context.jsx?v=20260517.2303";
+import { useTheme, useDerived } from "../context/app-context.jsx?v=20260517.2304";
 function AiracBadge() {
   const theme = useTheme();
   const [info, setInfo] = useState(null);
@@ -385,7 +385,8 @@ function Stat({ label, value }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, liveRoute, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+function SetupTab({ flight, setFlight, ac, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+  const { computed, liveRoute } = useDerived();
   const theme = useTheme();
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
