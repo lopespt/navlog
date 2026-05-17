@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v19";
+const CACHE_NAME = "navlog-v20";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -48,24 +48,48 @@ self.addEventListener("activate", (e) => {
   self.clients.claim();
 });
 
-// Fetch: cache-first para assets, network-first para dados
+// Fetch strategy splits our own code from CDN assets:
+//   - same-origin (lib/, app/, index.html, manifest): NETWORK-FIRST so a push
+//     to main propagates on the next reload without waiting for a SW cycle.
+//     Falls back to cache when offline.
+//   - everything else (esm.sh, unpkg, cdnjs, tailwind): CACHE-FIRST so CDN
+//     hits are instant and offline works. CDN assets are pinned by version
+//     in the URL, so staleness isn't a concern there.
 self.addEventListener("fetch", (e) => {
-  // Ignora POST e requests não-GET
   if (e.request.method !== "GET") return;
+  const url = new URL(e.request.url);
+  const sameOrigin = url.origin === self.location.origin;
 
-  e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const networkFetch = fetch(e.request)
+  if (sameOrigin) {
+    // Network-first for our own JS/HTML — eliminates the "old planning.js
+    // cached by previous SW version" failure mode that caused MapTab to
+    // black-screen after the nowHHMM move (commit 3674ece).
+    e.respondWith(
+      fetch(e.request)
         .then((res) => {
-          if (res.ok) {
+          if (res && res.ok) {
             const clone = res.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
           }
           return res;
         })
-        .catch(() => cached); // se offline, usa cache
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
 
-      // Cache-first: retorna cache imediatamente se disponível
+  // Cache-first for CDN (esm.sh / unpkg / cdnjs / tailwind).
+  e.respondWith(
+    caches.match(e.request).then((cached) => {
+      const networkFetch = fetch(e.request)
+        .then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          }
+          return res;
+        })
+        .catch(() => cached);
       return cached || networkFetch;
     })
   );
