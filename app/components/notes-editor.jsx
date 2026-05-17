@@ -2,11 +2,13 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 import {
   FileText, X,
 } from "lucide-react";
 
-function NotesEditor({ checkpoint, theme, onSave, onClose }) {
+function NotesEditor({ checkpoint, onSave, onClose }) {
+  const theme = useTheme();
   const [text, setText] = useState(checkpoint.notes || "");
   return (
     <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>

@@ -8,10 +8,12 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2256";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2301";
 
 
-function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, onSave }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function PointFinderMapTab({ flight, pdfOverlays, userPoints, onConfirm, onSave }) {
+  const theme = useTheme();
   const mapDivRef = useRef(null);
   const pickedMarkerRef = useRef(null);
   const [picked, setPicked] = useState(null);
@@ -92,7 +94,8 @@ function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, 
   );
 }
 
-function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
+function PointFinder({ flight, ac, userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm, onCancel, depth = 0, initialQuery = "", pdfOverlays, initialSource = null }) {
+  const theme = useTheme();
   const initialTab = initialSource && initialSource.kind === "radial" ? "radial"
     : initialSource && initialSource.kind === "intersection" ? "intersect"
     : initialSource && initialSource.kind === "map" ? "map"
@@ -640,7 +643,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
 
         {tab === "map" && (
           <PointFinderMapTab
-            flight={flight} theme={theme} pdfOverlays={pdfOverlays}
+            flight={flight} pdfOverlays={pdfOverlays}
             userPoints={userPoints}
             onConfirm={chooseAndConfirm}
             onSave={saveToLib}
@@ -656,7 +659,7 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
         const slotInitialQuery = slotSource && slotSource.kind === "search" ? slotSource.id : "";
         return (
           <PointFinder
-            flight={flight} ac={ac} theme={theme}
+            flight={flight} ac={ac}
             userPoints={userPoints}
             onAddUserPoint={onAddUserPoint}
             onDeleteUserPoint={onDeleteUserPoint}
@@ -678,7 +681,8 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
   );
 }
 
-function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays }) {
+function MapPicker({ allWps, initialPos, onConfirm, onCancel, pdfOverlays }) {
+  const theme = useTheme();
   const mapDivRef = useRef(null);
   const pickedMarkerRef = useRef(null);
   const [picked, setPicked] = useState(initialPos ?? null);
@@ -738,7 +742,8 @@ function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays
   );
 }
 
-function StepOverride({ cp, setCp, theme, onNext }) {
+function StepOverride({ cp, setCp, onNext }) {
+  const theme = useTheme();
   const fields = [
     { key: "tasClimbOvr",   label: "TAS Subida",   unit: "kt",    phase: "↗" },
     { key: "tasCruiseOvr",  label: "TAS Cruzeiro", unit: "kt",    phase: "→" },
@@ -861,7 +866,8 @@ function StepOverride({ cp, setCp, theme, onNext }) {
   );
 }
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, theme, ac, computed, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, ac, computed, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+  const theme = useTheme();
   const [finderOpen, setFinderOpen] = useState(false);
   const isNew    = editingIdx == null;
   const isOrigin = !isNew && flight.checkpoints[editingIdx]?.isOrigin;
@@ -1682,7 +1688,7 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
                 <span>Override de performance</span>
                 <span>{showPerf ? "▲" : "▼"}</span>
               </button>
-              {showPerf && <StepOverride cp={cp} setCp={setCp} theme={theme} onNext={function(){}} />}
+              {showPerf && <StepOverride cp={cp} setCp={setCp} onNext={function(){}} />}
             </div>
           )}
 
@@ -1722,14 +1728,13 @@ function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat
           initialPos={cp.lat != null ? [cp.lat, cp.lon] : null}
           onConfirm={applyCoords}
           onCancel={function() { setShowMapPicker(false); }}
-          theme={theme}
           pdfOverlays={pdfOverlays}
         />
       )}
 
       {finderOpen && (
         <PointFinder
-          flight={flight} ac={ac} theme={theme}
+          flight={flight} ac={ac}
           userPoints={userPoints}
           onAddUserPoint={onAddUserPoint}
           onDeleteUserPoint={onDeleteUserPoint}

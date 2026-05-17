@@ -6,9 +6,11 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   AlertTriangle, CircleCheckBig, Fuel,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2256";
+import { Section } from "./ui-primitives.jsx?v=20260517.2301";
 
-function FuelRow({ label, time, fuel, bold, accent, theme }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function FuelRow({ label, time, fuel, bold, accent }) {
+  const theme = useTheme();
   return (
     <div className={`flex items-center justify-between px-3 py-2 ${bold ? "bg-black/20" : ""}`}>
       <div className={`${bold ? "font-bold" : ""} ${accent ? theme.accent : theme.fgMuted} text-sm`}>
@@ -24,7 +26,8 @@ function FuelRow({ label, time, fuel, bold, accent, theme }) {
   );
 }
 
-function FuelTab({ flight, computed, liveFuel, ac, theme }) {
+function FuelTab({ flight, computed, liveFuel, ac }) {
+  const theme = useTheme();
   const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
 
   const tripByPhase = useMemo(() => {
@@ -89,18 +92,18 @@ function FuelTab({ flight, computed, liveFuel, ac, theme }) {
         </div>
       </div>
 
-      <Section theme={theme} icon={<Fuel className="w-4 h-4" />} title="Cálculo de combustível">
+      <Section icon={<Fuel className="w-4 h-4" />} title="Cálculo de combustível">
         <div className={`${theme.panel} border ${theme.panelBorder} rounded divide-y ${theme.panelBorder} text-sm`}>
-          <FuelRow theme={theme} label="Taxi e decolagem" time={taxi.time} fuel={taxi.fuel} />
-          <FuelRow theme={theme} label="Subida" time={tripByPhase.SUBIDA.time} fuel={tripByPhase.SUBIDA.fuel} />
-          <FuelRow theme={theme} label="Cruzeiro" time={tripByPhase.CRUZEIRO.time} fuel={tripByPhase.CRUZEIRO.fuel} />
-          <FuelRow theme={theme} label="Descida" time={tripByPhase.DESCIDA.time} fuel={tripByPhase.DESCIDA.fuel} />
-          <FuelRow theme={theme} label="Aproximação e pouso" time={approach.time} fuel={approach.fuel} />
-          <FuelRow theme={theme} label="Trip Fuel" fuel={tripTotal} bold />
-          <FuelRow theme={theme} label="Alternado" fuel={altn} />
-          <FuelRow theme={theme} label={`Reserva ${flight.rules}`} fuel={reserve} />
-          <FuelRow theme={theme} label="Contingência (5%)" fuel={cont} />
-          <FuelRow theme={theme} label="Total Requerido" fuel={totalReq} bold accent />
+          <FuelRow label="Taxi e decolagem" time={taxi.time} fuel={taxi.fuel} />
+          <FuelRow label="Subida" time={tripByPhase.SUBIDA.time} fuel={tripByPhase.SUBIDA.fuel} />
+          <FuelRow label="Cruzeiro" time={tripByPhase.CRUZEIRO.time} fuel={tripByPhase.CRUZEIRO.fuel} />
+          <FuelRow label="Descida" time={tripByPhase.DESCIDA.time} fuel={tripByPhase.DESCIDA.fuel} />
+          <FuelRow label="Aproximação e pouso" time={approach.time} fuel={approach.fuel} />
+          <FuelRow label="Trip Fuel" fuel={tripTotal} bold />
+          <FuelRow label="Alternado" fuel={altn} />
+          <FuelRow label={`Reserva ${flight.rules}`} fuel={reserve} />
+          <FuelRow label="Contingência (5%)" fuel={cont} />
+          <FuelRow label="Total Requerido" fuel={totalReq} bold accent />
         </div>
       </Section>
 

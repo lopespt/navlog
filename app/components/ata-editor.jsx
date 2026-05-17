@@ -2,11 +2,13 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 import {
   ChevronLeft, Clock, X,
 } from "lucide-react";
 
-function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onClear, onClose, onUseNow, theme, fieldLabel, confirmLabel, clearLabel }) {
+function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onClear, onClose, onUseNow, fieldLabel, confirmLabel, clearLabel }) {
+  const theme = useTheme();
   // Representação interna: string de dígitos puros, máx 6 (HHMMSS)
   const initialDigits = checkpoint.ata
     ? checkpoint.ata.replace(/:/g, "").slice(0, 6)

@@ -12,19 +12,19 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2256";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2256";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2256";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2256";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2256";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2256";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2256";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2256";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2256";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2256";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2256";
-import { AppProvider } from "./context/app-context.jsx?v=20260517.2256";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2256";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2301";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2301";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2301";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2301";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2301";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2301";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2301";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2301";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2301";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2301";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2301";
+import { AppProvider } from "./context/app-context.jsx?v=20260517.2301";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2301";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -102,7 +102,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2256";
+const APP_VERSION = "20260517.2301";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -498,7 +498,6 @@ function NavlogApp() {
 
   return (
     <AppProvider
-      theme={theme}
       prefs={prefs} savePrefs={savePrefs}
       flight={flight} setFlight={setFlight} ac={ac}
       actions={actions}
@@ -553,7 +552,7 @@ function NavlogApp() {
             </button>
             <div className="text-right leading-tight ml-1">
               <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>UTC</div>
-              <LiveClock theme={theme} />
+              <LiveClock />
             </div>
           </div>
         </div>
@@ -564,7 +563,7 @@ function NavlogApp() {
         {tab === "setup" && (
           <ErrorBoundary name="Setup" theme={theme}>
             <SetupTab
-              flight={flight} setFlight={setFlight} ac={ac} theme={theme}
+              flight={flight} setFlight={setFlight} ac={ac}
               onEditCp={(i) => { setEditingIdx(i); setEditorOpen(true); }}
               onAddCp={() => { setEditingIdx(null); setEditorOpen(true); }}
               onNewBlank={newBlankRoute}
@@ -598,7 +597,7 @@ function NavlogApp() {
               markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
               nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
               depart={depart}
-              resetFlight={resetFlight} ac={ac} theme={theme}
+              resetFlight={resetFlight} ac={ac}
               viewMode={viewMode} setViewMode={setViewMode}
               onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
               onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
@@ -613,19 +612,19 @@ function NavlogApp() {
         )}
         {tab === "fuel" && (
           <ErrorBoundary name="Combustível" theme={theme}>
-            <FuelTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+            <FuelTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} />
           </ErrorBoundary>
         )}
         {tab === "log" && (
           <ErrorBoundary name="Diário" theme={theme}>
-            <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+            <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} />
           </ErrorBoundary>
         )}
         {tab === "map" && (
           <ErrorBoundary name="Mapa" theme={theme}>
             <MapTab
               flight={flight} computed={computed} liveRoute={liveRoute}
-              liveETAs={liveETAs} ac={ac} theme={theme}
+              liveETAs={liveETAs} ac={ac}
               pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
               prefs={prefs} savePrefs={savePrefs}
               initialView={mapView} onViewChange={setMapView}
@@ -643,15 +642,15 @@ function NavlogApp() {
       {/* TAB BAR */}
       <nav className={`fixed bottom-0 left-0 right-0 z-20 ${theme.panel} border-t ${theme.panelBorder}`}>
         <div className="grid grid-cols-5">
-          <TabButton theme={theme} active={tab === "setup"} onClick={() => setTab("setup")}
+          <TabButton active={tab === "setup"} onClick={() => setTab("setup")}
             icon={<Settings className="w-5 h-5" />} label="Setup" />
-          <TabButton theme={theme} active={tab === "flight"} onClick={() => setTab("flight")}
+          <TabButton active={tab === "flight"} onClick={() => setTab("flight")}
             icon={<Gauge className="w-5 h-5" />} label="Em Voo" />
-          <TabButton theme={theme} active={tab === "fuel"} onClick={() => setTab("fuel")}
+          <TabButton active={tab === "fuel"} onClick={() => setTab("fuel")}
             icon={<Fuel className="w-5 h-5" />} label="Combustível" />
-          <TabButton theme={theme} active={tab === "log"} onClick={() => setTab("log")}
+          <TabButton active={tab === "log"} onClick={() => setTab("log")}
             icon={<BookOpen className="w-5 h-5" />} label="Diário" />
-          <TabButton theme={theme} active={tab === "map"} onClick={() => setTab("map")}
+          <TabButton active={tab === "map"} onClick={() => setTab("map")}
             icon={<MapIcon className="w-5 h-5" />} label="Mapa" />
         </div>
       </nav>
@@ -667,7 +666,6 @@ function NavlogApp() {
             initLon={insertCoords?.[1]}
             ac={ac}
             computed={computed}
-            theme={theme}
             pdfOverlays={pdfOverlays}
             userPoints={userPoints}
             onAddUserPoint={addUserPoint}
@@ -701,7 +699,6 @@ function NavlogApp() {
             : null}
           etaPlanned={computed[ataEditIdx]?.etaPlanned}
           etaLive={liveETAs[ataEditIdx]}
-          theme={theme}
           onSave={(ataStr) => { setAta(ataEditIdx, ataStr); setAtaEditOpen(false); }}
           onClear={() => { setAta(ataEditIdx, null); setAtaEditOpen(false); }}
           onClose={() => setAtaEditOpen(false)}
@@ -721,7 +718,6 @@ function NavlogApp() {
             prevAta={null}
             etaPlanned={null}
             etaLive={null}
-            theme={theme}
             onSave={(ataStr) => { setVirtualAta(virtualAtaEditKey, ataStr); setVirtualAtaEditKey(null); }}
             onClear={() => { unmarkVirtual(virtualAtaEditKey); setVirtualAtaEditKey(null); }}
             onClose={() => setVirtualAtaEditKey(null)}
@@ -738,7 +734,6 @@ function NavlogApp() {
           prevAta={null}
           etaPlanned={flight.eobt ? parseHHMM(flight.eobt) : null}
           etaLive={null}
-          theme={theme}
           fieldLabel="ATD"
           confirmLabel="Confirmar ATD"
           clearLabel="Cancelar ATD"
@@ -752,7 +747,7 @@ function NavlogApp() {
       {/* PREFERÊNCIAS */}
       {prefsOpen && (
         <PrefsPanel
-          prefs={prefs} savePrefs={savePrefs} theme={theme}
+          prefs={prefs} savePrefs={savePrefs}
           appVersion={APP_VERSION}
           onClose={() => setPrefsOpen(false)}
         />
@@ -761,7 +756,7 @@ function NavlogApp() {
       {/* DEVIAÇÃO / REPOSICIONAMENTO */}
       {deviationOpen && (
         <DeviationPanel
-          flight={flight} ac={ac} theme={theme}
+          flight={flight} ac={ac}
           pdfOverlays={pdfOverlays}
           defaultTargetIdx={(function() {
             // Resolve default to the next user waypoint not yet crossed.
@@ -781,7 +776,6 @@ function NavlogApp() {
       {notesOpen && notesIdx != null && (
         <NotesEditor
           checkpoint={flight.checkpoints[notesIdx]}
-          theme={theme}
           onSave={(text) => { saveNote(notesIdx, text); setNotesOpen(false); }}
           onClose={() => setNotesOpen(false)}
         />
@@ -790,7 +784,6 @@ function NavlogApp() {
       {/* IMPORTAR FPL */}
       {importOpen && (
         <FPLImporter
-          theme={theme}
           onImport={importFPLRoute}
           onClose={() => setImportOpen(false)}
         />
@@ -812,13 +805,11 @@ function NavlogApp() {
           }}
           onAdd={() => setFleetEditAircraft({ isBuiltIn: false, name: '', short: '', engine: '', tasCruise: 0, vy: 0, vDescent: 0, rocClimb: 0, rodDescent: 0, gphClimb: 0, gphCruise: 0, gphDescent: 0, fuelUsable: 0, mtow: 0, bew: 0 })}
           onClose={() => setFleetOpen(false)}
-          theme={theme}
         />
       )}
       {fleetEditAircraft !== null && (
         <AircraftEditor
           aircraft={fleetEditAircraft}
-          theme={theme}
           onSave={(updated) => {
             const id = updated.id || ('custom_' + Date.now().toString(36));
             setFleet((f) => ({ ...f, [id]: { ...updated, id } }));
