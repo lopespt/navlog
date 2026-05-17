@@ -12,14 +12,15 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.1921";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1921";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1921";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1921";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1921";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.1921";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1921";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1921";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2145";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2145";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2145";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2145";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2145";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2145";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2145";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2145";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2145";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -95,7 +96,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1921";
+const APP_VERSION = "20260517.2145";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -1208,71 +1209,81 @@ function NavlogApp() {
       {/* CONTEÚDO */}
       <main className={tab === 'map' ? 'overflow-hidden' : 'pb-24'}>
         {tab === "setup" && (
-          <SetupTab
-            flight={flight} setFlight={setFlight} ac={ac} theme={theme}
-            onEditCp={(i) => { setEditingIdx(i); setEditorOpen(true); }}
-            onAddCp={() => { setEditingIdx(null); setEditorOpen(true); }}
-            onNewBlank={newBlankRoute}
-            onDeleteCp={(i) => {
-              if (!confirm(`Remover ${flight.checkpoints[i].name}?`)) return;
-              setFlight((f) => {
-                const cps = [...f.checkpoints];
-                cps.splice(i, 1);
-                return { ...f, checkpoints: cps };
-              });
-            }}
-            onMoveUp={moveUp}
-            onMoveDown={moveDown}
-            onReorder={reorder}
-            onImportFPL={() => setImportOpen(true)}
-            fleet={fleet}
-            onManageFleet={() => setFleetOpen(true)}
-            computed={computed}
-            liveRoute={liveRoute}
-            userPoints={userPoints}
-            onAddUserPoint={addUserPoint}
-            onDeleteUserPoint={deleteUserPoint}
-          />
+          <ErrorBoundary name="Setup" theme={theme}>
+            <SetupTab
+              flight={flight} setFlight={setFlight} ac={ac} theme={theme}
+              onEditCp={(i) => { setEditingIdx(i); setEditorOpen(true); }}
+              onAddCp={() => { setEditingIdx(null); setEditorOpen(true); }}
+              onNewBlank={newBlankRoute}
+              onDeleteCp={(i) => {
+                if (!confirm(`Remover ${flight.checkpoints[i].name}?`)) return;
+                setFlight((f) => {
+                  const cps = [...f.checkpoints];
+                  cps.splice(i, 1);
+                  return { ...f, checkpoints: cps };
+                });
+              }}
+              onMoveUp={moveUp}
+              onMoveDown={moveDown}
+              onReorder={reorder}
+              onImportFPL={() => setImportOpen(true)}
+              fleet={fleet}
+              onManageFleet={() => setFleetOpen(true)}
+              computed={computed}
+              liveRoute={liveRoute}
+              userPoints={userPoints}
+              onAddUserPoint={addUserPoint}
+              onDeleteUserPoint={deleteUserPoint}
+            />
+          </ErrorBoundary>
         )}
         {tab === "flight" && (
-          <FlightTab
-            flight={flight} computed={computed} liveETAs={liveETAs} liveFuel={liveFuel}
-            liveRoute={liveRoute} nextLiveIdx={nextLiveIdx}
-            markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
-            nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
-            depart={depart}
-            resetFlight={resetFlight} ac={ac} theme={theme}
-            viewMode={viewMode} setViewMode={setViewMode}
-            onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
-            onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
-            onEditAtd={() => setAtdEditOpen(true)}
-            onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
-            onOpenDeviation={() => setDeviationOpen(true)}
-            onClearDeviation={clearDeviation}
-            onDirectTo={directToWp}
-            prefs={prefs}
-          />
+          <ErrorBoundary name="Em Voo" theme={theme}>
+            <FlightTab
+              flight={flight} computed={computed} liveETAs={liveETAs} liveFuel={liveFuel}
+              liveRoute={liveRoute} nextLiveIdx={nextLiveIdx}
+              markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
+              nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
+              depart={depart}
+              resetFlight={resetFlight} ac={ac} theme={theme}
+              viewMode={viewMode} setViewMode={setViewMode}
+              onEditAta={(i) => { setAtaEditIdx(i); setAtaEditOpen(true); }}
+              onEditVirtualAta={(key) => setVirtualAtaEditKey(key)}
+              onEditAtd={() => setAtdEditOpen(true)}
+              onEditNotes={(i) => { setNotesIdx(i); setNotesOpen(true); }}
+              onOpenDeviation={() => setDeviationOpen(true)}
+              onClearDeviation={clearDeviation}
+              onDirectTo={directToWp}
+              prefs={prefs}
+            />
+          </ErrorBoundary>
         )}
         {tab === "fuel" && (
-          <FuelTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+          <ErrorBoundary name="Combustível" theme={theme}>
+            <FuelTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+          </ErrorBoundary>
         )}
         {tab === "log" && (
-          <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+          <ErrorBoundary name="Diário" theme={theme}>
+            <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} theme={theme} />
+          </ErrorBoundary>
         )}
         {tab === "map" && (
-          <MapTab
-            flight={flight} computed={computed} liveRoute={liveRoute}
-            liveETAs={liveETAs} ac={ac} theme={theme}
-            pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
-            prefs={prefs} savePrefs={savePrefs}
-            initialView={mapView} onViewChange={setMapView}
-            onInsertWaypoint={(afterIdx, lat, lon) => {
-              setInsertAfterIdx(afterIdx);
-              setInsertCoords([lat, lon]);
-              setEditingIdx(null);
-              setEditorOpen(true);
-            }}
-          />
+          <ErrorBoundary name="Mapa" theme={theme}>
+            <MapTab
+              flight={flight} computed={computed} liveRoute={liveRoute}
+              liveETAs={liveETAs} ac={ac} theme={theme}
+              pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
+              prefs={prefs} savePrefs={savePrefs}
+              initialView={mapView} onViewChange={setMapView}
+              onInsertWaypoint={(afterIdx, lat, lon) => {
+                setInsertAfterIdx(afterIdx);
+                setInsertCoords([lat, lon]);
+                setEditingIdx(null);
+                setEditorOpen(true);
+              }}
+            />
+          </ErrorBoundary>
         )}
       </main>
 
@@ -1294,21 +1305,23 @@ function NavlogApp() {
 
       {/* EDITOR DE WAYPOINT */}
       {editorOpen && (
-        <WaypointEditor
-          flight={flight} setFlight={setFlight}
-          editingIdx={editingIdx}
-          insertAfterIdx={insertAfterIdx}
-          initLat={insertCoords?.[0]}
-          initLon={insertCoords?.[1]}
-          ac={ac}
-          computed={computed}
-          theme={theme}
-          pdfOverlays={pdfOverlays}
-          userPoints={userPoints}
-          onAddUserPoint={addUserPoint}
-          onDeleteUserPoint={deleteUserPoint}
-          onClose={() => { setEditorOpen(false); setInsertAfterIdx(null); setInsertCoords(null); }}
-        />
+        <ErrorBoundary name="Editor de Waypoint" theme={theme}>
+          <WaypointEditor
+            flight={flight} setFlight={setFlight}
+            editingIdx={editingIdx}
+            insertAfterIdx={insertAfterIdx}
+            initLat={insertCoords?.[0]}
+            initLon={insertCoords?.[1]}
+            ac={ac}
+            computed={computed}
+            theme={theme}
+            pdfOverlays={pdfOverlays}
+            userPoints={userPoints}
+            onAddUserPoint={addUserPoint}
+            onDeleteUserPoint={deleteUserPoint}
+            onClose={() => { setEditorOpen(false); setInsertAfterIdx(null); setInsertCoords(null); }}
+          />
+        </ErrorBoundary>
       )}
 
       {/* GERENCIADOR DE ROTAS */}

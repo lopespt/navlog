@@ -17,8 +17,8 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
-import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.1921";
-import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.1921";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.2145";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.2145";
 
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // Flat-earth distance from point P to segment A→B (in degrees, approximate)
