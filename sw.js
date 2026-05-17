@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v26";
+const CACHE_NAME = "navlog-v27";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -15,6 +15,10 @@ const STATIC = [
   "/navlog/app/components/pdf-layers-panel.jsx",
   "/navlog/app/components/waypoint-editor.jsx",
   "/navlog/app/components/setup-tab.jsx",
+  "/navlog/app/components/flight-tab.jsx",
+  "/navlog/app/components/fuel-tab.jsx",
+  "/navlog/app/components/log-tab.jsx",
+  "/navlog/app/components/prefs-panel.jsx",
   "/navlog/app/components/ui-primitives.jsx",
   "/navlog/manifest.json",
   // CDN assets — esm.sh hosts the JS modules now (no more babel-standalone).
@@ -26,12 +30,16 @@ const STATIC = [
   "https://esm.sh/react-dom@18.3.1/client",
   "https://esm.sh/react@18.3.1/jsx-runtime",
   "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1,react-dom@18.3.1",
-  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.1416",
+  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.1442",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/map-tab.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-georeferencer.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-layers-panel.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/waypoint-editor.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/setup-tab.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/flight-tab.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/fuel-tab.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/log-tab.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/prefs-panel.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/ui-primitives.jsx",
 ];
 
