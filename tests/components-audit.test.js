@@ -22,6 +22,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const COMPONENTS_DIR = path.join(__dirname, "..", "app", "components");
+const HOOKS_DIR = path.join(__dirname, "..", "app", "hooks");
 const LIB_DIR = path.join(__dirname, "..", "lib");
 const MAIN_JSX = path.join(__dirname, "..", "app", "main.jsx");
 
@@ -220,6 +221,19 @@ const files = fs.readdirSync(COMPONENTS_DIR).filter((f) => f.endsWith(".jsx"));
 for (const file of files) {
   test(`components/${file}: passes static audit`, () => {
     const code = fs.readFileSync(path.join(COMPONENTS_DIR, file), "utf8");
+    const issues = auditFile(file, code);
+    assert.deepEqual(issues, [], `audit issues in ${file}:\n  ${issues.join("\n  ")}`);
+  });
+}
+
+// Same audit on app/hooks/*.jsx — custom hooks reference the same window
+// globals from lib/* and would break the same way if an identifier moved.
+const hookFiles = fs.existsSync(HOOKS_DIR)
+  ? fs.readdirSync(HOOKS_DIR).filter((f) => f.endsWith(".jsx"))
+  : [];
+for (const file of hookFiles) {
+  test(`hooks/${file}: passes static audit`, () => {
+    const code = fs.readFileSync(path.join(HOOKS_DIR, file), "utf8");
     const issues = auditFile(file, code);
     assert.deepEqual(issues, [], `audit issues in ${file}:\n  ${issues.join("\n  ")}`);
   });
