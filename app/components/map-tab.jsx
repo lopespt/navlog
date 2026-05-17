@@ -3,10 +3,8 @@
 // relative ES module path in app/main.jsx; esm.sh/gh handles the relative
 // resolution and compiles JSX on the edge.
 //
-// Receives PdfGeoreferencer + PdfLayersPanel as props rather than importing
-// them: those components stay defined inside main.jsx for now to keep this
-// commit small; a future change can extract them too and we'd just turn the
-// props into direct relative imports.
+// Imports PdfGeoreferencer and PdfLayersPanel directly as sibling ES
+// modules (sibling .jsx files in the same folder).
 //
 // Window globals consumed (loaded by index.html before any module):
 //   window.L            Leaflet
@@ -19,6 +17,8 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx";
 
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // Flat-earth distance from point P to segment A→B (in degrees, approximate)
@@ -31,7 +31,7 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs, PdfGeoreferencer, PdfLayersPanel }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs }) {
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
