@@ -95,12 +95,23 @@
   <!-- Main React entry. esm.sh/gh fetches app/main.jsx from raw.gh@main,
        compiles JSX server-side, returns ES module. Browser handles dep
        order — no babel-standalone race condition.
+
+       The trailing &v=YYYYMMDD.HHMM cache-buster MUST be bumped on every
+       commit that touches app/main.jsx or any app/components/*.jsx — it's
+       just a query param so esm.sh treats each version as a distinct cache
+       key and re-fetches from raw.githubusercontent.com immediately. Same
+       value as the APP_VERSION constant inside main.jsx; keeping them in
+       sync makes the rendered footer the source of truth for what's
+       actually live. Without this, esm.sh's edge cache holds the previous
+       compile of @main for an unbounded TTL, so users see stale code even
+       after a deploy.
+
        Both react AND react-dom MUST be in ?deps= — pinning only react
        lets esm.sh resolve react-dom to its latest (19.x), which crashes
        with React error #525 "incompatible React versions" against the
        18.3.1 React the importmap binds in. -->
   <script type="module">
-    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1";
+    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.1342";
   </script>
 
   <script>
