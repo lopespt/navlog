@@ -48,6 +48,7 @@
   <script src="lib/planning.js"></script>
   <script src="lib/coords.js"></script>
   <script src="lib/airac.js"></script>
+  <script src="lib/storage.js"></script>
 
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
@@ -117,7 +118,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260517.1116";
+const APP_VERSION = "20260517.1118";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -7368,83 +7369,9 @@ async function computeWarpedImage(imgData, pdfPts, mapLeaflet) {
 }
 
 // ── IndexedDB helpers for PDF file handles ────────────────────────────────────
-function _pdfHandleDb() {
-  return new Promise(function(resolve, reject) {
-    var req = indexedDB.open('navlog_pdf_handles', 1);
-    req.onupgradeneeded = function(e) {
-      e.target.result.createObjectStore('handles', { keyPath: 'id' });
-    };
-    req.onsuccess = function(e) { resolve(e.target.result); };
-    req.onerror = function() { reject(req.error); };
-  });
-}
-// Stores full overlay record (handle + dataUrl + metadata) in IndexedDB
-async function savePdfOverlayIdb(ov, handle) {
-  try {
-    var db = await _pdfHandleDb();
-    // Preserve the existing handle when the caller passed null — the routine
-    // sync effect in App calls this on every overlay state change (rename,
-    // opacity tweak, hi-res arrival, etc.) and would otherwise wipe the
-    // FileSystemFileHandle saved at creation, forcing the user to re-pick the
-    // PDF on every calibration.
-    var preservedHandle = handle || null;
-    if (!handle) {
-      try {
-        var existing = await new Promise(function(resolve) {
-          var t = db.transaction('handles', 'readonly');
-          var r = t.objectStore('handles').get(ov.id);
-          r.onsuccess = function(e) { resolve(e.target.result || null); };
-          r.onerror = function() { resolve(null); };
-        });
-        if (existing && existing.handle) preservedHandle = existing.handle;
-      } catch (e) { _warn('savePdfOverlayIdb:preserveHandle:' + ov.id, e); }
-    }
-    var tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').put({
-      id: ov.id, handle: preservedHandle,
-      name: ov.name || null,
-      dataUrl: ov.dataUrl || null,
-      dataUrlHi: ov.dataUrlHi || null,
-      width: ov.width, height: ov.height,
-      bounds: ov.bounds || null,
-      pdfPts: ov.pdfPts, mapPts: ov.mapPts,
-      opacity: ov.opacity, visible: ov.visible,
-      calibration: ov.calibration || null,
-      order: (ov.order != null) ? ov.order : null,
-    });
-  } catch(e) { _warn('savePdfOverlayIdb:' + (ov && ov.id), e); }
-}
-async function getPdfOverlayIdb(id) {
-  try {
-    var db = await _pdfHandleDb();
-    return new Promise(function(resolve) {
-      var tx = db.transaction('handles', 'readonly');
-      var req = tx.objectStore('handles').get(id);
-      req.onsuccess = function(e) { resolve(e.target.result || null); };
-      req.onerror = function() { resolve(null); };
-    });
-  } catch(e) { _warn('getPdfOverlayIdb:' + id, e); return null; }
-}
-async function getAllPdfOverlaysIdb() {
-  try {
-    var db = await _pdfHandleDb();
-    return new Promise(function(resolve) {
-      var tx = db.transaction('handles', 'readonly');
-      var req = tx.objectStore('handles').getAll();
-      req.onsuccess = function(e) { resolve(e.target.result || []); };
-      req.onerror = function() { resolve([]); };
-    });
-  } catch(e) { _warn('getAllPdfOverlaysIdb', e); return []; }
-}
-async function deletePdfHandle(id) {
-  try {
-    var db = await _pdfHandleDb();
-    var tx = db.transaction('handles', 'readwrite');
-    tx.objectStore('handles').delete(id);
-  } catch(e) { _warn('deletePdfHandle:' + id, e); }
-}
-// Keep old name as alias for compat
-async function savePdfHandle(id, handle) { /* no-op, use savePdfOverlayIdb */ }
+// PDF overlay IndexedDB helpers (_pdfHandleDb, savePdfOverlayIdb,
+// getPdfOverlayIdb, getAllPdfOverlaysIdb, deletePdfHandle, savePdfHandle) are
+// defined in lib/storage.js and exposed as window globals.
 
 // Apply per-overlay translation + scale tweaks (from manual calibration) to a
 // 2-corner LatLng bounds tuple. Rotation is NOT supported here — would require
@@ -7570,47 +7497,9 @@ async function renderPdfHiRes(overlay, mapLeaflet, opts) {
 }
 
 // ── IndexedDB helpers for user-managed points (custom waypoints library) ──────
-function _userPtsDb() {
-  return new Promise(function(resolve, reject) {
-    var req = indexedDB.open('navlog_userpts', 1);
-    req.onupgradeneeded = function(e) {
-      e.target.result.createObjectStore('points', { keyPath: 'id' });
-    };
-    req.onsuccess = function(e) { resolve(e.target.result); };
-    req.onerror = function() { reject(req.error); };
-  });
-}
-async function userPtsAll() {
-  try {
-    var db = await _userPtsDb();
-    return new Promise(function(resolve) {
-      var tx = db.transaction('points', 'readonly');
-      var req = tx.objectStore('points').getAll();
-      req.onsuccess = function(e) { resolve(e.target.result || []); };
-      req.onerror = function() { resolve([]); };
-    });
-  } catch (e) { _warn('userPtsAll', e); return []; }
-}
-async function userPtsPut(pt) {
-  try {
-    var db = await _userPtsDb();
-    var rec = Object.assign({}, pt, {
-      id: pt.id || (Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)),
-      createdAt: pt.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    var tx = db.transaction('points', 'readwrite');
-    tx.objectStore('points').put(rec);
-    return rec;
-  } catch (e) { _warn('userPtsPut', e); return null; }
-}
-async function userPtsDelete(id) {
-  try {
-    var db = await _userPtsDb();
-    var tx = db.transaction('points', 'readwrite');
-    tx.objectStore('points').delete(id);
-  } catch (e) { _warn('userPtsDelete:' + id, e); }
-}
+// User-points IndexedDB helpers (userPtsAll, userPtsPut, userPtsDelete) are
+// defined in lib/storage.js and exposed as window globals.
+
 async function renderPdfFromHandle(handle) {
   if (!handle) return null;
   try {
