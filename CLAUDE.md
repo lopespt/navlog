@@ -10,18 +10,21 @@ português (pt-BR). Permite planejar rotas (waypoints, fases climb/cruise/descen
 vento, combustível), acompanhar o voo em tempo real (ETA, ATA, GS, fuel) e
 revisar o resultado em um diário.
 
-- **Sem build step.** Arquivos estáticos servidos diretamente.
-- **React via CDN** + Babel standalone fazem o transform de JSX no browser.
+- **Sem build step.** Arquivos estáticos servidos diretamente; JSX é
+  compilado em runtime pela esm.sh.
+- **React via esm.sh + importmap** (multi-file ES modules).
 - **Offline-first** via Service Worker; estado em `localStorage`.
 - Otimizado para Samsung Galaxy S24+, funciona em qualquer mobile moderno e
   desktop.
 
 ## Stack
 
-- React 18 (CDN `unpkg.com/react@18`)
-- Babel standalone `@babel/standalone@7.23.9` (transforma JSX em runtime)
-- Tailwind CSS (CDN), ícones Lucide
-- Leaflet 1.9.4 (aba Mapa)
+- React 18.3.1 — entregue pelo `esm.sh` (via importmap em `index.html`)
+- `esm.sh/gh/lopespt/navlog@main/app/*.jsx?deps=react@18.3.1,react-dom@18.3.1&v=...`
+  compila JSX no edge e serve como ES module. A query string `&v=APP_VERSION`
+  funciona como cache-buster.
+- Tailwind CSS (CDN), ícones Lucide (via `esm.sh/lucide-react`)
+- Leaflet 1.9.4 (aba Mapa), PDF.js (overlays de cartas)
 - NOAA World Magnetic Model (declinação magnética)
 - Node 18+ `node:test` para a suíte de testes (zero dependências npm)
 
@@ -30,14 +33,32 @@ Não há `package.json` — tudo vem por CDN.
 ## Layout de arquivos
 
 ```
-index.html         shell HTML + bloco React/Babel (artefato de produção)
-lib/planning.js    matemática pura de planejamento de voo (testável)
-lib/coords.js      parsing/formatação de coordenadas (decimal/DDM/DMS)
-manifest.json      manifesto PWA
-sw.js              service worker (cache versionado, ex: navlog-v8)
-tests/             suíte node:test
+index.html                       shell + importmap + boot diagnostic
+app/main.jsx                     entry React (required-globals guard,
+                                 monta NavlogApp no #root)
+app/components/
+  map-tab.jsx                    aba Mapa (Leaflet, overlays, sim aircraft)
+  setup-tab.jsx                  aba Setup (bundle: AiracBadge, FreqsSection,
+                                 ProceduresPanel, Stat)
+  waypoint-editor.jsx            modal de edição (bundle: PointFinder,
+                                 PointFinderMapTab, MapPicker, StepOverride)
+  pdf-georeferencer.jsx          wizard de calibração de carta PDF
+  pdf-layers-panel.jsx           painel de camadas PDF
+  ui-primitives.jsx              Section, Loading, Empty, ErrorState
+lib/
+  planning.js                    matemática pura (gcDist, calcLeg, getDecl,
+                                 nowHHMM, parseHHMM, …) — testável em Node
+  coords.js                      parsing/formatação de coordenadas
+  airac.js                       cliente AIRAC.NET
+  storage.js                     IndexedDB (overlays, user points)
+  pdf.js                         render PDF + warp afim
+  feedback.js                    haptic + audio (warmUpAudio, playAlarm)
+manifest.json                    manifesto PWA
+sw.js                            service worker (cache versionado +
+                                 network-first p/ nosso código)
+tests/                           suíte node:test (127 testes)
 icon-192.png, icon-512.png
-README.md          guia em português (deploy GitHub Pages / Vercel)
+README.md                        guia em português
 ```
 
 ## Abas e features
@@ -65,12 +86,15 @@ README.md          guia em português (deploy GitHub Pages / Vercel)
   threshold de alerta de desvio de ETA (2/5/10/15 min), Wake Lock,
   toggle de display de combustível.
 
-## Biblioteca matemática (reusar antes de criar)
+## Biblioteca de helpers (reusar antes de criar)
 
-`lib/planning.js` e `lib/coords.js` exportam em CommonJS (Node) e UMD (browser).
-Antes de adicionar lógica nova, verifique se uma destas já cobre o caso.
+Todos os módulos `lib/*.js` exportam em CommonJS (Node) e UMD (browser via
+`Object.assign(window, …)`). Antes de adicionar lógica nova, verifique se uma
+destas já cobre o caso. Os componentes em `app/` consomem os exports como
+bare identifiers — quando esses identifiers somem do window, o app
+black-screena (veja "Required-globals guard" abaixo).
 
-Funções principais (`lib/planning.js`):
+Principais funções (`lib/planning.js`):
 
 - Grande-círculo: `gcDist`, `gcTC`, `gcInterpolate`, `projectDest`,
   `projectSource`, `gcIntersection`.
@@ -78,20 +102,24 @@ Funções principais (`lib/planning.js`):
   {wca, th, mh, ch, gs, ete}`. Convenção: vento "de onde vem".
 - Correção de TAS: `correctTAS(baseTAS, alt_ft, isaDevC)`
   `TAS ≈ base × (1 + 0.02 × alt/1000) × (1 + ISA × 0.002)`.
-- Perfil de fase: `computeLegPhases` (modos `asap`, `at_fix`, `before_nm`,
-  `before_min`) e `resolveAltitudeProfile` (multi-perna com WPs `inherit`,
-  TOC/TOD únicos).
-- Posição: `estimatedPosition(liveRoute, atas, now)` — dead-reckoning com
-  suporte a hold e direct-to.
+- Perfil de fase: `computeLegPhases`, `resolveAltitudeProfile`.
+- Posição: `estimatedPosition(liveRoute, atas, now)` — dead-reckoning.
 - Direct-to: `applyDirectTo` / `clearDirectTo`.
 - Reserva: `bingoCheck`.
-- Tempo: `parseHHMM`, `formatHHMM`, `formatHHMMSS`.
+- Tempo: `parseHHMM`, `formatHHMM`, `formatHHMMSS`, `nowHHMM`.
+- Declinação: `getDecl(lat, lon, altFt)` — wrapper cacheado sobre
+  `window._geomagnetism` (NOAA WMM).
+- Afim (calibração de overlay): `affineFrom3Points`, `invertAffine`,
+  `applyAffinePt`.
 
 Coordenadas (`lib/coords.js`):
 
 - `parseCoordsString` aceita decimal, DDM, DMS, e DDMm.mm compacto.
 - `decDegToStr`, `formatCoord` para formatação.
 - `ddmDigitsToDecDeg` para entrada via keypad numérico.
+
+Outros: `airac.js` (AIRAC.NET client), `storage.js` (IndexedDB),
+`pdf.js` (render PDF + warp afim), `feedback.js` (haptic + audio).
 
 ## Persistência
 
@@ -118,20 +146,95 @@ node --test --test-reporter=spec tests/*.test.js   # verbose
 - **Matemática vai em `lib/`**, não embutida no JSX. Tudo o que sai de `lib/`
   precisa ser testável sem React.
 - **Toda função nova de cálculo deve ter teste** em `tests/*.test.js`. Veja
-  `tests/README.md` e use os helpers em `tests/helpers.js` (`makeAC`,
-  `makeFlight`, `makeCP`, `nearly`, `phaseDistSum`, `totalDist`). Defaults
+  `tests/README.md` e use os helpers em `tests/helpers.js`. Defaults
   são PA-28 com números redondos (ROC=500, ROD=500, vy=80, vDescent=90,
   tasCruise=110).
-- **`index.html` é o artefato de deploy** — toda mudança de produção mora
-  aqui (ou nos módulos `lib/` que ele importa).
-- **Service Worker tem cache versionado** (ex: `navlog-v8`, constante
-  `CACHE_NAME` em `sw.js`). Bump da versão ao alterar assets locais ou
-  URLs de CDN, senão clientes ficam presos em cache antigo.
-- **`APP_VERSION` em `index.html` deve subir a cada mudança publicada.**
-  Formato: `YYYYMMDD.HHMM` em UTC (ex: `20260517.1430`). Aparece no
-  rodapé do app e ajuda o piloto a confirmar que pegou o build novo
-  depois de uma atualização. Bumpar junto com o `CACHE_NAME` do SW
-  quando os dois precisarem subir.
+- **`app/main.jsx` é o entry React** — código JSX produtivo mora aqui ou
+  em `app/components/*.jsx`. `index.html` é só shell + importmap.
 - **UI em pt-BR.** Manter rótulos em português ao adicionar telas.
 - **Sem npm.** Não introduzir bundlers ou `package.json` sem alinhamento
   prévio — preserva o fluxo "sobe os arquivos e funciona".
+
+## Como deployar uma mudança em código (regra das 3 versões)
+
+Toda alteração em `app/main.jsx` ou `app/components/*.jsx` exige bumpar
+**três versões em sincronia**, na mesma frase do commit:
+
+1. `APP_VERSION` em `app/main.jsx` (formato `YYYYMMDD.HHMM` UTC, ex:
+   `20260517.1430`). Aparece no rodapé do app e é a fonte de verdade do
+   que está realmente rodando.
+2. `&v=YYYYMMDD.HHMM` na URL `esm.sh` dentro de `index.html` — mesmo valor.
+   esm.sh trata cada query string única como cache key separado; bumpar
+   força esm.sh a recompilar o JSX da raw.gh em vez de servir versão
+   antiga.
+3. `CACHE_NAME` em `sw.js` (ex: `navlog-v27`). Incrementar inteiro. Quando
+   houver mudanças em arquivos precacheados (lib, app), também atualizar
+   a entrada correspondente em `STATIC[]`.
+
+Mudanças que tocam apenas `lib/*.js` ou docs (`CLAUDE.md`, `README.md`)
+não exigem os bumps — `lib/*` é fetched network-first pelo SW e a
+required-globals guard auto-recupera caso o usuário pegue uma versão
+defasada.
+
+## Extrair um componente de `app/main.jsx`
+
+A migração para `esm.sh` em maio/2026 (commits `fc1256b` → `1e92f7d`)
+documentou um fluxo repetível para extrair componentes JSX. Antes de
+extrair, faça o audit:
+
+```sh
+# Liste TODO identifier referenciado pelo componente que pode quebrar
+# em escopo de módulo separado. Cobrir 3 padrões:
+grep -oE '<[A-Z][a-zA-Z0-9]+'       arquivo-extraido.jsx | sort -u  # JSX
+grep -oE '\b[a-z][a-zA-Z0-9]*\('    arquivo-extraido.jsx | sort -u  # calls
+grep -oE 'React\.[a-zA-Z]+'         arquivo-extraido.jsx | sort -u  # React.X
+```
+
+Para cada identifier, confirme que:
+
+- (a) Está nos imports do novo arquivo (`react`, `lucide-react`, ou
+  outro `./*.jsx` sibling), OU
+- (b) Está definido localmente dentro do mesmo arquivo, OU
+- (c) Está em algum `lib/*.js` e exposto via `Object.assign(window, …)`
+  — ESSE é o passo que costuma ser esquecido.
+
+Helpers que só vivem em `app/main.jsx` (module scope) NÃO são visíveis
+em outros módulos. Se um componente extraído usa um deles, mover o
+helper para `lib/planning.js` (matemática) ou `lib/feedback.js` (UI
+helpers) e adicioná-lo ao objeto `__NAVLOG_*__` para ir ao window.
+
+## Defesas contra cache stale
+
+A combinação esm.sh + Service Worker + GitHub Pages tem 3 camadas de
+cache (browser HTTP, SW próprio, esm.sh edge), e cada uma já causou
+um black screen nesta sessão. As três defesas atuais:
+
+1. **SW network-first** para `/navlog/lib/*` e `/navlog/app/*`
+   (cache-first só para CDN como esm.sh, unpkg, cdnjs — esses são
+   imutáveis por versão na URL).
+2. **Cache-buster `&v=APP_VERSION`** na URL esm.sh em `index.html`,
+   bumpado a cada deploy.
+3. **Required-globals guard** no topo de `app/main.jsx` — verifica que
+   todos os helpers de `lib/*` estão em `window` antes do React montar.
+   Se faltar alguma, faz `location.reload()` automático uma vez
+   (com flag em `sessionStorage`). Recuperação silenciosa de caches
+   defasados após deploy.
+
+Ao mover um helper de `app/main.jsx` para `lib/*`, **acrescente o nome
+ao array `required` dentro da guard** — assim a guard pega o desnível
+e auto-recupera no próximo refresh.
+
+## Diagnóstico no mobile
+
+O banner vermelho fixo no topo do app aparece automaticamente quando:
+
+- `window.error` dispara
+- `unhandledrejection` dispara
+- React unwind de erro em render
+- 20 s sem nada renderizar em `#root`
+
+Útil porque DevTools no celular é inviável. Texto do banner mostra
+`message + file:line` direto na tela. Não desliga após mount (commit
+`07f9c9f`), então erros pós-mount (clicar numa aba, abrir modal) também
+aparecem. Em sessões futuras: peça pro usuário copiar o texto do banner
+em vez de adivinhar.
