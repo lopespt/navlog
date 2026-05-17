@@ -37,16 +37,18 @@
   <div id="root"></div>
   <div id="bootstrap-status"></div>
 
-  <!-- Silent boot diagnostic. Banner stays empty during a healthy load and
-       only appears (red, top of page) if the esm.sh module chain fails to
-       reach React mount — useful for catching regressions on mobile without
-       DevTools. Stays disarmed once #root has children. -->
+  <!-- Boot + runtime diagnostic. Banner is hidden during healthy operation
+       and pops red at the top of the page on any error (window.onerror or
+       unhandledrejection), regardless of whether React has already mounted.
+       Useful for catching regressions on mobile without DevTools — current
+       refactor is moving JSX components into ES modules and we need
+       visibility into late failures (e.g. clicking a tab triggers a render
+       error in an extracted component). -->
   <script>
     (function() {
       var el = document.getElementById('bootstrap-status');
       var base = 'position:fixed;top:0;left:0;right:0;padding:1rem;font-family:monospace;font-size:0.8rem;z-index:9999;white-space:pre-wrap;word-break:break-word;line-height:1.4;background:#dc2626;color:#fff;';
-      var mounted = false;
-      function show(text) { if (mounted) return; el.textContent = text; el.style.cssText = base; }
+      function show(text) { el.textContent = text; el.style.cssText = base; }
       window.addEventListener('error', function(e) {
         show('❌ Error\n' + (e.message || '(sem mensagem)') + '\nfile: ' + (e.filename || '?') + ':' + (e.lineno || '?'));
       });
@@ -57,19 +59,10 @@
       });
       setTimeout(function() {
         var root = document.getElementById('root');
-        if (root && root.children.length === 0) {
+        if (root && root.children.length === 0 && !el.textContent) {
           show('⏱ Timeout: nada renderizou em 20s. esm.sh pode estar lento ou bloqueado.');
         }
       }, 20000);
-      var obs = new MutationObserver(function() {
-        var root = document.getElementById('root');
-        if (root && root.children.length > 0) {
-          mounted = true;
-          el.style.cssText = 'display:none;';
-          obs.disconnect();
-        }
-      });
-      obs.observe(document.getElementById('root'), { childList: true });
     })();
   </script>
 
