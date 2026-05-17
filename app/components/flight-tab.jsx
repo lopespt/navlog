@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2310";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -26,8 +26,9 @@ function phaseETELabel(portions, totalETE) {
     .join(" ") + " min";
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, onDirectTo, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, viewMode }) {
   const theme = useTheme();
+  const { directToWp } = useFlight();
   const bypassed = cp.bypassed === true;
   const ringClass =
     bypassed             ? "border-zinc-700/40 bg-zinc-900/30 opacity-50" :
@@ -134,9 +135,9 @@ function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive,
             ) : null}
           </div>
           {/* Atalho direct-to (só WPs upcoming não-cruzados, não-virtuais, não-bypassed) */}
-          {!isOrigin && !isAuto && !isVirtual && !crossed && !bypassed && onDirectTo && (
+          {!isOrigin && !isAuto && !isVirtual && !crossed && !bypassed && directToWp && (
             <button
-              onClick={(e) => { e.stopPropagation(); onDirectTo(cp.userIdx); }}
+              onClick={(e) => { e.stopPropagation(); directToWp(cp.userIdx); }}
               className={`mt-0.5 p-1 rounded ${theme.cyan} opacity-70 hover:opacity-100 active:scale-90`}
               aria-label={`Direct to ${cp.name}`}
               title={`Direct to ${cp.name}`}
@@ -187,10 +188,13 @@ CheckpointRow = React.memo(CheckpointRow, function(a, b) {
   );
 });
 
-function FlightTab({ markVirtual, unmarkVirtual, markCrossed, depart,
-    resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMode, setViewMode,
-    onOpenDeviation, onClearDeviation, onDirectTo,  }) {
-  const { flight, ac } = useFlight();
+function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMode, setViewMode,
+    onOpenDeviation }) {
+  const {
+    flight, ac,
+    markVirtual, unmarkVirtual, markCrossed,
+    depart, resetFlight, clearDeviation,
+  } = useFlight();
   const { computed, nextIdx, liveETAs, liveRoute, nextLiveIdx, liveFuel } = useDerived();
   const { prefs } = usePrefs();
   const theme = useTheme();
@@ -520,7 +524,7 @@ function FlightTab({ markVirtual, unmarkVirtual, markCrossed, depart,
                 className={`ml-auto text-[10px] px-2 py-1 rounded border ${theme.panelBorder} ${theme.fgMuted}`}>
                 Editar
               </button>
-              <button onClick={onClearDeviation}
+              <button onClick={clearDeviation}
                 className="text-[10px] px-2 py-1 rounded border border-red-500 text-red-400 font-bold">
                 Voltar à rota
               </button>
@@ -758,8 +762,8 @@ function FlightTab({ markVirtual, unmarkVirtual, markCrossed, depart,
             viewMode={viewMode}
             onEditAta={() => item.isVirtual ? onEditVirtualAta(item.autoKey) : onEditAta(item.userIdx)}
             onEditNotes={() => !item.isVirtual && onEditNotes(item.userIdx)}
+
             onUnmarkVirtual={item.isVirtual ? () => unmarkVirtual(item.autoKey) : null}
-            onDirectTo={onDirectTo}
           />
           );
         })}
