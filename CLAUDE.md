@@ -119,7 +119,8 @@ Coordenadas (`lib/coords.js`):
 - `ddmDigitsToDecDeg` para entrada via keypad numérico.
 
 Outros: `airac.js` (AIRAC.NET client), `storage.js` (IndexedDB),
-`pdf.js` (render PDF + warp afim), `feedback.js` (haptic + audio).
+`pdf.js` (render PDF + warp afim), `feedback.js` (haptic + audio),
+`themes.js` (paletas Tailwind night/day/red).
 
 ## Persistência
 
@@ -155,42 +156,73 @@ node --test --test-reporter=spec tests/*.test.js   # verbose
 - **Sem npm.** Não introduzir bundlers ou `package.json` sem alinhamento
   prévio — preserva o fluxo "sobe os arquivos e funciona".
 
-## Como deployar uma mudança em código (regra das 3 versões)
+## Como deployar uma mudança em código
 
-Toda alteração em `app/main.jsx` ou `app/components/*.jsx` exige bumpar
-**três versões em sincronia**, na mesma frase do commit:
+Qualquer commit que toque `app/main.jsx` ou `app/components/*.jsx`
+precisa propagar a versão em ~14 lugares (APP_VERSION no rodapé,
+`&v=` em duas URLs esm.sh, `CACHE_NAME` no SW, e `?v=` em cada import
+relativo). Não tente fazer isso à mão — use o script:
 
-1. `APP_VERSION` em `app/main.jsx` (formato `YYYYMMDD.HHMM` UTC, ex:
-   `20260517.1430`). Aparece no rodapé do app e é a fonte de verdade do
-   que está realmente rodando.
-2. `&v=YYYYMMDD.HHMM` na URL `esm.sh` dentro de `index.html` — mesmo valor.
-   esm.sh trata cada query string única como cache key separado; bumpar
-   força esm.sh a recompilar o JSX da raw.gh em vez de servir versão
-   antiga.
-3. `CACHE_NAME` em `sw.js` (ex: `navlog-v27`). Incrementar inteiro. Quando
-   houver mudanças em arquivos precacheados (lib, app), também atualizar
-   a entrada correspondente em `STATIC[]`.
+```sh
+python3 bump.py                  # usa o timestamp UTC atual
+python3 bump.py 20260517.1700    # versão explícita (re-rodar a mesma)
+```
+
+O script atualiza, em sincronia:
+
+1. `APP_VERSION` em `app/main.jsx` (rodapé do app, fonte de verdade).
+2. `&v=YYYYMMDD.HHMM` na URL `esm.sh` em `index.html` — esm.sh trata
+   cada query string única como cache key separado, então bumpar força
+   uma recompilação fresca do JSX da raw.gh.
+3. `&v=` na entrada equivalente em `sw.js` precache e `CACHE_NAME++`
+   (incrementa o inteiro do nome do cache).
+4. `?v=YYYYMMDD.HHMM` em **cada import relativo** dentro de
+   `app/main.jsx` e dos `app/components/*.jsx`. Sem isso, o esm.sh
+   cacheia os arquivos siblings (`./components/foo.jsx`) pela URL
+   nua e serve versão antiga mesmo após deploy — fonte do bug
+   "X is not defined" depois de uma extração.
+
+Depois de bumpar:
+
+```sh
+node --test tests/*.test.js   # sanity check
+git add -A && git commit -m "..."
+git push
+```
 
 Mudanças que tocam apenas `lib/*.js` ou docs (`CLAUDE.md`, `README.md`)
-não exigem os bumps — `lib/*` é fetched network-first pelo SW e a
+não exigem o bump — `lib/*` é fetched network-first pelo SW e a
 required-globals guard auto-recupera caso o usuário pegue uma versão
 defasada.
 
 ## Extrair um componente de `app/main.jsx`
 
-A migração para `esm.sh` em maio/2026 (commits `fc1256b` → `1e92f7d`)
+A migração para `esm.sh` em maio/2026 (commits `fc1256b` → `d09311a`)
 documentou um fluxo repetível para extrair componentes JSX. Antes de
-extrair, faça o audit:
+extrair, faça o audit completo de identifiers — cada um precisa estar
+no escopo do novo módulo.
+
+Padrões que o audit precisa cobrir:
 
 ```sh
-# Liste TODO identifier referenciado pelo componente que pode quebrar
-# em escopo de módulo separado. Cobrir 3 padrões:
-grep -oE '<[A-Z][a-zA-Z0-9]+'       arquivo-extraido.jsx | sort -u  # JSX
-grep -oE '\b[a-z][a-zA-Z0-9]*\('    arquivo-extraido.jsx | sort -u  # calls
-grep -oE 'React\.[a-zA-Z]+'         arquivo-extraido.jsx | sort -u  # React.X
+# Para cada componente que você está movendo para um arquivo separado:
+grep -oE '<[A-Z]\w*'             arquivo.jsx | sort -u    # JSX elements
+grep -oE '\b[a-z]\w*\('          arquivo.jsx | sort -u    # function calls
+grep -oE 'React\.[a-zA-Z]+'      arquivo.jsx | sort -u    # React.X
+grep -oE '^\s*\w+\s*='           arquivo.jsx | sort -u    # top-level reassigns
 ```
 
-Para cada identifier, confirme que:
+O último (`X = ...` at top level) pega coisas como
+`CheckpointRow = React.memo(CheckpointRow, ...)` — se ficar para trás
+em `main.jsx` quando você move `CheckpointRow`, vira ReferenceError no
+load. Os outros pegam: imports faltando (Lucide icon, sibling component),
+helpers de main.jsx scope, e o `import React, …` default necessário pra
+`React.Fragment` / `React.memo`.
+
+Cuidado: o regex `<[A-Z]\w*` precisa do `*` (zero ou mais) — usa um `+`
+e ele perde componentes de uma letra como `<X />` (Lucide close icon).
+
+Para cada identifier encontrado, confirme que:
 
 - (a) Está nos imports do novo arquivo (`react`, `lucide-react`, ou
   outro `./*.jsx` sibling), OU
@@ -199,30 +231,57 @@ Para cada identifier, confirme que:
   — ESSE é o passo que costuma ser esquecido.
 
 Helpers que só vivem em `app/main.jsx` (module scope) NÃO são visíveis
-em outros módulos. Se um componente extraído usa um deles, mover o
-helper para `lib/planning.js` (matemática) ou `lib/feedback.js` (UI
-helpers) e adicioná-lo ao objeto `__NAVLOG_*__` para ir ao window.
+em outros módulos. Se um componente extraído usa um deles:
+
+- **Matemática / dados puros** → `lib/planning.js` ou novo `lib/*.js`
+  (já temos `themes.js` pra paletas, `feedback.js` pra haptic+audio).
+- **Componente React interno só desse tab** → bundle no mesmo arquivo
+  (foi o caso de `CheckpointRow` em `flight-tab.jsx`, `AiracBadge` +
+  `FreqsSection` + `ProceduresPanel` em `setup-tab.jsx`).
+- **Componente React compartilhado entre main + tab** → arquivo próprio
+  (foi o caso de `Section` / `Loading` / `Empty` / `ErrorState` em
+  `ui-primitives.jsx`).
+- **Constante (APP_VERSION, etc.)** → passar como prop. Não esconder
+  na window se for trivial.
+
+Cross-check final, depois de extrair: `python3 audit-modules.py` (não
+existe ainda como script standalone, mas o padrão está nos commits
+`a59be1f` e `dda1389` — cruza cada bare identifier do componente
+contra o conjunto de top-level declarations em `main.jsx`).
+
+Depois de extrair, **adicione cada novo helper ao array `required`
+dentro do required-globals guard** em `app/main.jsx`. Sem isso, a
+guard não pega o desnível de cache e o usuário fica preso num erro.
+
+E finalmente: `python3 bump.py` antes do commit (veja seção acima).
 
 ## Defesas contra cache stale
 
 A combinação esm.sh + Service Worker + GitHub Pages tem 3 camadas de
 cache (browser HTTP, SW próprio, esm.sh edge), e cada uma já causou
-um black screen nesta sessão. As três defesas atuais:
+um black screen nesta migração. As quatro defesas atuais:
 
 1. **SW network-first** para `/navlog/lib/*` e `/navlog/app/*`
    (cache-first só para CDN como esm.sh, unpkg, cdnjs — esses são
    imutáveis por versão na URL).
-2. **Cache-buster `&v=APP_VERSION`** na URL esm.sh em `index.html`,
-   bumpado a cada deploy.
-3. **Required-globals guard** no topo de `app/main.jsx` — verifica que
-   todos os helpers de `lib/*` estão em `window` antes do React montar.
-   Se faltar alguma, faz `location.reload()` automático uma vez
-   (com flag em `sessionStorage`). Recuperação silenciosa de caches
-   defasados após deploy.
+2. **Cache-buster `&v=APP_VERSION`** na URL `esm.sh/gh/.../main.jsx`
+   dentro de `index.html`. Força esm.sh a recompilar a entry a cada
+   deploy.
+3. **Cache-buster `?v=APP_VERSION` em CADA import relativo** dentro
+   de `app/main.jsx` e dos `app/components/*.jsx`. Sem isso, esm.sh
+   serve a versão antiga do sibling (descoberto em `d09311a`: parent
+   atualiza, children ficam stale). O `bump.py` cuida disso
+   automaticamente.
+4. **Required-globals guard** no topo de `app/main.jsx` — verifica que
+   todos os helpers de `lib/*` (functions) e `themes` (objeto) estão
+   em `window` antes do React montar. Se faltar alguma, faz
+   `location.reload()` automático uma vez (com flag em
+   `sessionStorage`). Recuperação silenciosa de caches defasados
+   logo após deploy.
 
 Ao mover um helper de `app/main.jsx` para `lib/*`, **acrescente o nome
-ao array `required` dentro da guard** — assim a guard pega o desnível
-e auto-recupera no próximo refresh.
+ao array `required` dentro da guard** — assim ela pega o desnível e
+auto-recupera no próximo refresh.
 
 ## Diagnóstico no mobile
 
