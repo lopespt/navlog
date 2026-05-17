@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Eye, Moon, Sun, Type,
+  Eye, Moon, Sun, Type, X,
 } from "lucide-react";
 
 function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
