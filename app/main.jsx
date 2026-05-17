@@ -72,7 +72,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260517.1242";
+const APP_VERSION = "20260517.1252";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {

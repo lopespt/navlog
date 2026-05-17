@@ -37,35 +37,35 @@
   <div id="root"></div>
   <div id="bootstrap-status"></div>
 
-  <!-- Visible boot diagnostic. The previous esm.sh migration attempt (fc1256b)
-       produced a black screen with no way to inspect DevTools on mobile. This
-       block surfaces any module-load failure as a banner at the top of the
-       page: blue while loading, red when an error fires, hidden once React
-       mounts something into #root. -->
+  <!-- Silent boot diagnostic. Banner stays empty during a healthy load and
+       only appears (red, top of page) if the esm.sh module chain fails to
+       reach React mount — useful for catching regressions on mobile without
+       DevTools. Stays disarmed once #root has children. -->
   <script>
     (function() {
       var el = document.getElementById('bootstrap-status');
-      var base = 'position:fixed;top:0;left:0;right:0;padding:1rem;font-family:monospace;font-size:0.8rem;z-index:9999;white-space:pre-wrap;word-break:break-word;line-height:1.4;';
-      function show(text, bg) { el.textContent = text; el.style.cssText = base + 'background:' + bg + ';color:#fff;'; }
-      show('⏳ Carregando módulos via esm.sh... (1ª vez pode demorar)', '#2563eb');
+      var base = 'position:fixed;top:0;left:0;right:0;padding:1rem;font-family:monospace;font-size:0.8rem;z-index:9999;white-space:pre-wrap;word-break:break-word;line-height:1.4;background:#dc2626;color:#fff;';
+      var mounted = false;
+      function show(text) { if (mounted) return; el.textContent = text; el.style.cssText = base; }
       window.addEventListener('error', function(e) {
-        show('❌ Error\n' + (e.message || '(sem mensagem)') + '\nfile: ' + (e.filename || '?') + ':' + (e.lineno || '?'), '#dc2626');
+        show('❌ Error\n' + (e.message || '(sem mensagem)') + '\nfile: ' + (e.filename || '?') + ':' + (e.lineno || '?'));
       });
       window.addEventListener('unhandledrejection', function(e) {
         var r = e.reason;
         var msg = r && (r.message || r.stack || r.toString()) || String(r);
-        show('❌ Promise rejected\n' + msg, '#dc2626');
+        show('❌ Promise rejected\n' + msg);
       });
       setTimeout(function() {
         var root = document.getElementById('root');
-        if (root && root.children.length === 0 && el.style.display !== 'none') {
-          show('⏱ Timeout: nada renderizou em 20s. esm.sh pode estar lento ou bloqueado.', '#dc2626');
+        if (root && root.children.length === 0) {
+          show('⏱ Timeout: nada renderizou em 20s. esm.sh pode estar lento ou bloqueado.');
         }
       }, 20000);
       var obs = new MutationObserver(function() {
         var root = document.getElementById('root');
         if (root && root.children.length > 0) {
-          el.style.display = 'none';
+          mounted = true;
+          el.style.cssText = 'display:none;';
           obs.disconnect();
         }
       });
