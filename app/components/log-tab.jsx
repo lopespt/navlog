@@ -6,9 +6,11 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   BookOpen, Clock,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2256";
+import { Section } from "./ui-primitives.jsx?v=20260517.2301";
 
-function CompareRow({ label, plan, real, theme }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function CompareRow({ label, plan, real }) {
+  const theme = useTheme();
   return (
     <div className={`grid grid-cols-3 px-3 py-2 text-sm border-b ${theme.panelBorder} last:border-b-0`}>
       <div className={theme.fgMuted}>{label}</div>
@@ -18,7 +20,8 @@ function CompareRow({ label, plan, real, theme }) {
   );
 }
 
-function LogTab({ flight, computed, liveFuel, ac, theme }) {
+function LogTab({ flight, computed, liveFuel, ac }) {
+  const theme = useTheme();
   const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
 
   // Estatísticas gerais
@@ -61,25 +64,25 @@ function LogTab({ flight, computed, liveFuel, ac, theme }) {
       </div>
 
       {/* Comparação planejado vs real */}
-      <Section theme={theme} icon={<BookOpen className="w-4 h-4" />} title="Planejado vs Real">
+      <Section icon={<BookOpen className="w-4 h-4" />} title="Planejado vs Real">
         <div className={`${theme.panel} border ${theme.panelBorder} rounded overflow-hidden`}>
           <div className={`grid grid-cols-3 px-3 py-2 text-[10px] uppercase ${theme.fgFaint} border-b ${theme.panelBorder}`}>
             <div>Métrica</div><div className="text-right">Plano</div><div className="text-right">Real</div>
           </div>
-          <CompareRow theme={theme} label="Distância (NM)"
+          <CompareRow label="Distância (NM)"
             plan={planTotalDist.toFixed(0)} real={realTotalDist > 0 ? realTotalDist.toFixed(0) : "—"} />
-          <CompareRow theme={theme} label="Tempo (min)"
+          <CompareRow label="Tempo (min)"
             plan={planTotalTime.toFixed(0)} real={realTotalTime != null ? realTotalTime.toFixed(0) : "—"} />
-          <CompareRow theme={theme} label="GS médio (kt)"
+          <CompareRow label="GS médio (kt)"
             plan={planTotalDist > 0 && planTotalTime > 0 ? Math.round((planTotalDist / planTotalTime) * 60) : "—"}
             real={realGsAvg != null ? Math.round(realGsAvg) : "—"} />
-          <CompareRow theme={theme} label="Combustível (gal)"
+          <CompareRow label="Combustível (gal)"
             plan={planTotalFuel.toFixed(1)} real={realFuelUsed > 0 ? realFuelUsed.toFixed(1) : "—"} />
         </div>
       </Section>
 
       {/* Lista de passagens */}
-      <Section theme={theme} icon={<Clock className="w-4 h-4" />} title={`Passagens registradas (${crossed.length})`}>
+      <Section icon={<Clock className="w-4 h-4" />} title={`Passagens registradas (${crossed.length})`}>
         {crossed.length === 0 ? (
           <div className={`text-center py-6 ${theme.fgFaint} text-sm`}>
             Nenhuma passagem registrada ainda.

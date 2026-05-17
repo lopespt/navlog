@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 
 
 
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 // PDF overlay helpers (renderPdfToImage, computeWarpedImage,
 // applyOverlayCalibration, rewarpOverlayFromHandle, rewarpOverlayFromFile,
 // pickPdfFile, renderPdfHiRes, renderPdfFromHandle) are defined in lib/pdf.js
@@ -20,7 +21,8 @@ import { useState, useEffect, useRef } from "react";
 
 // ── PdfGeoreferencer ─────────────────────────────────────────────────────────
 // Full-screen wizard: pick 2 pts on PDF, then 2 pts on map
-function PdfGeoreferencer({ theme, mapRef, onDone, onCancel, pdfOverlays, setPdfOverlays }) {
+function PdfGeoreferencer({ mapRef, onDone, onCancel, pdfOverlays, setPdfOverlays }) {
+  const theme = useTheme();
   const [phase, setPhase] = useState('loading'); // loading | pdf | map | done
   const [imgData, setImgData] = useState(null);  // { dataUrl, width, height }
   const [pdfPts, setPdfPts] = useState([]);       // [[u,v], ...]  (≤2)

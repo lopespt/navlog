@@ -2,9 +2,11 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2256";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2301";
 
-function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function DeviationPanel({ flight, ac, defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
+  const theme = useTheme();
   const dev = flight.activeDeviation || null;
   const mapDivRef = useRef(null);
   const posMarkerRef = useRef(null);

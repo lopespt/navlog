@@ -3,6 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 import {
   Eye, Moon, Sun, Type, X, RefreshCw,
 } from "lucide-react";
@@ -32,7 +33,8 @@ async function forceUpdate() {
   location.href = location.pathname + sep + "_=" + Date.now();
 }
 
-function PrefsPanel({ prefs, savePrefs, theme, appVersion, onClose }) {
+function PrefsPanel({ prefs, savePrefs, appVersion, onClose }) {
+  const theme = useTheme();
   const [busy, setBusy] = useState(false);
   const onForceUpdate = async () => {
     if (busy) return;

@@ -12,7 +12,9 @@
 import React, { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, RefreshCw, MapPin, AlertTriangle } from "lucide-react";
 
-function Section({ icon, title, children, theme, collapsible, defaultOpen }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function Section({ icon, title, children, collapsible, defaultOpen }) {
+  const theme = useTheme();
   const [open, setOpen] = useState(defaultOpen != null ? defaultOpen : true);
   if (!collapsible) {
     return (
@@ -36,7 +38,8 @@ function Section({ icon, title, children, theme, collapsible, defaultOpen }) {
   );
 }
 
-function Loading({ theme, label }) {
+function Loading({ label }) {
+  const theme = useTheme();
   return (
     <div className={`flex items-center justify-center gap-2 py-4 text-[10px] uppercase tracking-widest ${theme?.fgFaint || "text-zinc-500"}`}
       role="status" aria-live="polite">
@@ -46,7 +49,8 @@ function Loading({ theme, label }) {
   );
 }
 
-function Empty({ theme, icon, title, hint }) {
+function Empty({ icon, title, hint }) {
+  const theme = useTheme();
   const Ico = icon || MapPin;
   return (
     <div className="flex flex-col items-center text-center py-6 px-4 gap-2">
@@ -57,7 +61,8 @@ function Empty({ theme, icon, title, hint }) {
   );
 }
 
-function ErrorState({ theme, message, onRetry }) {
+function ErrorState({ message, onRetry }) {
+  const theme = useTheme();
   return (
     <div className="flex flex-col items-center text-center py-4 px-4 gap-2"
       role="alert">
@@ -76,7 +81,8 @@ function ErrorState({ theme, message, onRetry }) {
 
 
 
-function TabButton({ active, onClick, icon, label, theme }) {
+function TabButton({ active, onClick, icon, label }) {
+  const theme = useTheme();
   return (
     <button
       onClick={onClick}
@@ -90,7 +96,8 @@ function TabButton({ active, onClick, icon, label, theme }) {
   );
 }
 
-function LiveClock({ theme }) {
+function LiveClock() {
+  const theme = useTheme();
   const [t, setT] = useState(nowHHMM());
   useEffect(() => {
     const id = setInterval(() => setT(nowHHMM()), 1000 * 10);

@@ -17,9 +17,10 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
-import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.2256";
-import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.2256";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260517.2301";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260517.2301";
 
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // Flat-earth distance from point P to segment A→B (in degrees, approximate)
 function ptSegDist(px, py, ax, ay, bx, by) {
@@ -31,7 +32,8 @@ function ptSegDist(px, py, ax, ay, bx, by) {
   return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
 }
 
-function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs }) {
+function MapTab({ flight, computed, liveRoute, liveETAs, onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange, prefs, savePrefs }) {
+  const theme = useTheme();
   const mapDivRef = useRef(null);
   const mapRef    = useRef(null);
   const overlayRef = useRef({ route: null, markers: [], simMarker: null, deviation: null });
@@ -670,7 +672,6 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
       {layersOpen && (
         <PdfLayersPanel
-          theme={theme}
           overlays={pdfOverlays}
           setOverlays={setPdfOverlays}
           prefs={prefs}
@@ -684,7 +685,6 @@ function MapTab({ flight, computed, liveRoute, liveETAs, theme, onInsertWaypoint
 
       {georefActive && (
         <PdfGeoreferencer
-          theme={theme}
           mapRef={mapRef}
           pdfOverlays={pdfOverlays}
           setPdfOverlays={setPdfOverlays}

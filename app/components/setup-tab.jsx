@@ -11,10 +11,12 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2256";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2301";
 
 
-function AiracBadge({ theme }) {
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+function AiracBadge() {
+  const theme = useTheme();
   const [info, setInfo] = useState(null);
   useEffect(() => { airacGetCurrent().then(setInfo); }, []);
   if (!info) return null;
@@ -37,7 +39,8 @@ function AiracBadge({ theme }) {
   );
 }
 
-function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
+function FreqsSection({ flight, setFlight, onRefreshFreqs }) {
+  const theme = useTheme();
   const [open, setOpen] = useState(false);
   const [proceduresIcao, setProceduresIcao] = useState(null);
   const setFreq = (which, key, val) => {
@@ -107,7 +110,6 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
           icao={proceduresIcao}
           flight={flight}
           setFlight={setFlight}
-          theme={theme}
           onClose={() => setProceduresIcao(null)}
         />
       )}
@@ -115,7 +117,8 @@ function FreqsSection({ flight, setFlight, theme, onRefreshFreqs }) {
   );
 }
 
-function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
+function ProceduresPanel({ icao, flight, setFlight, onClose }) {
+  const theme = useTheme();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -228,8 +231,8 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
           <div style={{ width: 80 }} />
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {detailLoading && <Loading theme={theme} />}
-          {detailErr && <ErrorState theme={theme} message={detailErr} />}
+          {detailLoading && <Loading />}
+          {detailErr && <ErrorState message={detailErr} />}
           {detail && legs.length > 0 && (
             <>
               <div className={`${theme.panel} border ${theme.panelBorder} rounded-xl overflow-hidden divide-y ${theme.panelBorder}`}>
@@ -290,7 +293,7 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
             </>
           )}
           {detail && legs.length === 0 && (
-            <Empty theme={theme} icon={MapPin} title="Sem fixes" hint="Este procedimento não tem coordenadas geográficas para anexar à rota." />
+            <Empty icon={MapPin} title="Sem fixes" hint="Este procedimento não tem coordenadas geográficas para anexar à rota." />
           )}
         </div>
       </div>
@@ -321,8 +324,8 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {loading && <Loading theme={theme} />}
-        {err && <ErrorState theme={theme} message={err} />}
+        {loading && <Loading />}
+        {err && <ErrorState message={err} />}
         {grouped && [["SID", "SIDs"], ["STAR", "STARs"], ["APP", "Approaches"]].map(([typeCode, label]) => {
           if (filter !== "all" && filter !== typeCode) return null;
           const ids = Object.keys(grouped[typeCode] || {}).sort();
@@ -365,14 +368,15 @@ function ProceduresPanel({ icao, flight, setFlight, theme, onClose }) {
           );
         })}
         {grouped && Object.values(grouped).every(g => Object.keys(g).length === 0) && !loading && (
-          <Empty theme={theme} icon={ClipboardList} title="Sem procedimentos" hint={`Não há SID/STAR/Approach publicados para ${icao}.`} />
+          <Empty icon={ClipboardList} title="Sem procedimentos" hint={`Não há SID/STAR/Approach publicados para ${icao}.`} />
         )}
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, theme }) {
+function Stat({ label, value }) {
+  const theme = useTheme();
   return (
     <div className={`${theme?.panel || "bg-zinc-900"} border ${theme?.panelBorder || "border-zinc-800"} rounded px-2 py-1.5`}>
       <div className={`text-[10px] uppercase tracking-wider ${theme?.fgFaint || "text-zinc-500"}`}>{label}</div>
@@ -381,7 +385,8 @@ function Stat({ label, value, theme }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, liveRoute, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+function SetupTab({ flight, setFlight, ac, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, computed, liveRoute, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+  const theme = useTheme();
   const set = (k, v) => setFlight({ ...flight, [k]: v });
   const setN = (k, v) => set(k, v === "" ? null : Number(v));
 
@@ -422,11 +427,11 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
   return (
     <div className="px-3 py-3 space-y-4">
       <div className="flex items-center justify-end -mb-2">
-        <AiracBadge theme={theme} />
+        <AiracBadge />
       </div>
 
       {/* AERONAVE */}
-      <Section theme={theme} icon={<Plane className="w-4 h-4" />} title="Aeronave">
+      <Section icon={<Plane className="w-4 h-4" />} title="Aeronave">
         <select
           value={flight.aircraftKey}
           onChange={(e) => set("aircraftKey", e.target.value)}
@@ -443,14 +448,14 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
           <Settings className="w-3.5 h-3.5" /> Gerenciar frota
         </button>
         <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
-          <Stat theme={theme} label="TAS" value={`${ac.tasCruise} kt`} />
-          <Stat theme={theme} label="GPH" value={`${ac.gphCruise}`} />
-          <Stat theme={theme} label="Fuel" value={`${ac.fuelUsable} gal`} />
+          <Stat label="TAS" value={`${ac.tasCruise} kt`} />
+          <Stat label="GPH" value={`${ac.gphCruise}`} />
+          <Stat label="Fuel" value={`${ac.fuelUsable} gal`} />
         </div>
       </Section>
 
       {/* IDENTIFICAÇÃO */}
-      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title="Identificação">
+      <Section icon={<MapPin className="w-4 h-4" />} title="Identificação">
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={labelClass}>Callsign</label>
@@ -500,7 +505,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* AMBIENTE */}
-      <Section theme={theme} icon={<Wind className="w-4 h-4" />} title="Ambiente (vento médio)">
+      <Section icon={<Wind className="w-4 h-4" />} title="Ambiente (vento médio)">
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={labelClass}>Alt cruzeiro (ft)</label>
@@ -548,10 +553,10 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* FREQUÊNCIAS */}
-      <FreqsSection flight={flight} setFlight={setFlight} theme={theme} onRefreshFreqs={onRefreshFreqs} />
+      <FreqsSection flight={flight} setFlight={setFlight} onRefreshFreqs={onRefreshFreqs} />
 
       {/* WAYPOINTS */}
-      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
+      <Section icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
         <div
           ref={listRef}
           className="space-y-1.5"
@@ -683,7 +688,7 @@ function SetupTab({ flight, setFlight, ac, theme, onEditCp, onAddCp, onNewBlank,
       </Section>
 
       {/* MEUS PONTOS */}
-      <Section theme={theme} icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}
+      <Section icon={<MapPin className="w-4 h-4" />} title={`Meus pontos · ${(userPoints || []).length}`}
         collapsible defaultOpen={(userPoints || []).length <= 5}>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <button

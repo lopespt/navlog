@@ -3,6 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -25,7 +26,8 @@ function phaseETELabel(portions, totalETE) {
     .join(" ") + " min";
 }
 
-function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, onDirectTo, theme, viewMode }) {
+function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, onDirectTo, viewMode }) {
+  const theme = useTheme();
   const bypassed = cp.bypassed === true;
   const ringClass =
     bypassed             ? "border-zinc-700/40 bg-zinc-900/30 opacity-50" :
@@ -187,9 +189,10 @@ CheckpointRow = React.memo(CheckpointRow, function(a, b) {
 
 function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVirtual, unmarkVirtual,
     nextIdx, markCrossed, depart,
-    resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, theme, viewMode, setViewMode,
+    resetFlight, onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMode, setViewMode,
     onOpenDeviation, onClearDeviation, onDirectTo,
     liveFuel, ac, prefs }) {
+  const theme = useTheme();
 
   const dev = flight.activeDeviation || null;
   // Recalculate deviation geometry on each render so the banner stays live with TAS edits etc.
@@ -741,7 +744,7 @@ function FlightTab({ flight, computed, liveETAs, liveRoute, nextLiveIdx, markVir
           const originEta = item.isOrigin ? (flight.atd ? parseHHMM(flight.atd) : null) : null;
           return (
           <CheckpointRow key={item.isVirtual ? item.autoKey : `u${item.userIdx}`}
-            cp={item} index={i} theme={theme}
+            cp={item} index={i}
             isNext={i === nextLiveIdx}
             etaPlanned={item.isOrigin ? originEta : item.etaPlanned}
             etaOriginLabel={item.isOrigin ? (flight.atd ? "ATD" : null) : undefined}

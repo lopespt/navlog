@@ -2,11 +2,13 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
 import {
   Plus, X,
 } from "lucide-react";
 
-function AircraftEditor({ aircraft, theme, onSave, onClose }) {
+function AircraftEditor({ aircraft, onSave, onClose }) {
+  const theme = useTheme();
   const [ac, setAc] = useState({ ...aircraft });
   const setN = (k, v) => setAc((a) => ({ ...a, [k]: v === '' ? 0 : Number(v) }));
   const setS = (k, v) => setAc((a) => ({ ...a, [k]: v }));
@@ -138,7 +140,8 @@ function AircraftEditor({ aircraft, theme, onSave, onClose }) {
   );
 }
 
-function FleetManager({ fleet, onEdit, onDelete, onReset, onAdd, onClose, theme }) {
+function FleetManager({ fleet, onEdit, onDelete, onReset, onAdd, onClose }) {
+  const theme = useTheme();
   return (
     <div className="fixed inset-0 z-30 bg-black/80 flex flex-col" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
