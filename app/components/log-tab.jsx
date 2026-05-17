@@ -6,9 +6,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   BookOpen, Clock,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2304";
+import { Section } from "./ui-primitives.jsx?v=20260517.2306";
 
-import { useTheme, useDerived } from "../context/app-context.jsx?v=20260517.2304";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
 function CompareRow({ label, plan, real }) {
   const theme = useTheme();
   return (
@@ -20,7 +20,8 @@ function CompareRow({ label, plan, real }) {
   );
 }
 
-function LogTab({ flight, ac }) {
+function LogTab({  }) {
+  const { flight, ac } = useFlight();
   const { computed, liveFuel } = useDerived();
   const theme = useTheme();
   const fuelStart = flight.fuelInitial ?? ac.fuelUsable;

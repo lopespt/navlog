@@ -11,10 +11,10 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2304";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2306";
 
 
-import { useTheme, useDerived } from "../context/app-context.jsx?v=20260517.2304";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
 function AiracBadge() {
   const theme = useTheme();
   const [info, setInfo] = useState(null);
@@ -39,7 +39,8 @@ function AiracBadge() {
   );
 }
 
-function FreqsSection({ flight, setFlight, onRefreshFreqs }) {
+function FreqsSection({ onRefreshFreqs }) {
+  const { flight, setFlight } = useFlight();
   const theme = useTheme();
   const [open, setOpen] = useState(false);
   const [proceduresIcao, setProceduresIcao] = useState(null);
@@ -108,8 +109,6 @@ function FreqsSection({ flight, setFlight, onRefreshFreqs }) {
       {proceduresIcao && (
         <ProceduresPanel
           icao={proceduresIcao}
-          flight={flight}
-          setFlight={setFlight}
           onClose={() => setProceduresIcao(null)}
         />
       )}
@@ -117,7 +116,8 @@ function FreqsSection({ flight, setFlight, onRefreshFreqs }) {
   );
 }
 
-function ProceduresPanel({ icao, flight, setFlight, onClose }) {
+function ProceduresPanel({ icao, onClose }) {
+  const { flight, setFlight } = useFlight();
   const theme = useTheme();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -385,7 +385,8 @@ function Stat({ label, value }) {
   );
 }
 
-function SetupTab({ flight, setFlight, ac, onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+  const { flight, setFlight, ac } = useFlight();
   const { computed, liveRoute } = useDerived();
   const theme = useTheme();
   const set = (k, v) => setFlight({ ...flight, [k]: v });
@@ -554,7 +555,7 @@ function SetupTab({ flight, setFlight, ac, onEditCp, onAddCp, onNewBlank, onDele
       </Section>
 
       {/* FREQUÊNCIAS */}
-      <FreqsSection flight={flight} setFlight={setFlight} onRefreshFreqs={onRefreshFreqs} />
+      <FreqsSection onRefreshFreqs={onRefreshFreqs} />
 
       {/* WAYPOINTS */}
       <Section icon={<MapPin className="w-4 h-4" />} title={`Rota · ${flight.checkpoints.filter(c=>!c.isAuto).length} pts + ${flight.checkpoints.filter(c=>c.isAuto).length} auto`}>
