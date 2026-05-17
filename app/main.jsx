@@ -78,7 +78,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260517.1315";
+const APP_VERSION = "20260517.1320";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -227,11 +227,12 @@ function displayTime(str) {
   if (!str) return null;
   return str.slice(0, 5);
 }
-// nowHHMM includes seconds for recording precision
-function nowHHMM() {
-  const d = new Date();
-  return d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60;
-}
+// nowHHMM moved to lib/planning.js (alongside parseHHMM / formatHHMM /
+// formatHHMMSS) so extracted component modules — which only see window-
+// scoped helpers, not main.jsx's module scope — can use it as a bare
+// identifier. This bug is exactly what black-screened the Map tab after
+// e3b3a96: MapTab references nowHHMM, and ES module isolation made it
+// unresolved once MapTab lived in its own file.
 
 // AIRAC.NET client (airacGetCurrent / airacSearch / airacAirport /
 // airacProcedures / airacProcedureDetail / syncAirportCheckpoint /
