@@ -61,6 +61,16 @@
       Maximize2, Minimize2
     } = LucideReact;
 
+// Lightweight diagnostic for non-fatal failures we still want to recover from.
+// Used in persistence paths (localStorage / window.storage / IndexedDB) and
+// JSON parsing of saved state — places where a silent catch used to make
+// pilots' "I lost my route" reports undebuggable. Intentionally NOT used
+// for benign feature-detect paths (vibrate, AudioContext, setPointerCapture,
+// Leaflet remount cleanup) where a throw is the expected control flow.
+function _warn(label, err) {
+  try { console.warn('[navlog]', label, err); } catch (_) {}
+}
+
 function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 }
@@ -179,7 +189,7 @@ function getDecl(lat, lon, altFt) {
       var result = window._geomagnetism.model().point([lat, lon, altKm]);
       return result.decl ?? 0;
     }
-  } catch(e) {}
+  } catch(e) { _warn('getDecl', e); }
   return null;
 }
 
@@ -263,7 +273,7 @@ function _airacCacheGet(key) {
     const obj = JSON.parse(raw);
     if (obj.expiresAt && obj.expiresAt < Date.now()) return null;
     return obj.data;
-  } catch (_) { return null; }
+  } catch (e) { _warn('_airacCacheGet:' + key, e); return null; }
 }
 function _airacCacheSet(key, data, ttlMs) {
   try {
@@ -271,7 +281,7 @@ function _airacCacheSet(key, data, ttlMs) {
       data,
       expiresAt: Date.now() + (ttlMs != null ? ttlMs : 14 * 86_400_000),
     }));
-  } catch (_) {}
+  } catch (e) { _warn('_airacCacheSet:' + key, e); }
 }
 
 async function airacGetCurrent() {
@@ -588,7 +598,7 @@ function loadNavlogLS(key, fallback) {
   try {
     const r = localStorage.getItem("navlog_" + key);
     if (r != null) return JSON.parse(r);
-  } catch {}
+  } catch (e) { _warn('loadNavlogLS:' + key, e); }
   return fallback;
 }
 
@@ -716,7 +726,7 @@ function NavlogApp() {
         const parsed = JSON.parse(saved);
         if (Object.keys(parsed).length > 0) return parsed;
       }
-    } catch {}
+    } catch (e) { _warn('load fleet', e); }
     return Object.fromEntries(
       Object.entries(FLEET_DEFAULTS).map(([k, v]) => [k, { ...v, id: k, isBuiltIn: true }])
     );
@@ -1349,7 +1359,7 @@ function NavlogApp() {
     setSavedRoutes(next);
     try {
       if (window.storage) await window.storage.set("routes", JSON.stringify(next));
-    } catch {}
+    } catch (e) { _warn('saveCurrentRoute', e); }
   }
 
   async function loadRoute(route) {
@@ -1364,7 +1374,7 @@ function NavlogApp() {
     setSavedRoutes(next);
     try {
       if (window.storage) await window.storage.set("routes", JSON.stringify(next));
-    } catch {}
+    } catch (e) { _warn('deleteRoute', e); }
   }
 
   // ----- Calcular TOC/TOD automaticamente -----
@@ -1486,8 +1496,8 @@ function NavlogApp() {
   // ----- Preferências -----
   function savePrefs(p) {
     setPrefs(p);
-    try { if (window.storage) window.storage.set("prefs", JSON.stringify(p)); } catch {}
-    try { localStorage.setItem("navlog_prefs", JSON.stringify(p)); } catch {}
+    try { if (window.storage) window.storage.set("prefs", JSON.stringify(p)); } catch (e) { _warn('savePrefs:storage', e); }
+    try { localStorage.setItem("navlog_prefs", JSON.stringify(p)); } catch (e) { _warn('savePrefs:localStorage', e); }
   }
 
   // ----- Wake lock -----
@@ -1561,13 +1571,13 @@ function NavlogApp() {
           const r = await window.storage.get(key);
           if (r?.value) return r.value;
         }
-      } catch {}
-      try { return localStorage.getItem("navlog_" + key); } catch {}
+      } catch (e) { _warn('store.get:storage:' + key, e); }
+      try { return localStorage.getItem("navlog_" + key); } catch (e) { _warn('store.get:localStorage:' + key, e); }
       return null;
     },
     async set(key, value) {
-      try { if (window.storage) await window.storage.set(key, value); } catch {}
-      try { localStorage.setItem("navlog_" + key, value); } catch {}
+      try { if (window.storage) await window.storage.set(key, value); } catch (e) { _warn('store.set:storage:' + key, e); }
+      try { localStorage.setItem("navlog_" + key, value); } catch (e) { _warn('store.set:localStorage:' + key, e); }
     },
   };
 
@@ -1603,7 +1613,7 @@ function NavlogApp() {
           // matches the persisted `order` after load. Sync effect writes back.
           setPdfOverlays(valid.map(function(o, i) { return Object.assign({}, o, { order: i }); }));
         }
-      } catch {}
+      } catch (e) { _warn('initial load (flight/routes/prefs/overlays)', e); }
       // Mark the initial load as complete so the cleanup effect can run safely.
       setPdfLoaded(true);
     })();
@@ -1635,7 +1645,7 @@ function NavlogApp() {
   }, [pdfOverlays, pdfLoaded]);
 
   useEffect(() => {
-    try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch {}
+    try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch (e) { _warn('save fleet', e); }
   }, [fleet]);
 
   const glowStyle = theme.glow ? "text-shadow: 0 0 8px currentColor;" : "";
@@ -7574,7 +7584,7 @@ async function savePdfOverlayIdb(ov, handle) {
           r.onerror = function() { resolve(null); };
         });
         if (existing && existing.handle) preservedHandle = existing.handle;
-      } catch (_) {}
+      } catch (e) { _warn('savePdfOverlayIdb:preserveHandle:' + ov.id, e); }
     }
     var tx = db.transaction('handles', 'readwrite');
     tx.objectStore('handles').put({
@@ -7589,7 +7599,7 @@ async function savePdfOverlayIdb(ov, handle) {
       calibration: ov.calibration || null,
       order: (ov.order != null) ? ov.order : null,
     });
-  } catch(e) {}
+  } catch(e) { _warn('savePdfOverlayIdb:' + (ov && ov.id), e); }
 }
 async function getPdfOverlayIdb(id) {
   try {
@@ -7600,7 +7610,7 @@ async function getPdfOverlayIdb(id) {
       req.onsuccess = function(e) { resolve(e.target.result || null); };
       req.onerror = function() { resolve(null); };
     });
-  } catch(e) { return null; }
+  } catch(e) { _warn('getPdfOverlayIdb:' + id, e); return null; }
 }
 async function getAllPdfOverlaysIdb() {
   try {
@@ -7611,14 +7621,14 @@ async function getAllPdfOverlaysIdb() {
       req.onsuccess = function(e) { resolve(e.target.result || []); };
       req.onerror = function() { resolve([]); };
     });
-  } catch(e) { return []; }
+  } catch(e) { _warn('getAllPdfOverlaysIdb', e); return []; }
 }
 async function deletePdfHandle(id) {
   try {
     var db = await _pdfHandleDb();
     var tx = db.transaction('handles', 'readwrite');
     tx.objectStore('handles').delete(id);
-  } catch(e) {}
+  } catch(e) { _warn('deletePdfHandle:' + id, e); }
 }
 // Keep old name as alias for compat
 async function savePdfHandle(id, handle) { /* no-op, use savePdfOverlayIdb */ }
@@ -7766,7 +7776,7 @@ async function userPtsAll() {
       req.onsuccess = function(e) { resolve(e.target.result || []); };
       req.onerror = function() { resolve([]); };
     });
-  } catch (_) { return []; }
+  } catch (e) { _warn('userPtsAll', e); return []; }
 }
 async function userPtsPut(pt) {
   try {
@@ -7779,14 +7789,14 @@ async function userPtsPut(pt) {
     var tx = db.transaction('points', 'readwrite');
     tx.objectStore('points').put(rec);
     return rec;
-  } catch (_) { return null; }
+  } catch (e) { _warn('userPtsPut', e); return null; }
 }
 async function userPtsDelete(id) {
   try {
     var db = await _userPtsDb();
     var tx = db.transaction('points', 'readwrite');
     tx.objectStore('points').delete(id);
-  } catch (_) {}
+  } catch (e) { _warn('userPtsDelete:' + id, e); }
 }
 async function renderPdfFromHandle(handle) {
   if (!handle) return null;
