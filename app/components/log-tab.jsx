@@ -6,9 +6,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   BookOpen, Clock,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2301";
+import { Section } from "./ui-primitives.jsx?v=20260517.2303";
 
-import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2303";
 function CompareRow({ label, plan, real }) {
   const theme = useTheme();
   return (

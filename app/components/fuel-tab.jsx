@@ -6,9 +6,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   AlertTriangle, CircleCheckBig, Fuel,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2301";
+import { Section } from "./ui-primitives.jsx?v=20260517.2303";
 
-import { useTheme } from "../context/app-context.jsx?v=20260517.2256";
+import { useTheme } from "../context/app-context.jsx?v=20260517.2303";
 function FuelRow({ label, time, fuel, bold, accent }) {
   const theme = useTheme();
   return (

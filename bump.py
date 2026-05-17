@@ -27,7 +27,10 @@ import re
 import sys
 
 
-REL_IMPORT_RE = re.compile(r'(from\s+["\'])(\./[^"\'?]+?\.jsx)(\?v=[^"\']*)?(["\'])')
+# Matches `from "./foo.jsx"` and `from "../bar/foo.jsx"` — both are relative
+# imports between modules served via esm.sh. Each unique URL is a separate
+# edge cache key, so the buster has to land on all of them.
+REL_IMPORT_RE = re.compile(r'(from\s+["\'])(\.\.?/[^"\'?]+?\.jsx)(\?v=[^"\']*)?(["\'])')
 
 
 def bump_files(version: str) -> None:
@@ -46,9 +49,12 @@ def bump_files(version: str) -> None:
     text = REL_IMPORT_RE.sub(rf'\g<1>\g<2>?v={version}\g<4>', text)
     main.write_text(text)
 
-    # 4. Relative imports inside every app/components/*.jsx
-    components = repo / "app" / "components"
-    for jsx in sorted(components.glob("*.jsx")):
+    # 4. Relative imports inside every .jsx under app/ (components, hooks,
+    # context — all share the same esm.sh edge cache treatment).
+    app_dir = repo / "app"
+    for jsx in sorted(app_dir.rglob("*.jsx")):
+        if jsx == main:
+            continue  # handled above
         t = jsx.read_text()
         t2 = REL_IMPORT_RE.sub(rf'\g<1>\g<2>?v={version}\g<4>', t)
         if t2 != t:
