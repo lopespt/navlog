@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>esm.sh POC — Navlog</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #09090b; color: #fafafa; font-family: ui-monospace, monospace; }
+  </style>
+
+  <!-- esm.sh resolves bare "react", "react-dom/client", "react/jsx-runtime" via
+       this importmap. All .jsx files imported via esm.sh/gh get their React
+       imports rewritten to point to these URLs. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+      "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="root" class="min-h-screen p-8"></div>
+
+  <!--
+    Entry point loaded as a true ES module. The browser's module loader
+    guarantees that dependencies (hello.jsx imported by main.jsx) resolve
+    in order before main.jsx executes — no race condition.
+
+    esm.sh/gh/lopespt/navlog@main/poc/main.jsx fetches the .jsx from
+    raw.githubusercontent.com, compiles JSX server-side, and returns a
+    real JS module. ?deps= pins React so esm.sh rewrites bare "react"
+    imports inside the .jsx files to the same version as the importmap.
+  -->
+  <script type="module">
+    import { mount } from "https://esm.sh/gh/lopespt/navlog@main/poc/main.jsx?deps=react@18.3.1";
+    mount(document.getElementById("root"));
+  </script>
+
+  <noscript>
+    <div style="padding: 1rem; color: #ef4444;">JavaScript desativado.</div>
+  </noscript>
+</body>
+</html>
