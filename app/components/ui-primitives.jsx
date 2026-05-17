@@ -6,8 +6,10 @@
 //   Loading     — centered spinner with a label
 //   Empty       — empty-state placeholder with icon + title + hint
 //   ErrorState  — error display with optional retry button
+//   TabButton   — bottom-bar tab toggle (used 6× by NavlogApp)
+//   LiveClock   — current UTC time, ticks every 10 s
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, RefreshCw, MapPin, AlertTriangle } from "lucide-react";
 
 function Section({ icon, title, children, theme, collapsible, defaultOpen }) {
@@ -72,4 +74,29 @@ function ErrorState({ theme, message, onRetry }) {
 }
 
 
-export { Section, Loading, Empty, ErrorState };
+
+
+function TabButton({ active, onClick, icon, label, theme }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center py-3 gap-1 transition-colors ${
+        active ? (theme?.accent || "text-amber-400") : (theme?.fgFaint || "text-zinc-500")
+      }`}
+    >
+      {icon}
+      <span className="text-[10px] uppercase tracking-wider font-bold">{label}</span>
+    </button>
+  );
+}
+
+function LiveClock({ theme }) {
+  const [t, setT] = useState(nowHHMM());
+  useEffect(() => {
+    const id = setInterval(() => setT(nowHHMM()), 1000 * 10);
+    return () => clearInterval(id);
+  }, []);
+  return <div className={`text-sm font-bold num ${theme?.cyan || "text-cyan-400"} cockpit-glow`}>{formatHHMM(t)}</div>;
+}
+
+export { Section, Loading, Empty, ErrorState, TabButton, LiveClock };
