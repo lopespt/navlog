@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v14";
+const CACHE_NAME = "navlog-v15";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -18,8 +18,8 @@ const STATIC = [
   "https://esm.sh/react@18.3.1",
   "https://esm.sh/react-dom@18.3.1/client",
   "https://esm.sh/react@18.3.1/jsx-runtime",
-  "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1",
-  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1",
+  "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1,react-dom@18.3.1",
+  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1",
 ];
 
 // Instala: pré-cacheia assets estáticos

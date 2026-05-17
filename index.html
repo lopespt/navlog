@@ -28,7 +28,7 @@
       "react": "https://esm.sh/react@18.3.1",
       "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
       "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-      "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1"
+      "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1,react-dom@18.3.1"
     }
   }
   </script>
@@ -101,9 +101,13 @@
 
   <!-- Main React entry. esm.sh/gh fetches app/main.jsx from raw.gh@main,
        compiles JSX server-side, returns ES module. Browser handles dep
-       order — no babel-standalone race condition. -->
+       order — no babel-standalone race condition.
+       Both react AND react-dom MUST be in ?deps= — pinning only react
+       lets esm.sh resolve react-dom to its latest (19.x), which crashes
+       with React error #525 "incompatible React versions" against the
+       18.3.1 React the importmap binds in. -->
   <script type="module">
-    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1";
+    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1";
   </script>
 
   <script>
