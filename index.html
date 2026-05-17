@@ -226,6 +226,17 @@ function phaseETELabel(portions, totalETE) {
     .join(" ") + " min";
 }
 
+// Mints a stable per-leg key for a virtual phase marker. Counters are mutated
+// in place ({}-bag), so two passes over the same `computed` array always
+// agree on the autoKey for a given (label, occurrence) — that's how
+// flight.autoWpATAs entries survive across re-renders.
+function nextAutoKey(label, counters) {
+  const k = label.toLowerCase();
+  const n = counters[k] || 0;
+  counters[k] = n + 1;
+  return `${k}_${n}`;
+}
+
 // parseHHMM, formatHHMM, formatHHMMSS are defined in lib/planning.js.
 // Display helper: "HH:MM:SS" or "HH:MM" → "HH:MM" for Em Voo display
 function displayTime(str) {
@@ -914,7 +925,7 @@ function NavlogApp() {
   // Mirrors the autoKey numbering used by liveRoute below so we can look up virtual ATAs per leg.
   const legVirtualsMap = useMemo(() => {
     const map = {};
-    let tocN = 0, todN = 0, bodN = 0, bocN = 0;
+    const counters = {};
     computed.forEach((cp, i) => {
       if (cp.isOrigin || !cp.portions || cp.portions.length <= 1) return;
       const list = [];
@@ -922,18 +933,9 @@ function NavlogApp() {
       for (let p = 0; p < cp.portions.length - 1; p++) {
         accDist += cp.portions[p].dist || 0;
         accTime += cp.portions[p].timeMin || 0;
-        const from = cp.portions[p].phase, to = cp.portions[p + 1].phase;
-        const label = from !== "SUBIDA"  && to === "SUBIDA"  ? "BOC"
-          : from === "SUBIDA"  && to !== "SUBIDA"  ? "TOC"
-          : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
-          : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
-          : null;
+        const label = portionTransitionLabel(cp.portions[p].phase, cp.portions[p + 1].phase);
         if (!label) continue;
-        const autoKey = label === "TOC" ? `toc_${tocN++}`
-          : label === "TOD" ? `tod_${todN++}`
-          : label === "BOC" ? `boc_${bocN++}`
-          : `bod_${bodN++}`;
-        list.push({ label, autoKey, dist: accDist, time: accTime });
+        list.push({ label, autoKey: nextAutoKey(label, counters), dist: accDist, time: accTime });
       }
       if (list.length > 0) map[i] = list;
     });
@@ -1022,7 +1024,7 @@ function NavlogApp() {
   // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
   const liveRoute = useMemo(() => {
     const result = [];
-    let tocN = 0, todN = 0, bodN = 0, bocN = 0;
+    const counters = {};
     computed.forEach((cp, i) => {
       if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
       const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
@@ -1047,17 +1049,9 @@ function NavlogApp() {
             : (cp.dist > 0 ? por.dist / cp.dist : 0);
           accDist += por.dist;
           accETE += timeFrac * cp.etePlanned;
-          const from = por.phase, to = cp.portions[p + 1].phase;
-          let label = from !== "SUBIDA"  && to === "SUBIDA"  ? "BOC"
-            : from === "SUBIDA"  && to !== "SUBIDA"  ? "TOC"
-            : from !== "DESCIDA" && to === "DESCIDA" ? "TOD"
-            : from === "DESCIDA" && to !== "DESCIDA" ? "BOD"
-            : null;
+          const label = portionTransitionLabel(por.phase, cp.portions[p + 1].phase);
           if (label) {
-            const autoKey = label === "TOC" ? `toc_${tocN++}`
-              : label === "TOD" ? `tod_${todN++}`
-              : label === "BOC" ? `boc_${bocN++}`
-              : `bod_${bodN++}`;
+            const autoKey = nextAutoKey(label, counters);
             const ataStr = flight.autoWpATAs?.[autoKey] ?? null;
             const ataMin = parseHHMM(ataStr);
             const eteLeg = accETE - prevVirtETE;
