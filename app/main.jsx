@@ -12,15 +12,16 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2145";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2145";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2145";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2145";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2145";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2145";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2145";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2145";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2145";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2201";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2201";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2201";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2201";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2201";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2201";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2201";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2201";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2201";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2201";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -44,8 +45,9 @@ import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.
 (function _requiredGlobalsGuard() {
   const required = [
     "getDecl", "nowHHMM", "parseHHMM", "formatHHMM", "formatHHMMSS", "displayTime",
-    "calcLeg", "gcDist", "gcTC", "gcInterpolate", "projectDest",
-    "estimatedPosition",
+    "calcLeg", "gcDist", "gcTC", "gcInterpolate", "projectDest", "projectSource",
+    "estimatedPosition", "nextAutoKey", "portionTransitionLabel",
+    "resolveAltitudeProfile", "computeLegPhases", "validateLeg",
     "affineFrom3Points", "invertAffine", "applyAffinePt",
     "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
     "airacGetCurrent", "airacSearch", "airacAirport",
@@ -96,7 +98,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2145";
+const APP_VERSION = "20260517.2201";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -119,16 +121,7 @@ const APP_VERSION = "20260517.2145";
 
 // phaseETELabel moved into app/components/flight-tab.jsx (its only consumer).
 
-// Mints a stable per-leg key for a virtual phase marker. Counters are mutated
-// in place ({}-bag), so two passes over the same `computed` array always
-// agree on the autoKey for a given (label, occurrence) — that's how
-// flight.autoWpATAs entries survive across re-renders.
-function nextAutoKey(label, counters) {
-  const k = label.toLowerCase();
-  const n = counters[k] || 0;
-  counters[k] = n + 1;
-  return `${k}_${n}`;
-}
+// nextAutoKey moved to lib/planning.js — see comment there.
 
 // parseHHMM, formatHHMM, formatHHMMSS, displayTime, nowHHMM are in lib/planning.js.
 // nowHHMM moved to lib/planning.js (alongside parseHHMM / formatHHMM /
@@ -365,387 +358,16 @@ function NavlogApp() {
   }, []);
 
   // Theme tokens
-  const theme = useMemo(() => themes[prefs.theme] || themes.night, [prefs.theme]);
+  // Pure derivations from flight/ac/prefs/geomagReady. Lives in
+  // app/hooks/use-derived-flight.jsx — see comment there for what's inside.
+  const {
+    theme, computed, nextIdx, legVirtualsMap,
+    liveETAs, liveRoute, nextLiveIdx, liveFuel,
+  } = useDerivedFlight({ flight, ac, prefs, geomagReady });
   const fontScale = { s: 0.9, m: 1, l: 1.15 }[prefs.fontSize] || 1;
 
-  // Computa dados de cada checkpoint (perna ATÉ ele)
-  const computed = useMemo(() => {
-    // Lat/lon is source of truth: for consecutive pairs with explicit coords,
-    // always derive TC and dist from geometry (overrides any manually stored value).
-    var resolvedCps = flight.checkpoints.map(function(cp, i) {
-      if (i === 0 || cp.isOrigin) return cp;
-      var prev = flight.checkpoints[i - 1];
-      if (prev.lat != null && prev.lon != null && cp.lat != null && cp.lon != null) {
-        return Object.assign({}, cp, {
-          tc:   Math.round(gcTC(prev.lat, prev.lon, cp.lat, cp.lon)),
-          dist: Math.round(gcDist(prev.lat, prev.lon, cp.lat, cp.lon) * 10) / 10
-        });
-      }
-      return cp;
-    });
-
-    // Resolve altitude profile — handles inherited altitudes and multi-leg climbs
-    var _altRes = resolveAltitudeProfile(resolvedCps, ac, flight);
-    var altProfile     = _altRes.profile;
-    var altProfileWarn = _altRes.altWarnings;
-    var altLegPlans    = _altRes.legPlans || {};
-
-    const eobtMin = parseHHMM(flight.eobt) ?? 0;
-    const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
-    let etaPlanned = eobtMin;
-    let fuelRem = fuelStart;
-    let cumDist = 0;
-    let cumTime = 0;
-    var _res = resolvedCps.map((cp, i) => {
-      if (cp.isOrigin) {
-        const originAlt = altProfile[i];
-        return {
-          ...cp,
-          alt: originAlt,
-          tas: null, wca: null, th: null, mc: null, mh: null, ch: null,
-          gsPlanned: null, etePlanned: 0,
-          etaPlanned: eobtMin,
-          fuelLeg: 0,
-          fuelRemPlanned: fuelStart,
-          gphEffective: ac.gphCruise,
-          portions: [],
-          cumDist: 0,
-          cumTime: 0,
-          windDirUsed: flight.windDir,
-          windVelUsed: flight.windVel,
-        };
-      }
-
-      // Altitude-per-fix: use pre-resolved profile (handles inherited / multi-leg climbs)
-      const prevAlt = altProfile[i - 1];
-      const thisAlt = altProfile[i];
-
-      // Vento: windMode = null/undefined → padrão da rota
-      //                   "none"          → sem vento (vel=0)
-      //                   "custom"        → windDir/windVel do checkpoint
-      let wDir, wVel;
-      if (cp.windMode === "none") {
-        wDir = 0; wVel = 0;
-      } else if (cp.windMode === "custom" && cp.windDir != null) {
-        wDir = Number(cp.windDir);
-        wVel = Number(cp.windVel ?? 0);
-      } else {
-        wDir = flight.windDir;
-        wVel = flight.windVel;
-      }
-
-      // Phase split: prefer the resolver's segment-aware plan (continuous
-      // climb/descent across inherit WPs ⇒ middle legs are single-phase, only
-      // the boundary legs carry TOC/TOD virtuals). Fall back to per-leg
-      // computeLegPhases when the resolver didn't pre-plan this leg.
-      let portions, avgTas;
-      if (altLegPlans[i]) {
-        portions = altLegPlans[i];
-        const _tt = portions.reduce((s, p) => s + (p.timeMin || 0), 0);
-        const _td = portions.reduce((s, p) => s + (p.dist || 0), 0);
-        avgTas = _tt > 0 ? (_td / _tt) * 60 : (ac.tasCruise || 100);
-      } else {
-        const _r = computeLegPhases(
-          prevAlt, thisAlt, cp.dist || 0, cp, ac, flight.isaDevC || 0,
-          wDir, wVel, flight.variation
-        );
-        portions = _r.portions;
-        avgTas = _r.avgTas;
-      }
-
-      // Per-leg magnetic variation from WMM (if library loaded and coords known)
-      // Falls back to flight.variation when unavailable
-      var legVar = getDecl(cp.lat, cp.lon, thisAlt) ?? (flight.variation ?? 0);
-
-      // ETE = sum of timeMin per portion (climb/descent time is fixed by altitude/ROC, not distance)
-      // Fuel = sum of (timeMin/60) × gph per portion
-      let totalETE = 0;
-      let fuelLeg = 0;
-      let displayResult = null; // use cruise phase for MH/WCA/heading display
-      portions.forEach((p) => {
-        totalETE += p.timeMin ?? 0;
-        fuelLeg += ((p.timeMin ?? 0) / 60) * p.gph;
-        // For heading/WCA display, prefer the cruise phase
-        const pr = calcLeg(cp.tc, 1, p.tas, wDir, wVel, legVar, 0);
-        if (p.phase === "CRUZEIRO" || displayResult == null) displayResult = pr;
-      });
-      if (!displayResult) displayResult = calcLeg(cp.tc, 1, avgTas, wDir, wVel, legVar, 0);
-
-      const totalDist = cp.dist || 0;
-      // Effective GS = total distance / total time
-      const totalGS = totalETE > 0 ? (totalDist / totalETE) * 60 : displayResult.gs;
-      etaPlanned += totalETE;
-      cumDist += totalDist;
-      cumTime += totalETE;
-
-      const gphEffective = totalETE > 0 ? fuelLeg / (totalETE / 60) : ac.gphCruise;
-      fuelRem -= fuelLeg;
-
-      return {
-        ...cp,
-        alt: thisAlt,   // effective altitude (resolved useCruiseAlt)
-        tas: avgTas, ...displayResult,
-        variation: legVar, // per-leg magnetic variation (WMM or fallback)
-        gs: totalGS,
-        ete: totalETE,
-        gsPlanned: totalGS,
-        etePlanned: totalETE,
-        etaPlanned,
-        fuelLeg,
-        fuelRemPlanned: fuelRem,
-        gphEffective,
-        portions,
-        cumDist,
-        cumTime,
-        windDirUsed: wDir,
-        windVelUsed: wVel,
-        windOverride: cp.windMode === "none" || cp.windMode === "custom",
-        warnings: [...validateLeg(cp, { gs: totalGS }), ...(altProfileWarn[i] ? [altProfileWarn[i]] : [])],
-        notes: cp.notes || "",
-      };
-    });
-
-    // Detect cross-leg phase transitions at user WPs: when the climb (or
-    // descent) completes exactly at a fix instead of mid-leg, no virtual
-    // marker is emitted by liveRoute (the leg is single-phase). Tag the WP
-    // itself so the views can render a TOC/TOD/BOC/BOD badge inline.
-    for (var _ph = 0; _ph < _res.length; _ph++) {
-      var _here = _res[_ph];
-      var _next = _res[_ph + 1];
-      if (!_here || _here.isOrigin || !_here.portions || _here.portions.length === 0) continue;
-      if (!_next || !_next.portions || _next.portions.length === 0) continue;
-      var _lastPhase = _here.portions[_here.portions.length - 1].phase;
-      var _nextFirst = _next.portions[0].phase;
-      if (_lastPhase === "SUBIDA" && _nextFirst !== "SUBIDA") _here.phaseHint = "TOC";
-      else if (_lastPhase === "DESCIDA" && _nextFirst !== "DESCIDA") _here.phaseHint = "BOD";
-      else if (_lastPhase !== "SUBIDA" && _nextFirst === "SUBIDA") _here.phaseHint = "BOC";
-      else if (_lastPhase !== "DESCIDA" && _nextFirst === "DESCIDA") _here.phaseHint = "TOD";
-    }
-
-    // Project lat/lon for waypoints without explicit coords using TC + dist
-    // Forward pass: project from each known coord to subsequent unknown waypoints
-    for (var _fi = 1; _fi < _res.length; _fi++) {
-      if (_res[_fi].lat == null && _res[_fi-1].lat != null
-          && _res[_fi].tc != null && (_res[_fi].dist ?? 0) > 0) {
-        var _fp = projectDest(_res[_fi-1].lat, _res[_fi-1].lon, _res[_fi].tc, _res[_fi].dist);
-        _res[_fi] = Object.assign({}, _res[_fi], { lat: _fp[0], lon: _fp[1], coordProjected: true });
-      }
-    }
-    // Backward pass: project from each known coord back through unknown predecessors
-    for (var _bi = _res.length - 2; _bi >= 0; _bi--) {
-      if (_res[_bi].lat == null && _res[_bi+1].lat != null
-          && _res[_bi+1].tc != null && (_res[_bi+1].dist ?? 0) > 0) {
-        var _bp = projectSource(_res[_bi+1].lat, _res[_bi+1].lon, _res[_bi+1].tc, _res[_bi+1].dist);
-        _res[_bi] = Object.assign({}, _res[_bi], { lat: _bp[0], lon: _bp[1], coordProjected: true });
-      }
-    }
-    return _res;
-  }, [flight, ac, geomagReady]);
-
-  // Próximo checkpoint não cruzado
-  const nextIdx = useMemo(() => {
-    const idx = computed.findIndex((cp) => !cp.isOrigin && cp.ata == null);
-    return idx === -1 ? computed.length : idx;
-  }, [computed]);
-
-  // ETA em voo: último ATA (ou ATD) + ETE das pernas seguintes
-  // Se temos GS real do último ponto cruzado, recomputa ETE futuro com esse GS
-  // Map: legIdx -> [{ label, autoKey, dist (planned, NM into the leg), time (planned, min into the leg) }]
-  // Mirrors the autoKey numbering used by liveRoute below so we can look up virtual ATAs per leg.
-  const legVirtualsMap = useMemo(() => {
-    const map = {};
-    const counters = {};
-    computed.forEach((cp, i) => {
-      if (cp.isOrigin || !cp.portions || cp.portions.length <= 1) return;
-      const list = [];
-      let accDist = 0, accTime = 0;
-      for (let p = 0; p < cp.portions.length - 1; p++) {
-        accDist += cp.portions[p].dist || 0;
-        accTime += cp.portions[p].timeMin || 0;
-        const label = portionTransitionLabel(cp.portions[p].phase, cp.portions[p + 1].phase);
-        if (!label) continue;
-        list.push({ label, autoKey: nextAutoKey(label, counters), dist: accDist, time: accTime });
-      }
-      if (list.length > 0) map[i] = list;
-    });
-    return map;
-  }, [computed]);
-
-  const liveETAs = useMemo(() => {
-    const etas = computed.map(() => null);
-    let lastCrossed = null;
-    for (let i = computed.length - 1; i >= 0; i--) {
-      if (computed[i].ata != null) { lastCrossed = i; break; }
-    }
-    let baseMin, baseIdx;
-    if (lastCrossed != null) {
-      baseMin = parseHHMM(computed[lastCrossed].ata);
-      baseIdx = lastCrossed;
-      etas[lastCrossed] = baseMin;
-    } else if (flight.atd) {
-      baseMin = parseHHMM(flight.atd);
-      baseIdx = 0;
-    } else {
-      return etas;
-    }
-    let cumMin = baseMin;
-    for (let i = baseIdx + 1; i < computed.length; i++) {
-      const cp = computed[i];
-      // Bypassed WPs (skipped via direct-to) don't consume time and don't
-      // belong in the live sequence — the deviation override on the target
-      // leg already accounts for the actual flown distance.
-      if (cp.bypassed) { etas[i] = null; continue; }
-      const legStartMin = cumMin;
-      let legETE = cp.etePlanned;
-
-      // Active deviation override: if this leg is the deviation target, replace
-      // the planned ETE with one computed from the pilot's current position +
-      // current TAS (wind-corrected). Cascades downstream legs naturally.
-      const dev = flight.activeDeviation;
-      if (dev && dev.targetIdx === i && dev.fromLat != null && dev.fromLon != null
-          && cp.lat != null && cp.lon != null) {
-        const devDist = gcDist(dev.fromLat, dev.fromLon, cp.lat, cp.lon);
-        const devTas  = Number(dev.currentTas) || (ac && ac.tasCruise) || 100;
-        const devTC   = gcTC(dev.fromLat, dev.fromLon, cp.lat, cp.lon);
-        const r = calcLeg(devTC, devDist, devTas, flight.windDir, flight.windVel, flight.variation, 0);
-        legETE = r.ete;
-        const devStartMin = parseHHMM(dev.startedAt);
-        if (devStartMin != null) {
-          cumMin = devStartMin + legETE;
-          etas[i] = cumMin;
-          continue;
-        }
-        // Fall through: cumMin += legETE below
-      }
-
-      // Adjust ETE based on the latest marked virtual (TOC/TOD/BOD) on this leg.
-      // Model: actual_GS in the climb/descent phase equals planned_GS, so reaching
-      // TOC X minutes off plan means we covered planned_dist * (X / planned_time).
-      // The remaining distance after the virtual runs at the planned post-virtual GS.
-      const virtuals = legVirtualsMap[i];
-      if (virtuals && virtuals.length > 0 && (cp.dist || 0) > 0 && (cp.etePlanned || 0) > 0) {
-        const marked = [];
-        for (const v of virtuals) {
-          const ata = parseHHMM(flight.autoWpATAs?.[v.autoKey]);
-          if (ata != null) marked.push({ ...v, ata });
-        }
-        if (marked.length > 0) {
-          const last = marked[marked.length - 1];
-          const actualTimeToVirtual = last.ata - legStartMin;
-          if (actualTimeToVirtual > 0 && last.time > 0) {
-            const actualDistToVirtual = last.dist * (actualTimeToVirtual / last.time);
-            const remPlannedDist = cp.dist - last.dist;
-            const remPlannedTime = cp.etePlanned - last.time;
-            const remDist = cp.dist - actualDistToVirtual;
-            const remGS = remPlannedDist > 0 && remPlannedTime > 0 ? remPlannedDist / remPlannedTime : null;
-            const remTime = (remGS && remDist > 0) ? remDist / remGS : remPlannedTime;
-            legETE = actualTimeToVirtual + Math.max(0, remTime);
-          }
-        }
-      }
-
-      cumMin = legStartMin + legETE;
-      etas[i] = cumMin;
-    }
-    return etas;
-  }, [computed, flight.atd, flight.autoWpATAs, flight.activeDeviation, flight.windDir, flight.windVel, flight.variation, ac, legVirtualsMap]);
-
-  // Rota expandida com TOC/TOD/BOD virtuais interpolados entre as pernas
-  const liveRoute = useMemo(() => {
-    const result = [];
-    const counters = {};
-    computed.forEach((cp, i) => {
-      if (cp.isOrigin) { result.push({ ...cp, userIdx: i }); return; }
-      const prevEta = i > 0 ? computed[i - 1].etaPlanned : (parseHHMM(flight.eobt) ?? 0);
-      const prevAlt = i > 0 ? computed[i - 1].alt : 0;
-      const prevLat  = i > 0 ? computed[i - 1].lat  : null;
-      const prevLon  = i > 0 ? computed[i - 1].lon  : null;
-      // Actual leg-start time: prefer the ATA of the previous fix when it has been crossed.
-      const prevAtaStr = i > 0 ? computed[i - 1].ata : null;
-      const legStartActual = prevAtaStr ? parseHHMM(prevAtaStr) : prevEta;
-      // Bypassed legs are not flown — emit the WP itself (so it still renders
-      // greyed-out in the route list) but skip the TOC/TOD/BOD interpolation.
-      if (cp.portions?.length > 1 && !cp.bypassed) {
-        let accDist = 0, accETE = 0;
-        let prevVirtETE = 0, prevVirtDist = 0;
-        // Total leg time from portions (sum of timeMin), used to distribute etePlanned by phase
-        const totalLegTime = cp.portions.reduce((s, p) => s + (p.timeMin ?? 0), 0);
-        for (let p = 0; p < cp.portions.length - 1; p++) {
-          const por = cp.portions[p];
-          // Time fraction: portion's timeMin share of total leg time
-          const timeFrac = totalLegTime > 0 && (por.timeMin ?? 0) > 0
-            ? por.timeMin / totalLegTime
-            : (cp.dist > 0 ? por.dist / cp.dist : 0);
-          accDist += por.dist;
-          accETE += timeFrac * cp.etePlanned;
-          const label = portionTransitionLabel(por.phase, cp.portions[p + 1].phase);
-          if (label) {
-            const autoKey = nextAutoKey(label, counters);
-            const ataStr = flight.autoWpATAs?.[autoKey] ?? null;
-            const ataMin = parseHHMM(ataStr);
-            const eteLeg = accETE - prevVirtETE;
-            const distLeg = accDist - prevVirtDist;
-            // Visual position: when the virtual has been marked, shift it along the leg to the
-            // distance the user actually covered (assuming planned phase GS).
-            let displayDist = accDist;
-            if (ataMin != null && accETE > 0) {
-              const actualTime = ataMin - legStartActual;
-              if (actualTime > 0) {
-                const actualDist = accDist * (actualTime / accETE);
-                displayDist = Math.max(0, Math.min(cp.dist || actualDist, actualDist));
-              }
-            }
-            const vFrac = cp.dist > 0 ? displayDist / cp.dist : 0;
-            const [vLat, vLon] = (prevLat != null && cp.lat != null)
-              ? gcInterpolate(prevLat, prevLon, cp.lat, cp.lon, Math.max(0, Math.min(1, vFrac))) : [null, null];
-            result.push({
-              name: label, isVirtual: true, autoKey, userIdx: i,
-              // TOC/BOD = leveled at dest alt; BOC/TOD = still at src alt
-              alt: (label === "TOC" || label === "BOD") ? cp.alt : (prevAlt ?? cp.alt),
-              lat: vLat, lon: vLon,
-              tc: cp.tc, mh: cp.mh, mc: cp.mc, wca: cp.wca,
-              windMode: cp.windMode, windDirUsed: cp.windDirUsed, windVelUsed: cp.windVelUsed,
-              dist: Math.round(displayDist * 10) / 10,
-              distToNext: Math.round(((cp.dist || 0) - displayDist) * 10) / 10,
-              etePlanned: accETE,
-              eteLeg: Math.round(eteLeg * 10) / 10,
-              distLeg: Math.round(distLeg * 100) / 100,
-              etaPlanned: prevEta + accETE,
-              ata: ataStr,
-              gsActual: null, portions: [], warnings: [], notes: "",
-            });
-            prevVirtETE = accETE;
-            prevVirtDist = accDist;
-          }
-        }
-        // User waypoint gets the remaining segment after the last virtual point
-        const eteLeg = cp.etePlanned - prevVirtETE;
-        const distLeg = cp.dist - prevVirtDist;
-        result.push({ ...cp, userIdx: i, eteLeg, distLeg });
-      } else {
-        result.push({ ...cp, userIdx: i });
-      }
-    });
-    return result;
-  }, [computed, flight.autoWpATAs, flight.eobt]);
-
-  // Próximo item não cruzado na liveRoute (inclui TOC/TOD virtuais)
-  const nextLiveIdx = useMemo(() => {
-    for (let i = 0; i < liveRoute.length; i++) {
-      const item = liveRoute[i];
-      if (item.isOrigin || item.ata != null) continue;
-      // Direct-to bypass: a WP marked as bypassed is no longer in the active
-      // sequence — the live "next" must skip over to the deviation target.
-      if (item.bypassed) continue;
-      if (item.isVirtual) {
-        // Pular se o próximo waypoint de usuário já foi cruzado
-        const nextUser = liveRoute.slice(i + 1).find(x => !x.isVirtual && !x.isOrigin);
-        if (nextUser?.ata != null) continue;
-      }
-      return i;
-    }
-    return liveRoute.length;
-  }, [liveRoute]);
+  // computed, nextIdx, legVirtualsMap, liveETAs, liveRoute, nextLiveIdx
+  // are derived in useDerivedFlight (called above).
 
   function markVirtual(key) {
     haptic([40]); warmUpAudio();
@@ -759,28 +381,7 @@ function NavlogApp() {
     setFlight((f) => ({ ...f, autoWpATAs: { ...(f.autoWpATAs || {}), [key]: ataStr } }));
   }
 
-  // Combustível restante real (baseado em ATAs reais consumindo no GPH planejado)
-  const liveFuel = useMemo(() => {
-    const fuelStart = flight.fuelInitial ?? ac.fuelUsable;
-    let fuel = fuelStart;
-    return computed.map((cp, i) => {
-      if (cp.isOrigin) return fuel;
-      // Se tem ATA real, usa tempo real
-      if (cp.ata != null && i > 0) {
-        const prevAta = computed[i - 1].ata != null
-          ? parseHHMM(computed[i - 1].ata)
-          : (i - 1 === 0 ? parseHHMM(flight.atd ?? flight.eobt) : null);
-        if (prevAta != null) {
-          const ataMin = parseHHMM(cp.ata);
-          let elapsed = ataMin - prevAta;
-          if (elapsed < 0) elapsed += 1440;
-          fuel -= (elapsed / 60) * (cp.gphEffective || ac.gphCruise);
-          return fuel;
-        }
-      }
-      return null; // não cruzado ainda
-    });
-  }, [computed, flight, ac]);
+  // liveFuel is derived in useDerivedFlight (called above).
 
   // Marca checkpoint como cruzado (registra ATA = agora UTC, calcula GS real)
   function markCrossed(i) {
