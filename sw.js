@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v11";
+const CACHE_NAME = "navlog-v12";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -8,6 +8,7 @@ const STATIC = [
   "/navlog/lib/airac.js",
   "/navlog/lib/storage.js",
   "/navlog/lib/pdf.js",
+  "/navlog/app/pdf-layers-panel.jsx",
   "/navlog/manifest.json",
   // CDN assets
   "https://cdn.tailwindcss.com",
