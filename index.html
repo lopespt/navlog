@@ -339,21 +339,24 @@ function _normalizeCoords(d) {
   return d;
 }
 
-async function airacAirport(icao) {
+async function airacAirport(icao, signal) {
   if (!icao) return null;
   const code = String(icao).toUpperCase().trim();
   if (!/^[A-Z0-9]{3,4}$/.test(code)) return null;
   const cached = _airacCacheGet("ap_" + code);
   if (cached) return cached;
   try {
-    const r = await fetch(AIRAC_BASE + "/airports/" + code, { headers: { Accept: "application/json" } });
+    const r = await fetch(AIRAC_BASE + "/airports/" + code, { headers: { Accept: "application/json" }, signal });
     if (!r.ok) return null;
     const j = await r.json();
     if (j.status !== "success" || !j.data) return null;
     const d = _normalizeCoords(j.data);
     _airacCacheSet("ap_" + code, d, 14 * 86_400_000);
     return d;
-  } catch (_) { return null; }
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    return null;
+  }
 }
 
 // Pin the first checkpoint to the departure airport / the last one to the
@@ -701,10 +704,32 @@ function NavlogApp() {
     return out;
   }
 
+  // AbortController per slot so a fast sequence of ICAO edits (e.g. user types
+  // SBSP then immediately changes to SBGR) can't have the older fetch land
+  // after the newer one and clobber freqs with stale data for a stale ICAO.
+  // Slots are independent: refreshing origin never aborts destination.
+  const airacRefreshAbortRef = useRef({ origin: null, destination: null, alternate: null });
+
   async function refreshAirportFreqs(which, overwrite) {
     var icao = flight && flight[which];
     if (!icao || !/^[A-Z0-9]{4}$/.test(String(icao).toUpperCase())) return;
-    var ap = await airacAirport(icao);
+    // Cancel any in-flight fetch for this same slot before starting a new one.
+    var prevCtrl = airacRefreshAbortRef.current[which];
+    if (prevCtrl) { try { prevCtrl.abort(); } catch (_) {} }
+    var ctrl = new AbortController();
+    airacRefreshAbortRef.current[which] = ctrl;
+    var ap;
+    try {
+      ap = await airacAirport(icao, ctrl.signal);
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      _warn('refreshAirportFreqs:' + which, e);
+      return;
+    }
+    // Bail if we were aborted between the await resolving and now (a newer
+    // refresh has taken over for this slot).
+    if (ctrl.signal.aborted) return;
+    if (airacRefreshAbortRef.current[which] === ctrl) airacRefreshAbortRef.current[which] = null;
     if (!ap) return;
     var derived = airportToFreqs(ap);
     if (!derived) return;
