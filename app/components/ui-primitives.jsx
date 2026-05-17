@@ -8,7 +8,7 @@
 //   ErrorState  — error display with optional retry button
 
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, MapPin, AlertTriangle } from "lucide-react";
 
 function Section({ icon, title, children, theme, collapsible, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen != null ? defaultOpen : true);
