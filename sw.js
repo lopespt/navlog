@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v11";
+const CACHE_NAME = "navlog-v13";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -8,13 +8,21 @@ const STATIC = [
   "/navlog/lib/airac.js",
   "/navlog/lib/storage.js",
   "/navlog/lib/pdf.js",
+  "/navlog/app/main.jsx",
   "/navlog/manifest.json",
-  // CDN assets
+  // CDN assets — esm.sh hosts the JS modules now (no more babel-standalone).
+  // The /gh/ entry is fetched as the dynamic import inside index.html; caching
+  // the exact URL here pre-warms the offline path. ?deps= must match the
+  // version pinned in index.html's importmap.
   "https://cdn.tailwindcss.com",
-  "https://unpkg.com/react@18/umd/react.production.min.js",
-  "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
-  "https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js",
-  "https://unpkg.com/@babel/standalone@7.23.9/babel.min.js",
+  "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+  "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+  "https://esm.sh/react@18.3.1",
+  "https://esm.sh/react-dom@18.3.1/client",
+  "https://esm.sh/react@18.3.1/jsx-runtime",
+  "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1",
+  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1",
 ];
 
 // Instala: pré-cacheia assets estáticos
