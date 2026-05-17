@@ -49,16 +49,67 @@
       var el = document.getElementById('bootstrap-status');
       var base = 'position:fixed;top:0;left:0;right:0;padding:1rem;font-family:monospace;font-size:0.8rem;z-index:9999;white-space:pre-wrap;word-break:break-word;line-height:1.4;background:#dc2626;color:#fff;';
       function show(text) { el.textContent = text; el.style.cssText = base; }
+
+      // Erros que tipicamente significam "estou rodando código velho contra
+      // assets novos" — main.jsx atualizou mas algum sibling foi servido do
+      // cache stale. Auto-reload uma vez com cache-bust e flag de
+      // sessionStorage pra evitar loops. Se persistir depois do reload,
+      // mostra o banner — o deploy em si está quebrado.
+      var RECOVERABLE = [
+        /missing <AppProvider> ancestor/,
+        /\bis not defined\b/,
+        /Cannot read propert(y|ies) of undefined/,
+      ];
+      function isRecoverable(msg) {
+        if (!msg) return false;
+        for (var i = 0; i < RECOVERABLE.length; i++) {
+          if (RECOVERABLE[i].test(msg)) return true;
+        }
+        return false;
+      }
+      function tryRecover(msg) {
+        if (!isRecoverable(msg)) return false;
+        var flag;
+        try { flag = sessionStorage.getItem('navlog_boot_recover'); } catch (_) {}
+        if (flag) return false;
+        try { sessionStorage.setItem('navlog_boot_recover', '1'); } catch (_) {}
+        // Unregister SW + clear caches before reload so the next fetch
+        // hits the network and picks up the deployed fix.
+        function reload() { location.reload(); }
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              return Promise.all(regs.map(function(r) { return r.unregister(); }));
+            }).catch(function() {}).then(function() {
+              if (window.caches && caches.keys) {
+                caches.keys().then(function(keys) {
+                  return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+                }).catch(function() {}).then(reload);
+              } else { reload(); }
+            });
+          } else { reload(); }
+        } catch (_) { reload(); }
+        return true;
+      }
+
       window.addEventListener('error', function(e) {
-        show('❌ Error\n' + (e.message || '(sem mensagem)') + '\nfile: ' + (e.filename || '?') + ':' + (e.lineno || '?'));
+        var msg = e.message || '(sem mensagem)';
+        if (tryRecover(msg)) return;
+        show('❌ Error\n' + msg + '\nfile: ' + (e.filename || '?') + ':' + (e.lineno || '?'));
       });
       window.addEventListener('unhandledrejection', function(e) {
         var r = e.reason;
         var msg = r && (r.message || r.stack || r.toString()) || String(r);
+        if (tryRecover(msg)) return;
         show('❌ Promise rejected\n' + msg);
       });
+      // App montou com sucesso ⇒ limpa o flag pra que uma falha futura
+      // possa tentar recuperar de novo (sem loop entre boots saudáveis).
       setTimeout(function() {
         var root = document.getElementById('root');
+        if (root && root.children.length > 0 && !el.textContent) {
+          try { sessionStorage.removeItem('navlog_boot_recover'); } catch (_) {}
+        }
         if (root && root.children.length === 0 && !el.textContent) {
           show('⏱ Timeout: nada renderizou em 20s. esm.sh pode estar lento ou bloqueado.');
         }
@@ -114,7 +165,7 @@
        with React error #525 "incompatible React versions" against the
        18.3.1 React the importmap binds in. -->
   <script type="module">
-    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.2347";
+    import "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.2358";
   </script>
 
   <script>
