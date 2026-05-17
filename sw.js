@@ -1,5 +1,5 @@
 // Navlog Service Worker — offline-first cache
-const CACHE_NAME = "navlog-v36";
+const CACHE_NAME = "navlog-v37";
 const STATIC = [
   "/navlog/",
   "/navlog/index.html",
@@ -28,6 +28,7 @@ const STATIC = [
   "/navlog/app/components/routes-manager.jsx",
   "/navlog/app/components/fpl-importer.jsx",
   "/navlog/app/components/ui-primitives.jsx",
+  "/navlog/app/components/leaflet-mini-map.jsx",
   "/navlog/manifest.json",
   // CDN assets — esm.sh hosts the JS modules now (no more babel-standalone).
   "https://cdn.tailwindcss.com",
@@ -38,7 +39,7 @@ const STATIC = [
   "https://esm.sh/react-dom@18.3.1/client",
   "https://esm.sh/react@18.3.1/jsx-runtime",
   "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1,react-dom@18.3.1",
-  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.1911",
+  "https://esm.sh/gh/lopespt/navlog@main/app/main.jsx?deps=react@18.3.1,react-dom@18.3.1&v=20260517.1921",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/map-tab.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-georeferencer.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/pdf-layers-panel.jsx",
@@ -55,6 +56,7 @@ const STATIC = [
   "https://esm.sh/gh/lopespt/navlog@main/app/components/routes-manager.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/fpl-importer.jsx",
   "https://esm.sh/gh/lopespt/navlog@main/app/components/ui-primitives.jsx",
+  "https://esm.sh/gh/lopespt/navlog@main/app/components/leaflet-mini-map.jsx",
 ];
 
 // Instala: pré-cacheia assets estáticos

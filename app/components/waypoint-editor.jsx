@@ -8,77 +8,31 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.1921";
 
 
 function PointFinderMapTab({ flight, theme, pdfOverlays, userPoints, onConfirm, onSave }) {
   const mapDivRef = useRef(null);
-  const mapRef = useRef(null);
   const pickedMarkerRef = useRef(null);
-  const pdfLayerRefs = useRef({});
   const [picked, setPicked] = useState(null);
   const [name, setName] = useState("");
 
-  useEffect(() => {
-    if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4,
-    }).addTo(map);
-
-    map.createPane('pfRoute');
-    map.getPane('pfRoute').style.zIndex = 500;
-    map.createPane('pfLib');
-    map.getPane('pfLib').style.zIndex = 510;
-
-    const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
-    if (wps.length >= 2) {
-      const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.7, dashArray: '4,4', pane: 'pfRoute' }).addTo(map);
-      wps.forEach(cp => {
-        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
-        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
-        window.L.marker([cp.lat, cp.lon], { icon, pane: 'pfRoute' }).addTo(map).bindPopup(cp.name || '');
+  const { mapRef } = useLeafletMiniMap({
+    mapDivRef,
+    routePane: { name: 'pfRoute', zIndex: 500 },
+    extraPanes: [{ name: 'pfLib', zIndex: 510 }],
+    wps: flight.checkpoints || [],
+    onMapClick: (latlng) => setPicked([latlng.lat, latlng.lng]),
+    setupExtras: (map) => {
+      (userPoints || []).forEach(pt => {
+        if (pt.lat == null || pt.lon == null) return;
+        const html = `<div style="background:#f59e0b;border-radius:50%;width:14px;height:14px;border:2px solid #fff;box-shadow:0 1px 3px #000;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">★</div>`;
+        const icon = window.L.divIcon({ html, className: '', iconSize: [14,14], iconAnchor: [7,7] });
+        window.L.marker([pt.lat, pt.lon], { icon, pane: 'pfLib' }).addTo(map).bindPopup(pt.name || '');
       });
-      map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
-    } else if (wps.length === 1) {
-      map.setView([wps[0].lat, wps[0].lon], 9);
-    } else {
-      map.setView([39.5, -8.0], 6);
-    }
-
-    // Library points (⭐)
-    (userPoints || []).forEach(pt => {
-      if (pt.lat == null || pt.lon == null) return;
-      const html = `<div style="background:#f59e0b;border-radius:50%;width:14px;height:14px;border:2px solid #fff;box-shadow:0 1px 3px #000;display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:700">★</div>`;
-      const icon = window.L.divIcon({ html, className: '', iconSize: [14,14], iconAnchor: [7,7] });
-      window.L.marker([pt.lat, pt.lon], { icon, pane: 'pfLib' }).addTo(map).bindPopup(pt.name || '');
-    });
-
-    map.on('click', (e) => setPicked([e.latlng.lat, e.latlng.lng]));
-
-    mapRef.current = map;
-    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
-    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
-  }, []);
-
-  // PDF overlays
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.L || !pdfOverlays) return;
-    Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
-    pdfLayerRefs.current = {};
-    pdfOverlays.forEach(ov => {
-      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
-      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
-        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450,
-      }).addTo(map);
-      pdfLayerRefs.current[ov.id] = layer;
-    });
-    return () => {
-      Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
-      pdfLayerRefs.current = {};
-    };
-  }, [pdfOverlays]);
+    },
+  });
+  useLeafletPdfOverlays(mapRef, pdfOverlays);
 
   // Picked marker
   useEffect(() => {
@@ -726,79 +680,18 @@ function PointFinder({ flight, ac, theme, userPoints, onAddUserPoint, onDeleteUs
 
 function MapPicker({ allWps, initialPos, onConfirm, onCancel, theme, pdfOverlays }) {
   const mapDivRef = useRef(null);
-  const mapRef = useRef(null);
   const pickedMarkerRef = useRef(null);
-  const pdfLayerRefs = useRef({});
   const [picked, setPicked] = useState(initialPos ?? null);
 
-  useEffect(() => {
-    if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4
-    }).addTo(map);
-
-    // Pane for waypoints/route on top of PDF overlays
-    map.createPane('pickerRoute');
-    map.getPane('pickerRoute').style.zIndex = 500;
-
-    const wps = allWps.filter(cp => cp.lat != null && cp.lon != null);
-    if (wps.length >= 2) {
-      const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.8, dashArray: '5,5', pane: 'pickerRoute' }).addTo(map);
-      wps.forEach(cp => {
-        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
-        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
-        window.L.marker([cp.lat, cp.lon], { icon, pane: 'pickerRoute' }).addTo(map).bindPopup(cp.name || '');
-      });
-      map.fitBounds(window.L.latLngBounds(coords), { padding: [50,50] });
-    } else if (wps.length === 1) {
-      // Single anchor (e.g. only origin or only destination has coords) — degenerate bounds
-      // breaks fitBounds with padding; just centre and pin a marker.
-      const onlyWp = wps[0];
-      const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
-      const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
-      window.L.marker([onlyWp.lat, onlyWp.lon], { icon, pane: 'pickerRoute' }).addTo(map).bindPopup(onlyWp.name || '');
-      map.setView([onlyWp.lat, onlyWp.lon], 9);
-    } else if (initialPos) {
-      map.setView(initialPos, 10);
-    } else {
-      map.setView([39.5, -8.0], 6);
-    }
-
-    map.on('click', (e) => setPicked([e.latlng.lat, e.latlng.lng]));
-
-    mapRef.current = map;
-    // The map container is inside a flex column that may not have its final
-    // size at mount; force a resize so tiles fill the viewport correctly.
-    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
-    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
-  }, []);
-
-  // Render PDF overlays (cartas) on the picker map
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.L || !pdfOverlays) return;
-    // Remove existing
-    Object.keys(pdfLayerRefs.current).forEach(id => {
-      try { pdfLayerRefs.current[id].remove(); } catch (_) {}
-    });
-    pdfLayerRefs.current = {};
-    // Add visible overlays
-    pdfOverlays.forEach(ov => {
-      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
-      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
-        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450
-      }).addTo(map);
-      pdfLayerRefs.current[ov.id] = layer;
-    });
-    return () => {
-      Object.keys(pdfLayerRefs.current).forEach(id => {
-        try { pdfLayerRefs.current[id].remove(); } catch (_) {}
-      });
-      pdfLayerRefs.current = {};
-    };
-  }, [pdfOverlays]);
+  const { mapRef } = useLeafletMiniMap({
+    mapDivRef,
+    routePane: { name: 'pickerRoute', zIndex: 500 },
+    wps: allWps,
+    routeStyle: { opacity: 0.8, dashArray: '5,5' },
+    initialPos,
+    onMapClick: (latlng) => setPicked([latlng.lat, latlng.lng]),
+  });
+  useLeafletPdfOverlays(mapRef, pdfOverlays);
 
   useEffect(() => {
     const map = mapRef.current;

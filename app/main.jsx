@@ -12,14 +12,14 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.1911";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1911";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1911";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1911";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1911";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.1911";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1911";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1911";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.1921";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1921";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1921";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1921";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1921";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.1921";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1921";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1921";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -95,7 +95,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1911";
+const APP_VERSION = "20260517.1921";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection

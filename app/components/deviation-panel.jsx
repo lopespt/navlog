@@ -2,15 +2,14 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.1921";
 
 function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
   const dev = flight.activeDeviation || null;
   const mapDivRef = useRef(null);
-  const mapRef = useRef(null);
   const posMarkerRef = useRef(null);
   const previewLineRef = useRef(null);
   const targetMarkerRef = useRef(null);
-  const pdfLayerRefs = useRef({});
 
   const [pos, setPos] = useState(dev ? [dev.fromLat, dev.fromLon] : null);
   const [alt, setAlt] = useState(dev != null && dev.currentAlt != null ? dev.currentAlt : (flight.cruiseAlt ?? 7000));
@@ -23,58 +22,14 @@ function DeviationPanel({ flight, ac, theme, defaultTargetIdx, pdfOverlays, onAp
       && (x.cp.ata == null || (dev && dev.targetIdx === x.i))
       && (!x.cp.bypassed || (dev && dev.targetIdx === x.i)));
 
-  // Init map
-  useEffect(() => {
-    if (!window.L || !mapDivRef.current || mapRef.current) return;
-    const map = window.L.map(mapDivRef.current, { zoomControl: true, zoomSnap: 0, zoomDelta: 0.25, wheelPxPerZoomLevel: 90 });
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap', maxZoom: 18, keepBuffer: 4,
-    }).addTo(map);
-    map.createPane('devRoute');
-    map.getPane('devRoute').style.zIndex = 500;
-    map.getPane('devRoute').style.pointerEvents = 'none';
-
-    const wps = (flight.checkpoints || []).filter(cp => cp.lat != null && cp.lon != null);
-    if (wps.length >= 2) {
-      const coords = wps.map(cp => [cp.lat, cp.lon]);
-      window.L.polyline(coords, { color: '#f59e0b', weight: 2, opacity: 0.65, dashArray: '4,4', pane: 'devRoute' }).addTo(map);
-      wps.forEach(cp => {
-        const html = `<div style="background:#a855f7;border-radius:50%;width:10px;height:10px;border:2px solid #fff;box-shadow:0 1px 3px #000"></div>`;
-        const icon = window.L.divIcon({ html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
-        window.L.marker([cp.lat, cp.lon], { icon, pane: 'devRoute' }).addTo(map).bindPopup(cp.name || '');
-      });
-      map.fitBounds(window.L.latLngBounds(coords), { padding: [60,60] });
-    } else if (wps.length === 1) {
-      map.setView([wps[0].lat, wps[0].lon], 9);
-    } else {
-      map.setView([39.5, -8.0], 6);
-    }
-
-    map.on('click', (e) => setPos([e.latlng.lat, e.latlng.lng]));
-
-    mapRef.current = map;
-    const t = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
-    return () => { clearTimeout(t); map.remove(); mapRef.current = null; };
-  }, []);
-
-  // Render PDF overlays
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.L || !pdfOverlays) return;
-    Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
-    pdfLayerRefs.current = {};
-    pdfOverlays.forEach(ov => {
-      if (!ov.visible || !ov.dataUrl || !ov.bounds) return;
-      const layer = window.L.imageOverlay(ov.dataUrl, ov.bounds, {
-        opacity: ov.opacity != null ? ov.opacity : 0.7, interactive: false, zIndex: 450,
-      }).addTo(map);
-      pdfLayerRefs.current[ov.id] = layer;
-    });
-    return () => {
-      Object.keys(pdfLayerRefs.current).forEach(id => { try { pdfLayerRefs.current[id].remove(); } catch (_) {} });
-      pdfLayerRefs.current = {};
-    };
-  }, [pdfOverlays]);
+  const { mapRef } = useLeafletMiniMap({
+    mapDivRef,
+    routePane: { name: 'devRoute', zIndex: 500, pointerEvents: 'none' },
+    wps: flight.checkpoints || [],
+    routeStyle: { opacity: 0.65 },
+    onMapClick: (latlng) => setPos([latlng.lat, latlng.lng]),
+  });
+  useLeafletPdfOverlays(mapRef, pdfOverlays);
 
   // Target waypoint marker (cyan)
   useEffect(() => {
