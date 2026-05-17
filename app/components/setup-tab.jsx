@@ -5,7 +5,7 @@
 // main.jsx-scoped helpers beyond haptic, which lives in lib/feedback.js as
 // of this commit.
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plane, Plus, Trash, Wind, Upload, Download,
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,

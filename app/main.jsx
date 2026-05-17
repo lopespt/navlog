@@ -93,7 +93,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1352";
+const APP_VERSION = "20260517.1407";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
