@@ -4,7 +4,7 @@
 // module. The browser's module loader (not babel-standalone) handles dependency
 // order, so external .jsx files can be imported reliably.
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Plane, Settings, Fuel, Gauge, FolderOpen,
@@ -12,17 +12,18 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2207";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2207";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2207";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2207";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2207";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2207";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2207";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2207";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2207";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2207";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2207";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2210";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2210";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2210";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2210";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2210";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2210";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2210";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2210";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2210";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2210";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2210";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2210";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -53,7 +54,7 @@ import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.
     "affineFrom3Points", "invertAffine", "applyAffinePt",
     "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
     "airacGetCurrent", "airacSearch", "airacAirport",
-    "savePdfOverlayIdb", "getAllPdfOverlaysIdb", "getPdfHandle", "savePdfHandle",
+    "savePdfOverlayIdb", "getAllPdfOverlaysIdb", "getPdfHandle", "savePdfHandle", "deletePdfHandle",
     "userPtsAll", "userPtsPut", "userPtsDelete",
     "renderPdfToImage", "computeWarpedImage", "applyOverlayCalibration",
     "pickPdfFile", "renderPdfHiRes", "renderPdfFromHandle",
@@ -100,7 +101,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2207";
+const APP_VERSION = "20260517.2210";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -185,42 +186,30 @@ const DEFAULT_PREFS = {
 // Tokens de tema. Cada um define classes Tailwind para os elementos principais.
 // themes moved to lib/themes.js (UMD, sets window.themes).
 
-// Synchronous localStorage read so initial state is correct on the first
-// render — avoids the race where the auto-save effect overwrites the saved
-// value with the in-memory default before the async load effect resolves.
-function loadNavlogLS(key, fallback) {
-  try {
-    const r = localStorage.getItem("navlog_" + key);
-    if (r != null) return JSON.parse(r);
-  } catch (e) { _warn('loadNavlogLS:' + key, e); }
-  return fallback;
-}
+// loadNavlogLS + the store helpers moved to app/hooks/use-flight-persistence.jsx.
 
 // ================= APP =================
 function NavlogApp() {
+  // Persistência: flight, savedRoutes, prefs, fleet, pdfOverlays + pdfLoaded
+  // gate. Lógica em app/hooks/use-flight-persistence.jsx.
+  const {
+    flight, setFlight,
+    savedRoutes, setSavedRoutes,
+    prefs, setPrefs, savePrefs,
+    fleet, setFleet,
+    pdfOverlays, setPdfOverlays,
+  } = useFlightPersistence({ defaultFlight: DEFAULT_FLIGHT, defaultPrefs: DEFAULT_PREFS });
+
   const [tab, setTab] = useState("setup"); // setup | flight | fuel | log
-  const [flight, setFlight] = useState(() => {
-    const loaded = loadNavlogLS("flight", null);
-    if (!loaded) return DEFAULT_FLIGHT;
-    if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
-    return { ...DEFAULT_FLIGHT, ...loaded };
-  });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
   const [insertAfterIdx, setInsertAfterIdx] = useState(null);
   const [insertCoords, setInsertCoords] = useState(null); // [lat, lon] from map click
-  const [pdfOverlays, setPdfOverlays] = useState([]); // PDF map overlays
-  const [pdfLoaded, setPdfLoaded] = useState(false);    // gates IDB cleanup until initial load is done
   const [routesOpen, setRoutesOpen] = useState(false);
-  const [savedRoutes, setSavedRoutes] = useState(() => loadNavlogLS("routes", []));
   const [ataEditOpen, setAtaEditOpen] = useState(false);
   const [ataEditIdx, setAtaEditIdx] = useState(null);
   const [virtualAtaEditKey, setVirtualAtaEditKey] = useState(null);
   const [atdEditOpen, setAtdEditOpen] = useState(false);
-  const [prefs, setPrefs] = useState(() => {
-    const loaded = loadNavlogLS("prefs", null);
-    return loaded ? { ...DEFAULT_PREFS, ...loaded } : DEFAULT_PREFS;
-  });
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [viewMode, setViewMode] = useState("leg");
@@ -333,18 +322,7 @@ function NavlogApp() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flight.origin, flight.destination, flight.alternate]);
-  const [fleet, setFleet] = useState(() => {
-    try {
-      const saved = localStorage.getItem('navlog_fleet');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Object.keys(parsed).length > 0) return parsed;
-      }
-    } catch (e) { _warn('load fleet', e); }
-    return Object.fromEntries(
-      Object.entries(FLEET_DEFAULTS).map(([k, v]) => [k, { ...v, id: k, isBuiltIn: true }])
-    );
-  });
+  // fleet state moved to useFlightPersistence (called at top of NavlogApp).
   const [fleetOpen, setFleetOpen] = useState(false);
   const [fleetEditAircraft, setFleetEditAircraft] = useState(null); // null = closed, {} = new, {id,...} = edit
 
@@ -434,12 +412,7 @@ function NavlogApp() {
     } catch (e) { _warn('deleteRoute', e); }
   }
 
-  // ----- Preferências -----
-  function savePrefs(p) {
-    setPrefs(p);
-    try { if (window.storage) window.storage.set("prefs", JSON.stringify(p)); } catch (e) { _warn('savePrefs:storage', e); }
-    try { localStorage.setItem("navlog_prefs", JSON.stringify(p)); } catch (e) { _warn('savePrefs:localStorage', e); }
-  }
+  // savePrefs moved to useFlightPersistence (destructured at top of NavlogApp).
 
   // ----- Wake lock -----
   useEffect(() => {
@@ -504,90 +477,7 @@ function NavlogApp() {
     setImportOpen(false);
   }
 
-  // Persistência — storage do artifact + fallback localStorage
-  const store = {
-    async get(key) {
-      try {
-        if (window.storage) {
-          const r = await window.storage.get(key);
-          if (r?.value) return r.value;
-        }
-      } catch (e) { _warn('store.get:storage:' + key, e); }
-      try { return localStorage.getItem("navlog_" + key); } catch (e) { _warn('store.get:localStorage:' + key, e); }
-      return null;
-    },
-    async set(key, value) {
-      try { if (window.storage) await window.storage.set(key, value); } catch (e) { _warn('store.set:storage:' + key, e); }
-      try { localStorage.setItem("navlog_" + key, value); } catch (e) { _warn('store.set:localStorage:' + key, e); }
-    },
-  };
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await store.get("flight");
-        if (r) {
-          const loaded = JSON.parse(r);
-          // Strip legacy isAuto waypoints from previous deploy
-          if (loaded.checkpoints) loaded.checkpoints = loaded.checkpoints.filter(cp => !cp.isAuto);
-          setFlight({ ...DEFAULT_FLIGHT, ...loaded });
-        }
-        const rr = await store.get("routes");
-        if (rr) setSavedRoutes(JSON.parse(rr));
-        const pp = await store.get("prefs");
-        if (pp) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(pp) });
-        // Load PDF overlays from IndexedDB (stores warped dataUrl + bounds)
-        var idbOverlays = await getAllPdfOverlaysIdb();
-        if (idbOverlays.length > 0) {
-          // Filter to records with usable warped data + bounds.
-          var valid = idbOverlays.filter(function(r) { return r.dataUrl && r.bounds; });
-          // Sort by stored `order` ASC (bottom-to-top in z-stack); fall back to
-          // `id` (creation timestamp) for legacy records without `order`. Mixed
-          // datasets (some new, some legacy) get re-normalized below so values
-          // can't end up comparing 0..N against billion-scale timestamps.
-          valid.sort(function(a, b) {
-            var ao = (a.order != null) ? a.order : a.id;
-            var bo = (b.order != null) ? b.order : b.id;
-            return ao - bo;
-          });
-          // Re-assign sequential orders so the canonical array index always
-          // matches the persisted `order` after load. Sync effect writes back.
-          setPdfOverlays(valid.map(function(o, i) { return Object.assign({}, o, { order: i }); }));
-        }
-      } catch (e) { _warn('initial load (flight/routes/prefs/overlays)', e); }
-      // Mark the initial load as complete so the cleanup effect can run safely.
-      setPdfLoaded(true);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!pdfLoaded) return; // skip until async load completes — avoids overwriting artifact storage with the in-memory default
-    store.set("flight", JSON.stringify(flight));
-  }, [flight, pdfLoaded]);
-
-  useEffect(() => {
-    if (!pdfLoaded) return;
-    store.set("routes", JSON.stringify(savedRoutes));
-  }, [savedRoutes, pdfLoaded]);
-
-  useEffect(() => {
-    // Don't sync to IDB until the initial load has populated pdfOverlays —
-    // otherwise the empty initial state would mark every stored overlay as
-    // an orphan and delete them all on app start (losing all charts).
-    if (!pdfLoaded) return;
-    pdfOverlays.forEach(function(o) {
-      savePdfOverlayIdb(o, null); // handle was saved separately on creation
-    });
-    // Clean up deleted overlays
-    var ids = new Set(pdfOverlays.map(function(o) { return o.id; }));
-    getAllPdfOverlaysIdb().then(function(all) {
-      all.forEach(function(rec) { if (!ids.has(rec.id)) deletePdfHandle(rec.id); });
-    }).catch(function() {});
-  }, [pdfOverlays, pdfLoaded]);
-
-  useEffect(() => {
-    try { localStorage.setItem('navlog_fleet', JSON.stringify(fleet)); } catch (e) { _warn('save fleet', e); }
-  }, [fleet]);
+  // Persistência (store + load + 4 auto-saves) vive em useFlightPersistence.
 
   const glowStyle = theme.glow ? "text-shadow: 0 0 8px currentColor;" : "";
 

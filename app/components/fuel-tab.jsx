@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   AlertTriangle, CircleCheckBig, Fuel,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260517.2207";
+import { Section } from "./ui-primitives.jsx?v=20260517.2210";
 
 function FuelRow({ label, time, fuel, bold, accent, theme }) {
   return (
