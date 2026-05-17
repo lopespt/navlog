@@ -11,10 +11,10 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2306";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.2310";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2306";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2310";
 function AiracBadge() {
   const theme = useTheme();
   const [info, setInfo] = useState(null);
@@ -385,8 +385,8 @@ function Stat({ label, value }) {
   );
 }
 
-function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveDown, onReorder, onImportFPL, fleet, onManageFleet, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
-  const { flight, setFlight, ac } = useFlight();
+function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onImportFPL, fleet, onManageFleet, userPoints, onAddUserPoint, onDeleteUserPoint, onRefreshFreqs }) {
+  const { flight, setFlight, ac, reorder } = useFlight();
   const { computed, liveRoute } = useDerived();
   const theme = useTheme();
   const set = (k, v) => setFlight({ ...flight, [k]: v });
@@ -416,7 +416,7 @@ function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onMoveUp, onMoveD
   function onDragHandleTouchEnd() {
     if (dragIdx != null && dragOverIdx != null && dragIdx !== dragOverIdx) {
       haptic([30]);
-      onReorder(dragIdx, dragOverIdx);
+      reorder(dragIdx, dragOverIdx);
     }
     setDragIdx(null);
     setDragOverIdx(null);
