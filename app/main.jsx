@@ -24,6 +24,58 @@ import { WaypointEditor } from "./components/waypoint-editor.jsx";
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
 
+// ── Required-globals guard ────────────────────────────────────────────────
+// Each lib/*.js UMD module calls Object.assign(window, …) to expose its
+// helpers. main.jsx and the extracted component modules reference those as
+// bare identifiers. When we extract a component AND simultaneously move a
+// helper from main.jsx into lib/planning.js (as for getDecl in this commit),
+// users on the prior SW version see a stale lib/planning.js while esm.sh
+// serves the new main.jsx — bare identifier resolution then throws deep
+// inside a React render, surfacing as "X is not defined" with a useless
+// react-dom file path.
+//
+// This guard fixes the UX: at module-init time we check every helper the
+// app uses; if anything is missing we auto-reload once (a single
+// sessionStorage flag prevents loops) so the new SW's network-first fetch
+// picks up the fresh lib/*. A persistent miss after the reload — meaning
+// the deploy itself is broken — throws a clear actionable message that
+// lands on the boot diagnostic banner.
+(function _requiredGlobalsGuard() {
+  const required = [
+    "getDecl", "nowHHMM", "parseHHMM", "formatHHMM", "formatHHMMSS",
+    "calcLeg", "gcDist", "gcTC", "gcInterpolate", "projectDest",
+    "estimatedPosition",
+    "affineFrom3Points", "invertAffine", "applyAffinePt",
+    "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
+    "airacGetCurrent", "airacSearch", "airacAirport",
+    "savePdfOverlayIdb", "getAllPdfOverlaysIdb",
+    "userPtsAll", "userPtsPut", "userPtsDelete",
+    "renderPdfToImage", "computeWarpedImage", "applyOverlayCalibration",
+    "pickPdfFile", "renderPdfHiRes", "renderPdfFromHandle",
+    "rewarpOverlayFromHandle",
+  ];
+  const missing = required.filter((n) => typeof window[n] !== "function");
+  if (missing.length === 0) {
+    // Clear any prior guard flag on a successful run so a future race is
+    // still auto-recoverable.
+    try { sessionStorage.removeItem("navlog_globals_guard"); } catch (_) {}
+    return;
+  }
+  const flagged = (function() {
+    try { return sessionStorage.getItem("navlog_globals_guard"); } catch (_) { return null; }
+  })();
+  if (!flagged) {
+    try { sessionStorage.setItem("navlog_globals_guard", "1"); } catch (_) {}
+    location.reload();
+    throw new Error("navlog: auto-reloading; missing window.* helpers: " + missing.join(", "));
+  }
+  try { sessionStorage.removeItem("navlog_globals_guard"); } catch (_) {}
+  throw new Error(
+    "navlog: lib/* still missing window helpers after reload (" + missing.join(", ") +
+    "). Check that lib/planning.js + lib/storage.js + lib/pdf.js + lib/airac.js + lib/coords.js are deployed and the SW cache for /navlog/lib/ was bypassed."
+  );
+})();
+
 // Lightweight diagnostic for non-fatal failures we still want to recover from.
 // Used in persistence paths (localStorage / window.storage / IndexedDB) and
 // JSON parsing of saved state — places where a silent catch used to make
@@ -79,7 +131,7 @@ function playAlarm(type = "waypoint") {
   else go();
 }
 
-const APP_VERSION = "20260517.1334";
+const APP_VERSION = "20260517.1338";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
