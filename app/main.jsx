@@ -4,28 +4,22 @@
 // module. The browser's module loader (not babel-standalone) handles dependency
 // order, so external .jsx files can be imported reliably.
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Plane, Settings, Fuel, ChevronRight, ChevronLeft,
-  MapPin, Wind, Clock, Gauge, AlertTriangle, CircleCheckBig,
-  Play, RotateCcw, Plus, Trash, X, Save, FolderOpen, FileText,
-  Pencil, Edit2, Eye, EyeOff, Sun, Moon, Type, Radio, BookOpen,
-  Download, Upload, ChevronDown, ChevronUp, GripVertical,
-  TrendingUp, TrendingDown, Minus, Map as MapIcon, Navigation,
-  Search, Star, ClipboardList, RefreshCw,
-  Maximize2, Minimize2
+  Plane, Settings, Fuel, Gauge, FolderOpen,
+  Eye, EyeOff, BookOpen, Map as MapIcon,
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.1841";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1841";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1841";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1841";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1841";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.1841";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1841";
-import { Section, Loading, Empty, ErrorState, TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1841";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.1911";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.1911";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.1911";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.1911";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.1911";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.1911";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.1911";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.1911";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -101,7 +95,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1841";
+const APP_VERSION = "20260517.1911";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection

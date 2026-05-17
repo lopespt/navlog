@@ -5,13 +5,13 @@
 // main.jsx-scoped helpers beyond haptic, which lives in lib/feedback.js as
 // of this commit.
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Plane, Plus, Trash, Wind, Upload, Download,
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.1841";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260517.1911";
 
 
 function AiracBadge({ theme }) {
