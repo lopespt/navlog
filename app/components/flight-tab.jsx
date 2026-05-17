@@ -9,6 +9,22 @@ import {
   ChevronRight, FileText, Minus, Pencil, TrendingDown, TrendingUp,
 } from "lucide-react";
 
+// Per-phase ETE breakdown label, e.g. "↗5 →12 ↘3 min". Returns null for
+// single-phase legs. Used by CheckpointRow's secondary line.
+function phaseETELabel(portions, totalETE) {
+  if (!portions || portions.length <= 1 || !totalETE) return null;
+  const totalDist = portions.reduce((s, p) => s + p.dist, 0);
+  if (totalDist <= 0) return null;
+  const icon = { SUBIDA: "↗", DESCIDA: "↘", CRUZEIRO: "→" };
+  return portions
+    .map((p) => {
+      const ete = Math.round((p.dist / totalDist) * totalETE);
+      return ete > 0 ? `${icon[p.phase] || "→"}${ete}` : null;
+    })
+    .filter(Boolean)
+    .join(" ") + " min";
+}
+
 function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, onDirectTo, theme, viewMode }) {
   const bypassed = cp.bypassed === true;
   const ringClass =

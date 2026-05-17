@@ -60,8 +60,12 @@ import { Section, Loading, Empty, ErrorState } from "./components/ui-primitives.
     "pickPdfFile", "renderPdfHiRes", "renderPdfFromHandle",
     "rewarpOverlayFromHandle",
     "haptic", "warmUpAudio", "playAlarm",
+    "themes",
   ];
-  const missing = required.filter((n) => typeof window[n] !== "function");
+  // Accept any non-null value — most entries are functions (lib/* exports),
+  // but `themes` is a plain data object. The lib UMD modules use
+  // Object.assign(window, …) so missing means undefined.
+  const missing = required.filter((n) => window[n] == null);
   if (missing.length === 0) {
     // Clear any prior guard flag on a successful run so a future race is
     // still auto-recoverable.
@@ -97,7 +101,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.1539";
+const APP_VERSION = "20260517.1558";
 
 // ================= AERONAVES =================
 const FLEET_DEFAULTS = {
@@ -191,21 +195,7 @@ function tocTodLabel(portions, dist) {
 }
 
 
-// Per-phase ETE breakdown label, e.g. "↗5 →12 ↘3 min"
-// Returns null for single-phase legs
-function phaseETELabel(portions, totalETE) {
-  if (!portions || portions.length <= 1 || !totalETE) return null;
-  const totalDist = portions.reduce((s, p) => s + p.dist, 0);
-  if (totalDist <= 0) return null;
-  const icon = { SUBIDA: "↗", DESCIDA: "↘", CRUZEIRO: "→" };
-  return portions
-    .map((p) => {
-      const ete = Math.round((p.dist / totalDist) * totalETE);
-      return ete > 0 ? `${icon[p.phase] || "→"}${ete}` : null;
-    })
-    .filter(Boolean)
-    .join(" ") + " min";
-}
+// phaseETELabel moved into app/components/flight-tab.jsx (its only consumer).
 
 // Mints a stable per-leg key for a virtual phase marker. Counters are mutated
 // in place ({}-bag), so two passes over the same `computed` array always
@@ -276,65 +266,7 @@ const DEFAULT_PREFS = {
 };
 
 // Tokens de tema. Cada um define classes Tailwind para os elementos principais.
-const themes = {
-  night: {
-    name: "Noite",
-    bg: "bg-zinc-950",
-    panel: "bg-zinc-900",
-    panelBorder: "border-zinc-800",
-    fg: "text-zinc-100",
-    fgMuted: "text-zinc-400",
-    fgFaint: "text-zinc-500",
-    accent: "text-amber-400",
-    accentBg: "bg-amber-500",
-    accentBgFg: "text-zinc-950",
-    accentBorder: "border-amber-500/50",
-    cyan: "text-cyan-400",
-    success: "text-green-400",
-    danger: "text-red-400",
-    inputBg: "bg-zinc-900",
-    inputBorder: "border-zinc-700",
-    glow: true,
-  },
-  day: {
-    name: "Dia",
-    bg: "bg-stone-100",
-    panel: "bg-white",
-    panelBorder: "border-stone-300",
-    fg: "text-stone-900",
-    fgMuted: "text-stone-700",
-    fgFaint: "text-stone-500",
-    accent: "text-amber-700",
-    accentBg: "bg-amber-600",
-    accentBgFg: "text-white",
-    accentBorder: "border-amber-600/60",
-    cyan: "text-sky-700",
-    success: "text-emerald-700",
-    danger: "text-red-700",
-    inputBg: "bg-white",
-    inputBorder: "border-stone-400",
-    glow: false,
-  },
-  red: {
-    name: "Vermelho (visão noturna)",
-    bg: "bg-black",
-    panel: "bg-black",
-    panelBorder: "border-red-900/40",
-    fg: "text-red-500",
-    fgMuted: "text-red-600",
-    fgFaint: "text-red-800",
-    accent: "text-red-400",
-    accentBg: "bg-red-700",
-    accentBgFg: "text-black",
-    accentBorder: "border-red-600",
-    cyan: "text-red-400",
-    success: "text-red-400",
-    danger: "text-red-300",
-    inputBg: "bg-black",
-    inputBorder: "border-red-900",
-    glow: true,
-  },
-};
+// themes moved to lib/themes.js (UMD, sets window.themes).
 
 // Synchronous localStorage read so initial state is correct on the first
 // render — avoids the race where the auto-save effect overwrites the saved
@@ -1656,6 +1588,7 @@ function NavlogApp() {
       {prefsOpen && (
         <PrefsPanel
           prefs={prefs} savePrefs={savePrefs} theme={theme}
+          appVersion={APP_VERSION}
           onClose={() => setPrefsOpen(false)}
         />
       )}

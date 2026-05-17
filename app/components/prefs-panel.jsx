@@ -7,7 +7,7 @@ import {
   Eye, Moon, Sun, Type, X,
 } from "lucide-react";
 
-function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
+function PrefsPanel({ prefs, savePrefs, theme, appVersion, onClose }) {
   return (
     <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
@@ -94,7 +94,7 @@ function PrefsPanel({ prefs, savePrefs, theme, onClose }) {
           Fechar
         </button>
         <div className={`text-center text-[10px] ${theme.fgFaint} pt-2 border-t ${theme.panelBorder}`}>
-          Navlog v{APP_VERSION}
+          Navlog v{appVersion}
         </div>
       </div>
     </div>
