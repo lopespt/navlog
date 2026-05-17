@@ -12,19 +12,19 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260517.2303";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2303";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2303";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2303";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2303";
-import { LogTab } from "./components/log-tab.jsx?v=20260517.2303";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2303";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2303";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2303";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2303";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2303";
-import { AppProvider } from "./context/app-context.jsx?v=20260517.2303";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2303";
+import { MapTab } from "./components/map-tab.jsx?v=20260517.2304";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260517.2304";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260517.2304";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260517.2304";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260517.2304";
+import { LogTab } from "./components/log-tab.jsx?v=20260517.2304";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260517.2304";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260517.2304";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260517.2304";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260517.2304";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260517.2304";
+import { AppProvider } from "./context/app-context.jsx?v=20260517.2304";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260517.2304";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -102,7 +102,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260517.2303";
+const APP_VERSION = "20260517.2304";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -580,8 +580,6 @@ function NavlogApp() {
               onImportFPL={() => setImportOpen(true)}
               fleet={fleet}
               onManageFleet={() => setFleetOpen(true)}
-              computed={computed}
-              liveRoute={liveRoute}
               userPoints={userPoints}
               onAddUserPoint={addUserPoint}
               onDeleteUserPoint={deleteUserPoint}
@@ -591,10 +589,8 @@ function NavlogApp() {
         {tab === "flight" && (
           <ErrorBoundary name="Em Voo" theme={theme}>
             <FlightTab
-              flight={flight} computed={computed} liveETAs={liveETAs} liveFuel={liveFuel}
-              liveRoute={liveRoute} nextLiveIdx={nextLiveIdx}
-              markVirtual={markVirtual} unmarkVirtual={unmarkVirtual}
-              nextIdx={nextIdx} markCrossed={markCrossed} unmark={unmark}
+              flight={flight}
+              markVirtual={markVirtual} unmarkVirtual={unmarkVirtual} markCrossed={markCrossed} unmark={unmark}
               depart={depart}
               resetFlight={resetFlight} ac={ac}
               viewMode={viewMode} setViewMode={setViewMode}
@@ -610,19 +606,18 @@ function NavlogApp() {
         )}
         {tab === "fuel" && (
           <ErrorBoundary name="Combustível" theme={theme}>
-            <FuelTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} />
+            <FuelTab flight={flight} ac={ac} />
           </ErrorBoundary>
         )}
         {tab === "log" && (
           <ErrorBoundary name="Diário" theme={theme}>
-            <LogTab flight={flight} computed={computed} liveFuel={liveFuel} ac={ac} />
+            <LogTab flight={flight} ac={ac} />
           </ErrorBoundary>
         )}
         {tab === "map" && (
           <ErrorBoundary name="Mapa" theme={theme}>
             <MapTab
-              flight={flight} computed={computed} liveRoute={liveRoute}
-              liveETAs={liveETAs} ac={ac}
+              flight={flight} ac={ac}
               pdfOverlays={pdfOverlays} setPdfOverlays={setPdfOverlays}
               initialView={mapView} onViewChange={setMapView}
               onInsertWaypoint={(afterIdx, lat, lon) => {
@@ -662,7 +657,6 @@ function NavlogApp() {
             initLat={insertCoords?.[0]}
             initLon={insertCoords?.[1]}
             ac={ac}
-            computed={computed}
             pdfOverlays={pdfOverlays}
             userPoints={userPoints}
             onAddUserPoint={addUserPoint}

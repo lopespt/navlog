@@ -8,10 +8,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2303";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260517.2304";
 
 
-import { useTheme } from "../context/app-context.jsx?v=20260517.2303";
+import { useTheme, useDerived } from "../context/app-context.jsx?v=20260517.2304";
 function PointFinderMapTab({ flight, pdfOverlays, userPoints, onConfirm, onSave }) {
   const theme = useTheme();
   const mapDivRef = useRef(null);
@@ -866,7 +866,8 @@ function StepOverride({ cp, setCp, onNext }) {
   );
 }
 
-function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, ac, computed, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+function WaypointEditor({ flight, setFlight, editingIdx, insertAfterIdx, initLat, initLon, onClose, ac, pdfOverlays, userPoints, onAddUserPoint, onDeleteUserPoint }) {
+  const { computed } = useDerived();
   const theme = useTheme();
   const [finderOpen, setFinderOpen] = useState(false);
   const isNew    = editingIdx == null;
