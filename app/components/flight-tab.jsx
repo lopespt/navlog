@@ -3,28 +3,14 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0012";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0029";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
   ChevronRight, FileText, Minus, Pencil, TrendingDown, TrendingUp,
 } from "lucide-react";
 
-// Per-phase ETE breakdown label, e.g. "↗5 →12 ↘3 min". Returns null for
-// single-phase legs. Used by CheckpointRow's secondary line.
-function phaseETELabel(portions, totalETE) {
-  if (!portions || portions.length <= 1 || !totalETE) return null;
-  const totalDist = portions.reduce((s, p) => s + p.dist, 0);
-  if (totalDist <= 0) return null;
-  const icon = { SUBIDA: "↗", DESCIDA: "↘", CRUZEIRO: "→" };
-  return portions
-    .map((p) => {
-      const ete = Math.round((p.dist / totalDist) * totalETE);
-      return ete > 0 ? `${icon[p.phase] || "→"}${ete}` : null;
-    })
-    .filter(Boolean)
-    .join(" ") + " min";
-}
+// phaseETELabel moved to lib/planning.js (consumed here + tested in Node).
 
 function CheckpointRow({ cp, index, isNext, etaPlanned, etaOriginLabel, etaLive, crossed, isOrigin, isVirtual, hasLiveBase, departDelay, onEditAta, onEditNotes, onUnmarkVirtual, viewMode }) {
   const theme = useTheme();

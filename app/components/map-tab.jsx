@@ -17,20 +17,12 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
-import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260518.0012";
-import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260518.0012";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260518.0029";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260518.0029";
 
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0012";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0029";
 // ── Map tab ───────────────────────────────────────────────────────────────────
-// Flat-earth distance from point P to segment A→B (in degrees, approximate)
-function ptSegDist(px, py, ax, ay, bx, by) {
-  var dx = bx - ax, dy = by - ay;
-  var len2 = dx*dx + dy*dy;
-  if (len2 === 0) return Math.sqrt((px-ax)*(px-ax)+(py-ay)*(py-ay));
-  var t = Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/len2));
-  var cx = ax+t*dx, cy = ay+t*dy;
-  return Math.sqrt((px-cx)*(px-cx)+(py-cy)*(py-cy));
-}
+// ptSegDist moved to lib/planning.js (pure flat-earth helper, tested in Node).
 
 function MapTab({ onInsertWaypoint, pdfOverlays, setPdfOverlays, initialView, onViewChange }) {
   const { flight } = useFlight();
