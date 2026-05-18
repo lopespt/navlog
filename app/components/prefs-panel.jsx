@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260518.0002";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260518.0012";
 import {
   Eye, Moon, Sun, Type, X, RefreshCw,
 } from "lucide-react";

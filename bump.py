@@ -8,17 +8,19 @@ sync on every deploy that touches app/main.jsx or app/components/*.jsx:
   2. &v=YYYYMMDD.HHMM cache-buster on the esm.sh import URL inside
      index.html — forces esm.sh to recompile the entry from raw.gh
   3. CACHE_NAME in sw.js (incremented integer, e.g. navlog-v30 → -v31)
-  4. ?v=YYYYMMDD.HHMM appended to every RELATIVE import inside app/main.jsx
-     and inside any app/components/*.jsx that imports a sibling. esm.sh
-     caches each unique URL separately at the edge; without the buster on
-     the relative imports, parent gets refreshed but children stay stale
-     and the app crashes with "X is not defined" inside a render.
+  4. ?v=YYYYMMDD.HHMM appended to every RELATIVE import inside any
+     .jsx under app/. esm.sh caches each unique URL separately at the
+     edge; without the buster on the relative imports, parent gets
+     refreshed but children stay stale and the app crashes with
+     "X is not defined" inside a render.
 
-Run with no args to use the current UTC timestamp. Pass an explicit version
-to override (handy for re-running a bump without the clock moving).
+Usage:
 
   python3 bump.py              # uses YYYYMMDD.HHMM in UTC right now
   python3 bump.py 20260517.1620
+  python3 bump.py --check      # verify all v-tags match APP_VERSION,
+                               # exit 1 with diagnostics if anything
+                               # is out of sync. Does not modify files.
 """
 
 import datetime
@@ -31,6 +33,16 @@ import sys
 # imports between modules served via esm.sh. Each unique URL is a separate
 # edge cache key, so the buster has to land on all of them.
 REL_IMPORT_RE = re.compile(r'(from\s+["\'])(\.\.?/[^"\'?]+?\.jsx)(\?v=[^"\']*)?(["\'])')
+
+# Any `?v=X` or `&v=X` cache-buster (in .jsx imports, index.html and sw.js).
+V_TAG_RE = re.compile(r'[?&]v=([\d.]+)')
+
+# Files that may carry v-tags. Used by both bump and verify so they stay in sync.
+def candidate_files(repo: pathlib.Path):
+    files = list((repo / "app").rglob("*.jsx"))
+    files.append(repo / "index.html")
+    files.append(repo / "sw.js")
+    return files
 
 
 def bump_files(version: str) -> None:
@@ -82,9 +94,69 @@ def bump_files(version: str) -> None:
     print(f"  sw.js CACHE_NAME + &v=")
 
 
+def read_app_version(repo: pathlib.Path) -> str | None:
+    main = repo / "app" / "main.jsx"
+    m = re.search(r'const APP_VERSION = "([\d.]+)"', main.read_text())
+    return m.group(1) if m else None
+
+
+def verify(repo: pathlib.Path, expected: str | None = None) -> list[str]:
+    """Returns a list of issues (empty = all in sync).
+
+    If `expected` is None, uses APP_VERSION from main.jsx as the source of
+    truth — this is the typical CI usage ("does the current tree have a
+    consistent version everywhere?").
+    """
+    issues: list[str] = []
+    app_version = read_app_version(repo)
+    if app_version is None:
+        issues.append("app/main.jsx: APP_VERSION constant not found")
+        return issues
+    if expected is not None and app_version != expected:
+        issues.append(f"app/main.jsx: APP_VERSION = {app_version} (expected {expected})")
+    target = expected or app_version
+
+    for f in candidate_files(repo):
+        if not f.exists():
+            continue
+        rel = f.relative_to(repo)
+        for line_no, line in enumerate(f.read_text().splitlines(), 1):
+            for m in V_TAG_RE.finditer(line):
+                if m.group(1) != target:
+                    issues.append(
+                        f"{rel}:{line_no}: v={m.group(1)} (expected {target})"
+                    )
+    return issues
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        version = sys.argv[1]
+    args = sys.argv[1:]
+    repo = pathlib.Path(__file__).resolve().parent
+
+    if "--check" in args:
+        issues = verify(repo)
+        if issues:
+            print(f"bump.py --check: found {len(issues)} mismatched v-tags:", file=sys.stderr)
+            for i in issues:
+                print(f"  ✗ {i}", file=sys.stderr)
+            sys.exit(1)
+        version = read_app_version(repo)
+        print(f"✓ all v-tags match APP_VERSION = {version}")
+        sys.exit(0)
+
+    if args:
+        version = args[0]
     else:
         version = datetime.datetime.utcnow().strftime("%Y%m%d.%H%M")
     bump_files(version)
+
+    # Auto-verify: catch the case where a future regex change skips some
+    # file silently. Better to fail loudly than to deploy a stale
+    # mid-tree that black-screens on mobile.
+    issues = verify(repo, expected=version)
+    if issues:
+        print(f"bump.py: post-bump verify found {len(issues)} mismatches:", file=sys.stderr)
+        for i in issues:
+            print(f"  ✗ {i}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  ✓ verify: all v-tags = {version}")
