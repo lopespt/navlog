@@ -2,9 +2,9 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260518.0012";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260518.0029";
 
-import { useTheme, useFlight } from "../context/app-context.jsx?v=20260518.0012";
+import { useTheme, useFlight } from "../context/app-context.jsx?v=20260518.0029";
 function DeviationPanel({ defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
   const { flight, ac } = useFlight();
   const theme = useTheme();
