@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, RefreshCw, MapPin, AlertTriangle } from "lucide-react";
 
-import { useTheme } from "../context/app-context.jsx?v=20260518.0002";
+import { useTheme } from "../context/app-context.jsx?v=20260518.0012";
 function Section({ icon, title, children, collapsible, defaultOpen }) {
   const theme = useTheme();
   const [open, setOpen] = useState(defaultOpen != null ? defaultOpen : true);

@@ -8,10 +8,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260518.0002";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260518.0012";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0002";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0012";
 function PointFinderMapTab({ pdfOverlays, userPoints, onConfirm, onSave }) {
   const { flight } = useFlight();
   const theme = useTheme();
