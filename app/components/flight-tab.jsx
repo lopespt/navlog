@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260517.2358";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.0002";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -409,7 +409,15 @@ function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMo
         </div>
 
         <div className={`bg-black/30 border-2 rounded-lg px-3 py-3 text-center ${isAlert ? "border-red-500/60" : "border-cyan-500/40"}`}>
-          <div className={`text-[11px] uppercase tracking-widest ${theme.fgFaint} mb-1`}>{isAlert ? "ETA ⚠" : "ETA"}</div>
+          {/* Apenas o label de status fica em aria-live — anuncia na
+              transição normal→alerta sem repetir o ETA a cada tick. */}
+          <div
+            role="status"
+            aria-live="polite"
+            className={`text-[11px] uppercase tracking-widest ${theme.fgFaint} mb-1`}
+          >
+            {isAlert ? "ETA fora do limite" : "ETA"}
+          </div>
           <div className={`text-5xl font-black num cockpit-glow leading-none ${accent}`}>{etaStr}</div>
           {deltaMin != null && Math.abs(deltaMin) >= 1 && (
             <div className={`text-sm num mt-1 ${deltaMin > 0 ? theme.danger : theme.success}`}>
@@ -497,8 +505,13 @@ function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMo
 
       {/* Bingo fuel alert (F2): predicted arrival below legal reserve */}
       {flight.atd && bingo && bingo.isBingo && (
-        <div className="bg-red-900/40 border-2 border-red-500 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse">
-          <Fuel className="w-5 h-5 text-red-400 shrink-0" />
+        <div
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+          className="bg-red-900/40 border-2 border-red-500 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse"
+        >
+          <Fuel className="w-5 h-5 text-red-400 shrink-0" aria-hidden="true" />
           <div className="flex-1 text-xs">
             <div className={`font-bold text-red-300`}>BINGO FUEL</div>
             <div className={`num text-red-200/90`}>
