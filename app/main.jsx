@@ -12,25 +12,26 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260520.0054";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260520.0054";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260520.0054";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260520.0054";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260520.0054";
-import { LogTab } from "./components/log-tab.jsx?v=20260520.0054";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260520.0054";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260520.0054";
-import { RoutesManager } from "./components/routes-manager.jsx?v=20260520.0054";
-import { AtaEditor } from "./components/ata-editor.jsx?v=20260520.0054";
-import { NotesEditor } from "./components/notes-editor.jsx?v=20260520.0054";
-import { DeviationPanel } from "./components/deviation-panel.jsx?v=20260520.0054";
-import { FPLImporter } from "./components/fpl-importer.jsx?v=20260520.0054";
-import { FleetManager, AircraftEditor } from "./components/fleet-manager.jsx?v=20260520.0054";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260520.0054";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260520.0054";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260520.0054";
-import { AppProvider } from "./context/app-context.jsx?v=20260520.0054";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260520.0054";
+import { MapTab } from "./components/map-tab.jsx?v=20260520.0108";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260520.0108";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260520.0108";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260520.0108";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260520.0108";
+import { LogTab } from "./components/log-tab.jsx?v=20260520.0108";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260520.0108";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260520.0108";
+import { RoutesManager } from "./components/routes-manager.jsx?v=20260520.0108";
+import { AtaEditor } from "./components/ata-editor.jsx?v=20260520.0108";
+import { NotesEditor } from "./components/notes-editor.jsx?v=20260520.0108";
+import { DeviationPanel } from "./components/deviation-panel.jsx?v=20260520.0108";
+import { FPLImporter } from "./components/fpl-importer.jsx?v=20260520.0108";
+import { FleetManager, AircraftEditor } from "./components/fleet-manager.jsx?v=20260520.0108";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260520.0108";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260520.0108";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260520.0108";
+import { AppProvider } from "./context/app-context.jsx?v=20260520.0108";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260520.0108";
+import { IconButton } from "./ui/button.jsx?v=20260520.0108";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -110,7 +111,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260520.0054";
+const APP_VERSION = "20260520.0108";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
@@ -537,28 +538,23 @@ function NavlogApp() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
+            <IconButton
+              icon={prefs.wakeLock ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+              active={!!prefs.wakeLock}
               onClick={() => savePrefs({ ...prefs, wakeLock: !prefs.wakeLock })}
-              className={`p-2 ${prefs.wakeLock ? theme.accent : theme.fgMuted} active:scale-90 transition`}
               aria-label="Manter tela ligada"
               title={prefs.wakeLock ? "Tela travada ligada" : "Permitir desligar tela"}
-            >
-              {prefs.wakeLock ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-            </button>
-            <button
+            />
+            <IconButton
+              icon={<FolderOpen className="w-5 h-5" />}
               onClick={() => setRoutesOpen(true)}
-              className={`p-2 ${theme.fgMuted} hover:${theme.accent} active:scale-90 transition`}
               aria-label="Rotas salvas"
-            >
-              <FolderOpen className="w-5 h-5" />
-            </button>
-            <button
+            />
+            <IconButton
+              icon={<Settings className="w-5 h-5" />}
               onClick={() => setPrefsOpen(true)}
-              className={`p-2 ${theme.fgMuted} active:scale-90 transition`}
               aria-label="Preferências"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
+            />
             <div className="text-right leading-tight ml-1">
               <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint}`}>UTC</div>
               <LiveClock />

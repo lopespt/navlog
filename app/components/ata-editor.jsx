@@ -2,7 +2,8 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 import {
   ChevronLeft, Clock, X,
 } from "lucide-react";
@@ -191,32 +192,17 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
 
         {/* Ações */}
         <div className="space-y-2 pt-1">
-          {/* Confirmar — destaque máximo */}
-          <button
-            disabled={!valid}
-            onClick={() => onSave(digitsToHHMMSS(digits))}
-            className={`w-full ${theme.accentBg} disabled:opacity-40 ${theme.accentBgFg} rounded-xl py-4 font-bold text-lg active:scale-95 transition-transform duration-100`}
-          >
+          <Button variant="primary" size="xl" disabled={!valid} onClick={() => onSave(digitsToHHMMSS(digits))}>
             {confirmLabel ?? "Confirmar passagem"}
-          </button>
-
-          {/* Limpar — só aparece quando o ponto já foi marcado */}
+          </Button>
           {checkpoint.ata && (
-            <button
-              onClick={onClear}
-              className="w-full bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform duration-100"
-            >
+            <Button variant="danger" size="md" onClick={onClear}>
               <X className="w-4 h-4" /> {clearLabel ?? "Limpar passagem registrada"}
-            </button>
+            </Button>
           )}
-
-          {/* Cancelar — sempre visível, discreto */}
-          <button
-            onClick={onClose}
-            className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold active:scale-95 transition-transform duration-100`}
-          >
+          <Button variant="secondary" size="md" onClick={onClose}>
             Cancelar
-          </button>
+          </Button>
         </div>
 
       </div>

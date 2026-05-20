@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from "react";
 
 
 
-import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
 // PDF overlay helpers (renderPdfToImage, computeWarpedImage,
 // applyOverlayCalibration, rewarpOverlayFromHandle, rewarpOverlayFromFile,
 // pickPdfFile, renderPdfHiRes, renderPdfFromHandle) are defined in lib/pdf.js

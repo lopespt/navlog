@@ -3,7 +3,8 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -456,11 +457,9 @@ function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMo
               <div className={`text-2xl font-black ${theme.fg}`}>{flight.origin || computed[0]?.name || "—"}</div>
             </div>
           </div>
-          <button onClick={depart}
-            className={`w-full ${theme.accentBg} ${theme.accentBgFg} font-bold py-5 rounded-lg text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-all duration-150`}
-            style={{ minHeight: 64 }}>
+          <Button variant="primary" size="xl" onClick={depart} style={{ minHeight: 64 }}>
             <Plane className="w-5 h-5" /> Partir agora
-          </button>
+          </Button>
         </div>
       ) : flight.atd ? (
         <button onClick={onEditAtd}

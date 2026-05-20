@@ -2,7 +2,8 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 import {
   Plus, X,
 } from "lucide-react";
@@ -126,14 +127,9 @@ function AircraftEditor({ aircraft, onSave, onClose }) {
         </div>
 
         <div className={`px-4 py-3 border-t ${theme.panelBorder} shrink-0`}>
-          <button
-            onClick={() => isValid && onSave(ac)}
-            className={`w-full rounded-xl py-3 text-sm font-bold uppercase tracking-widest ${
-              isValid ? `${theme.accentBg} text-black` : 'bg-zinc-800 text-zinc-500'
-            }`}
-          >
+          <Button variant="primary" size="lg" disabled={!isValid} onClick={() => onSave(ac)} className="uppercase tracking-widest">
             Salvar aeronave
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -185,10 +181,9 @@ function FleetManager({ fleet, onEdit, onDelete, onReset, onAdd, onClose }) {
           ))}
         </div>
         <div className={`px-4 py-3 border-t ${theme.panelBorder}`}>
-          <button onClick={onAdd}
-            className={`w-full ${theme.accentBg} text-black font-bold rounded-xl py-3 text-sm uppercase tracking-widest flex items-center justify-center gap-2`}>
+          <Button variant="primary" size="lg" onClick={onAdd} className="uppercase tracking-widest">
             <Plus className="w-4 h-4" /> Nova aeronave
-          </button>
+          </Button>
         </div>
       </div>
     </div>

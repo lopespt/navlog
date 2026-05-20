@@ -2,7 +2,8 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
+import { Button, IconButton } from "../ui/button.jsx?v=20260520.0108";
 import {
   FileText, X,
 } from "lucide-react";
@@ -18,7 +19,7 @@ function NotesEditor({ checkpoint, onSave, onClose }) {
           <h3 className={`text-sm uppercase tracking-widest ${theme.accent} font-bold flex items-center gap-2`}>
             <FileText className="w-4 h-4" /> {checkpoint.name} — Notas
           </h3>
-          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+          <IconButton onClick={onClose} aria-label="Fechar" icon={<X className="w-5 h-5" />} />
         </div>
         <div className={`text-[10px] ${theme.fgFaint}`}>
           Anote frequências, QNH, instruções ATC, pista em uso ou qualquer observação relevante.
@@ -33,15 +34,13 @@ function NotesEditor({ checkpoint, onSave, onClose }) {
         />
         <div className="grid grid-cols-2 gap-2">
           {text && (
-            <button onClick={() => { setText(""); onSave(""); }}
-              className="bg-red-900/40 border border-red-800 text-red-300 rounded-xl py-3 text-sm font-bold active:scale-95">
+            <Button variant="danger" size="md" onClick={() => { setText(""); onSave(""); }}>
               Limpar nota
-            </button>
+            </Button>
           )}
-          <button onClick={() => onSave(text)}
-            className={`${text ? "" : "col-span-2"} ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-3 font-bold text-sm active:scale-95`}>
+          <Button variant="primary" size="md" className={text ? "" : "col-span-2"} onClick={() => onSave(text)}>
             Salvar
-          </button>
+          </Button>
         </div>
       </div>
     </div>

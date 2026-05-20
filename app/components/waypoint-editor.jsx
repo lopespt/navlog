@@ -8,10 +8,11 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260520.0054";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260520.0108";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 function PointFinderMapTab({ pdfOverlays, userPoints, onConfirm, onSave }) {
   const { flight } = useFlight();
   const theme = useTheme();
@@ -856,12 +857,9 @@ function StepOverride({ cp, setCp, onNext }) {
         </button>
       )}
 
-      <button
-        onClick={() => { apply(); onNext(); }}
-        className={`w-full ${theme.accentBg} ${theme.accentBgFg} rounded-xl py-4 font-bold text-base active:scale-95 transition-transform duration-100`}
-      >
+      <Button variant="primary" size="xl" onClick={() => { apply(); onNext(); }}>
         {hasAny ? "Confirmar overrides →" : "Sem overrides →"}
-      </button>
+      </Button>
     </div>
   );
 }
