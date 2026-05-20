@@ -3,7 +3,8 @@
 // imports below match every JSX element + bare-identifier call.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 import {
   Eye, Moon, Sun, Type, X, RefreshCw,
 } from "lucide-react";
@@ -125,10 +126,9 @@ function PrefsPanel({ appVersion, onClose }) {
           </label>
         </div>
 
-        <button onClick={onClose}
-          className={`w-full ${theme.panel} border ${theme.panelBorder} ${theme.fgMuted} rounded-xl py-3 text-sm font-bold`}>
+        <Button variant="secondary" size="md" onClick={onClose}>
           Fechar
-        </button>
+        </Button>
         <div className={`pt-2 border-t ${theme.panelBorder} flex items-center justify-between gap-3`}>
           <div className={`text-[10px] ${theme.fgFaint}`}>
             Navlog v{appVersion}

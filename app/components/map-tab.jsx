@@ -17,10 +17,10 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Map as MapIcon } from "lucide-react";
-import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260520.0054";
-import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260520.0054";
+import { PdfGeoreferencer } from "./pdf-georeferencer.jsx?v=20260520.0108";
+import { PdfLayersPanel } from "./pdf-layers-panel.jsx?v=20260520.0108";
 
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0108";
 // ── Map tab ───────────────────────────────────────────────────────────────────
 // ptSegDist moved to lib/planning.js (pure flat-earth helper, tested in Node).
 

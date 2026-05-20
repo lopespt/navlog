@@ -2,9 +2,10 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260520.0054";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260520.0108";
 
-import { useTheme, useFlight } from "../context/app-context.jsx?v=20260520.0054";
+import { useTheme, useFlight } from "../context/app-context.jsx?v=20260520.0108";
+import { Button } from "../ui/button.jsx?v=20260520.0108";
 function DeviationPanel({ defaultTargetIdx, pdfOverlays, onApply, onClear, onClose }) {
   const { flight, ac } = useFlight();
   const theme = useTheme();
@@ -150,15 +151,9 @@ function DeviationPanel({ defaultTargetIdx, pdfOverlays, onApply, onClear, onClo
             {String(pMC).padStart(3, '0')}°M · {pDist.toFixed(1)} NM · {pETE.toFixed(1)} min · ETA {formatHHMM(pETA)}
           </div>
         )}
-        <button onClick={handleApply}
-          disabled={pos == null || targetIdx == null}
-          className={`w-full py-3 rounded-xl font-bold text-base ${
-            pos != null && targetIdx != null
-              ? `${theme.accentBg} ${theme.accentBgFg ?? 'text-black'}`
-              : `${theme.panel} ${theme.fgFaint} opacity-40`
-          }`}>
+        <Button variant="primary" size="lg" disabled={pos == null || targetIdx == null} onClick={handleApply}>
           {dev ? "Atualizar desvio" : "Aplicar desvio"}
-        </button>
+        </Button>
       </div>
     </div>
   );
