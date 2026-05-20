@@ -2,8 +2,9 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
-import { Button, IconButton } from "../ui/button.jsx?v=20260520.0108";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0128";
+import { Button, IconButton } from "../ui/button.jsx?v=20260520.0128";
+import { TextArea } from "../ui/text-field.jsx?v=20260520.0128";
 import {
   X,
 } from "lucide-react";
@@ -23,11 +24,12 @@ function FPLImporter({ onImport, onClose }) {
           Cole o campo 15 do FPL ICAO (ou só a sequência de waypoints).
           O app extrai os fixos e adiciona à rota — você ajusta TC e distância depois.
         </div>
-        <textarea
+        <TextArea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={setText}
           placeholder="Ex: DCT EMBOI UZ23 RIPLI DCT TOD"
-          className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded h-24 num focus:${theme.accentBorder} focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
+          rows={4}
+          numeric
         />
         <Button variant="primary" size="md" disabled={!text.trim()} onClick={() => onImport(text)}>
           Importar
