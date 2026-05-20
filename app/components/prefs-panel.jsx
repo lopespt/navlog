@@ -3,11 +3,12 @@
 // imports below match every JSX element + bare-identifier call.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0128";
-import { Button, IconButton } from "../ui/button.jsx?v=20260520.0128";
-import { ToggleRow } from "../ui/text-field.jsx?v=20260520.0128";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.1003";
+import { Button } from "../ui/button.jsx?v=20260520.1003";
+import { ToggleRow } from "../ui/text-field.jsx?v=20260520.1003";
+import { BottomSheet } from "../ui/bottom-sheet.jsx?v=20260520.1003";
 import {
-  Eye, Moon, Sun, Type, X, RefreshCw,
+  Eye, Moon, Sun, Type, RefreshCw,
 } from "lucide-react";
 
 // Nuclear cache reset: unregister every Service Worker for this scope,
@@ -47,14 +48,7 @@ function PrefsPanel({ appVersion, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-30 bg-black/80 flex items-end" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
-        className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-4 max-h-[90vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between">
-          <h3 className={`text-sm uppercase tracking-widest ${theme.accent} font-bold`}>Preferências</h3>
-          <IconButton onClick={onClose} aria-label="Fechar" icon={<X className="w-5 h-5" />} />
-        </div>
-
+    <BottomSheet title="Preferências" onClose={onClose} maxHeight="90vh" className="space-y-4">
         {/* Tema */}
         <div>
           <div className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} mb-2`}>Tema</div>
@@ -136,8 +130,7 @@ function PrefsPanel({ appVersion, onClose }) {
             {busy ? "Atualizando…" : "Forçar atualização"}
           </button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 

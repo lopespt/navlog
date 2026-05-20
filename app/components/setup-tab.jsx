@@ -11,11 +11,11 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260520.0128";
-import { TextField, SelectField } from "../ui/text-field.jsx?v=20260520.0128";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260520.1003";
+import { TextField, SelectField } from "../ui/text-field.jsx?v=20260520.1003";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0128";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.1003";
 function AiracBadge() {
   const theme = useTheme();
   const [info, setInfo] = useState(null);

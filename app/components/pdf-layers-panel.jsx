@@ -8,7 +8,7 @@
 import React from "react";
 
 
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0128";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.1003";
 // ── PdfLayersPanel ────────────────────────────────────────────────────────────
 function PdfLayersPanel({ overlays, setOverlays, mapZoom, onAddNew, onStartCalibration, onClose }) {
   const { prefs, savePrefs } = usePrefs();

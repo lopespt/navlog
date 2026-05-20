@@ -26,7 +26,7 @@
 // (ícone + aria-label obrigatório em vez de children).
 
 import React from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0128";
+import { useTheme } from "../context/app-context.jsx?v=20260520.1003";
 
 const SIZE = {
   sm: "py-1.5 text-xs",
