@@ -19,7 +19,7 @@
 // elimina o boilerplate `(e) => setX(e.target.value)` em cada caller.
 
 import React from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0128";
+import { useTheme } from "../context/app-context.jsx?v=20260520.1003";
 
 const SIZE = {
   sm: "px-2 py-1.5 text-xs",

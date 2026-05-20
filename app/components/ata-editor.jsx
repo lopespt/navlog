@@ -2,8 +2,9 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0128";
-import { Button } from "../ui/button.jsx?v=20260520.0128";
+import { useTheme } from "../context/app-context.jsx?v=20260520.1003";
+import { Button } from "../ui/button.jsx?v=20260520.1003";
+import { BottomSheet } from "../ui/bottom-sheet.jsx?v=20260520.1003";
 import {
   ChevronLeft, Clock, X,
 } from "lucide-react";
@@ -72,18 +73,12 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
     [7, 8, 9],
   ];
 
-  return (
-    <div className="fixed inset-0 z-30 bg-black/85 flex items-end" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
-        className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-3`}>
+  const title = checkpoint.ata
+    ? (fieldLabel ? `Editar ${fieldLabel}` : "Editar passagem")
+    : (fieldLabel ? `Registrar ${fieldLabel}` : "Marcar passagem");
 
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h3 className={`text-sm uppercase tracking-widest ${theme.accent} font-bold`}>
-            {checkpoint.ata ? (fieldLabel ? `Editar ${fieldLabel}` : "Editar passagem") : (fieldLabel ? `Registrar ${fieldLabel}` : "Marcar passagem")}
-          </h3>
-          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
-        </div>
+  return (
+    <BottomSheet title={title} onClose={onClose} dimAmount="bg-black/85">
 
         {/* Waypoint + ETAs */}
         <div className={`${theme.panel} border ${theme.panelBorder} rounded-lg px-4 py-3`}>
@@ -205,8 +200,7 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
           </Button>
         </div>
 
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 export { AtaEditor };
