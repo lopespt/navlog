@@ -383,7 +383,7 @@ export function useDerivedFlight({ flight, ac, prefs, geomagReady }) {
         if (prevAta != null) {
           const ataMin = parseHHMM(cp.ata);
           let elapsed = ataMin - prevAta;
-          if (elapsed < 0) elapsed += 1440;
+          if (elapsed < 0) elapsed += MINUTES_PER_DAY;
           fuel -= (elapsed / 60) * (cp.gphEffective || ac.gphCruise);
           return fuel;
         }

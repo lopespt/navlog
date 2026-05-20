@@ -8,10 +8,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Map as MapIcon, MapPin, Plane, Radio, Save, Search, Star, X } from "lucide-react";
-import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260518.1104";
+import { useLeafletMiniMap, useLeafletPdfOverlays } from "./leaflet-mini-map.jsx?v=20260520.0054";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.1104";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
 function PointFinderMapTab({ pdfOverlays, userPoints, onConfirm, onSave }) {
   const { flight } = useFlight();
   const theme = useTheme();
@@ -50,8 +50,8 @@ function PointFinderMapTab({ pdfOverlays, userPoints, onConfirm, onSave }) {
 
   function buildPoint() {
     if (!picked) return null;
-    const lat = Math.round(picked[0] * 1e6) / 1e6;
-    const lon = Math.round(picked[1] * 1e6) / 1e6;
+    const lat = roundCoord(picked[0]);
+    const lon = roundCoord(picked[1]);
     let n = (name || "").trim().slice(0, 10).toUpperCase();
     if (!n) {
       // Auto name: M + abs(lat°)*100 + abs(lon°)*100, e.g., M2350-4664 trimmed
@@ -181,8 +181,8 @@ function PointFinder({ userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm,
     const proj = projectDest(anchor.lat, anchor.lon, tc, dist);
     return {
       name: ((anchor.name || "PT") + Math.round(brg).toString().padStart(3, "0") + Math.round(dist)).slice(0, 10).toUpperCase(),
-      lat: Math.round(proj[0] * 1e6) / 1e6,
-      lon: Math.round(proj[1] * 1e6) / 1e6,
+      lat: roundCoord(proj[0]),
+      lon: roundCoord(proj[1]),
       kind: "computed",
       notes: (anchor.name || "") + " " + bearingMode.toUpperCase() + " " + Math.round(brg) + "° / " + dist + " NM",
       source: {
@@ -213,8 +213,8 @@ function PointFinder({ userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm,
     return {
       name: ((iAnchorA.name || "A") + "x" + (iAnchorB.name || "B")).slice(0, 10).toUpperCase(),
       kind: "computed",
-      lat: Math.round(out[0] * 1e6) / 1e6,
-      lon: Math.round(out[1] * 1e6) / 1e6,
+      lat: roundCoord(out[0]),
+      lon: roundCoord(out[1]),
       notes: (iAnchorA.name || "?") + " R" + Math.round(ba) + "° × " + (iAnchorB.name || "?") + " R" + Math.round(bb) + "°",
       source: {
         kind: "intersection",
@@ -239,8 +239,8 @@ function PointFinder({ userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm,
     return {
       name: "PT",
       kind: "custom",
-      lat: Math.round(r[0] * 1e6) / 1e6,
-      lon: Math.round(r[1] * 1e6) / 1e6,
+      lat: roundCoord(r[0]),
+      lon: roundCoord(r[1]),
       source: { kind: "manual" },
     };
   })();
@@ -253,8 +253,8 @@ function PointFinder({ userPoints, onAddUserPoint, onDeleteUserPoint, onConfirm,
     return {
       name: id,
       kind,
-      lat: Math.round(Number(lat) * 1e6) / 1e6,
-      lon: Math.round(Number(lon) * 1e6) / 1e6,
+      lat: roundCoord(Number(lat)),
+      lon: roundCoord(Number(lon)),
       alt: kind === "airport" && item.elevation_ft != null ? Number(item.elevation_ft) : null,
       notes: kind === "airport" ? [item.name, item.city].filter(Boolean).join(" · ") : (item.name || ""),
       source: { kind: "search", airacKind: kind, id: id },
@@ -941,13 +941,13 @@ function WaypointEditor({ editingIdx, insertAfterIdx, initLat, initLon, onClose,
     }
     setCp(p => {
       const n = Object.assign({}, p, { name: String(name).slice(0, 10).toUpperCase() });
-      if (lat != null && lon != null) { n.lat = Math.round(lat * 1e6) / 1e6; n.lon = Math.round(lon * 1e6) / 1e6; n._tcDistEdited = true; }
+      if (lat != null && lon != null) { n.lat = roundCoord(lat); n.lon = roundCoord(lon); n._tcDistEdited = true; }
       if (alt != null) { n.alt = alt; n.useCruiseAlt = false; }
       if (source) n.source = source;
       return n;
     });
     setAiracSugs(null);
-    if (lat != null && lon != null) applyCoords(Math.round(lat * 1e6) / 1e6, Math.round(lon * 1e6) / 1e6);
+    if (lat != null && lon != null) applyCoords(roundCoord(lat), roundCoord(lon));
   }
 
   // DDM (degrees + decimal minutes) editing state, kept in sync with cp.lat/cp.lon.
@@ -1747,8 +1747,8 @@ function WaypointEditor({ editingIdx, insertAfterIdx, initLat, initLon, onClose,
             setCp(function(p) {
               const out = Object.assign({}, p, { name: (pt.name || "").slice(0, 10).toUpperCase() });
               if (pt.lat != null && pt.lon != null) {
-                out.lat = Math.round(pt.lat * 1e6) / 1e6;
-                out.lon = Math.round(pt.lon * 1e6) / 1e6;
+                out.lat = roundCoord(pt.lat);
+                out.lon = roundCoord(pt.lon);
                 out._tcDistEdited = true;
               }
               if (pt.kind === "airport" && pt.alt != null) {

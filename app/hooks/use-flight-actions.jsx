@@ -45,7 +45,7 @@ export function useFlightActions({ flight, setFlight, ac, liveRoute, liveETAs })
       let gsActual = null;
       if (prevTime != null && cps[i].dist > 0) {
         let elapsed = ataMin - prevTime;
-        if (elapsed < 0) elapsed += 1440;
+        if (elapsed < 0) elapsed += MINUTES_PER_DAY;
         if (elapsed > 0) gsActual = (cps[i].dist / elapsed) * 60;
       }
       cps[i] = { ...cps[i], ata: ataStr, gsActual };
@@ -107,8 +107,8 @@ export function useFlightActions({ flight, setFlight, ac, liveRoute, liveETAs })
         if (!ok) return f;
       }
       var dev = {
-        fromLat: Math.round(est.lat * 1e6) / 1e6,
-        fromLon: Math.round(est.lon * 1e6) / 1e6,
+        fromLat: roundCoord(est.lat),
+        fromLon: roundCoord(est.lon),
         targetIdx: Number(targetIdx),
         currentAlt: target.alt != null ? Number(target.alt) : (f.cruiseAlt ?? 7000),
         currentTas: ac && ac.tasCruise ? ac.tasCruise : 100,

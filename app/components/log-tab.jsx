@@ -6,9 +6,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   BookOpen, Clock,
 } from "lucide-react";
-import { Section } from "./ui-primitives.jsx?v=20260518.1104";
+import { Section } from "./ui-primitives.jsx?v=20260520.0054";
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.1104";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
 function CompareRow({ label, plan, real }) {
   const theme = useTheme();
   return (
@@ -42,7 +42,7 @@ function LogTab({  }) {
   if (last && eobt != null) {
     const lastAta = parseHHMM(last.ata);
     realTotalTime = lastAta - eobt;
-    if (realTotalTime < 0) realTotalTime += 1440;
+    if (realTotalTime < 0) realTotalTime += MINUTES_PER_DAY;
     realTotalDist = last.cumDist || 0;
     const lastFuel = liveFuel[computed.indexOf(last)];
     if (lastFuel != null) realFuelUsed = fuelStart - lastFuel;

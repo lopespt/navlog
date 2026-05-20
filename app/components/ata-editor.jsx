@@ -2,7 +2,7 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260518.1104";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
 import {
   ChevronLeft, Clock, X,
 } from "lucide-react";
@@ -50,8 +50,8 @@ function AtaEditor({ checkpoint, eobt, prevAta, etaPlanned, etaLive, onSave, onC
     const ataMin = hh * 60 + mm + ss / 60;
     let d = ataMin - etaPlanned;
     // Ajusta crossing de meia-noite
-    if (d > 720) d -= 1440;
-    if (d < -720) d += 1440;
+    if (d > 720) d -= MINUTES_PER_DAY;
+    if (d < -720) d += MINUTES_PER_DAY;
     return d;
   }, [digits, valid, etaPlanned]);
 
