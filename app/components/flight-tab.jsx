@@ -3,7 +3,7 @@
 // imports below match every JSX element + bare-identifier call.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260518.1104";
+import { useTheme, usePrefs, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0054";
 import {
   AlertTriangle, CircleCheckBig, Clock, Edit2, Fuel, Maximize2, Minimize2,
   Navigation, Plane, RotateCcw, Wind,
@@ -290,7 +290,7 @@ function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMo
       const nowMin = nowHHMM();
       let bestDiff = Infinity;
       for (const m of allAtaMins) {
-        let diff = nowMin - m; if (diff < 0) diff += 1440;
+        let diff = nowMin - m; if (diff < 0) diff += MINUTES_PER_DAY;
         if (diff < bestDiff) { bestDiff = diff; latestMin = m; }
       }
     } else if (flight.atd) {
@@ -310,8 +310,8 @@ function FlightTab({ onEditAta, onEditVirtualAta, onEditAtd, onEditNotes, viewMo
   const isEtaPassed = useMemo(() => {
     if (!next || liveNext == null) return false;
     let diff = nowHHMM() - liveNext;
-    if (diff > 720) diff -= 1440;
-    if (diff < -720) diff += 1440;
+    if (diff > 720) diff -= MINUTES_PER_DAY;
+    if (diff < -720) diff += MINUTES_PER_DAY;
     return diff >= 0;
   }, [tick, next, liveNext]); // tick muda a cada segundo → reavalia
 

@@ -2,7 +2,7 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260518.1104";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0054";
 import {
   FileText, X,
 } from "lucide-react";

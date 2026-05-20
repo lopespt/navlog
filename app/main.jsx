@@ -12,25 +12,25 @@ import {
 } from "lucide-react";
 
 // Extracted React components — each loaded as a sibling ES module via esm.sh/gh.
-import { MapTab } from "./components/map-tab.jsx?v=20260518.1104";
-import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260518.1104";
-import { SetupTab } from "./components/setup-tab.jsx?v=20260518.1104";
-import { FlightTab } from "./components/flight-tab.jsx?v=20260518.1104";
-import { FuelTab } from "./components/fuel-tab.jsx?v=20260518.1104";
-import { LogTab } from "./components/log-tab.jsx?v=20260518.1104";
-import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260518.1104";
-import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260518.1104";
-import { RoutesManager } from "./components/routes-manager.jsx?v=20260518.1104";
-import { AtaEditor } from "./components/ata-editor.jsx?v=20260518.1104";
-import { NotesEditor } from "./components/notes-editor.jsx?v=20260518.1104";
-import { DeviationPanel } from "./components/deviation-panel.jsx?v=20260518.1104";
-import { FPLImporter } from "./components/fpl-importer.jsx?v=20260518.1104";
-import { FleetManager, AircraftEditor } from "./components/fleet-manager.jsx?v=20260518.1104";
-import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260518.1104";
-import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260518.1104";
-import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260518.1104";
-import { AppProvider } from "./context/app-context.jsx?v=20260518.1104";
-import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260518.1104";
+import { MapTab } from "./components/map-tab.jsx?v=20260520.0054";
+import { WaypointEditor } from "./components/waypoint-editor.jsx?v=20260520.0054";
+import { SetupTab } from "./components/setup-tab.jsx?v=20260520.0054";
+import { FlightTab } from "./components/flight-tab.jsx?v=20260520.0054";
+import { FuelTab } from "./components/fuel-tab.jsx?v=20260520.0054";
+import { LogTab } from "./components/log-tab.jsx?v=20260520.0054";
+import { PrefsPanel } from "./components/prefs-panel.jsx?v=20260520.0054";
+import { ErrorBoundary } from "./components/error-boundary.jsx?v=20260520.0054";
+import { RoutesManager } from "./components/routes-manager.jsx?v=20260520.0054";
+import { AtaEditor } from "./components/ata-editor.jsx?v=20260520.0054";
+import { NotesEditor } from "./components/notes-editor.jsx?v=20260520.0054";
+import { DeviationPanel } from "./components/deviation-panel.jsx?v=20260520.0054";
+import { FPLImporter } from "./components/fpl-importer.jsx?v=20260520.0054";
+import { FleetManager, AircraftEditor } from "./components/fleet-manager.jsx?v=20260520.0054";
+import { useDerivedFlight } from "./hooks/use-derived-flight.jsx?v=20260520.0054";
+import { useFlightActions } from "./hooks/use-flight-actions.jsx?v=20260520.0054";
+import { useFlightPersistence } from "./hooks/use-flight-persistence.jsx?v=20260520.0054";
+import { AppProvider } from "./context/app-context.jsx?v=20260520.0054";
+import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260520.0054";
 // PdfGeoreferencer + PdfLayersPanel were extracted alongside this commit but
 // are no longer referenced directly from main.jsx — only MapTab uses them,
 // and MapTab now imports them as siblings (app/components/*.jsx).
@@ -60,7 +60,8 @@ import { TabButton, LiveClock } from "./components/ui-primitives.jsx?v=20260518.
     "applyDirectTo", "clearDirectTo",
     "phaseETELabel", "ptSegDist",
     "affineFrom3Points", "invertAffine", "applyAffinePt",
-    "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg",
+    "parseCoordsString", "decDegToStr", "formatCoord", "ddmDigitsToDecDeg", "roundCoord",
+    "MINUTES_PER_DAY",
     "airacGetCurrent", "airacSearch", "airacAirport",
     "savePdfOverlayIdb", "getAllPdfOverlaysIdb", "getPdfHandle", "savePdfHandle", "deletePdfHandle",
     "userPtsAll", "userPtsPut", "userPtsDelete",
@@ -109,7 +110,7 @@ function _warn(label, err) {
 // component modules can use them as bare identifiers via window. The audio
 // context state stays encapsulated inside the lib (not on window).
 
-const APP_VERSION = "20260518.1104";
+const APP_VERSION = "20260520.0054";
 
 // ================= MATEMÁTICA =================
 // toRad/toDeg, gcDist/gcTC/gcInterpolate/projectDest/projectSource/gcIntersection
