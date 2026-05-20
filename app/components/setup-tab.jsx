@@ -11,10 +11,11 @@ import {
   Pencil, Settings, GripVertical, MapPin, FileText, Search, Star,
   Radio, RefreshCw, ClipboardList, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260520.0108";
+import { Section, Loading, Empty, ErrorState } from "./ui-primitives.jsx?v=20260520.0128";
+import { TextField, SelectField } from "../ui/text-field.jsx?v=20260520.0128";
 
 
-import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0108";
+import { useTheme, useDerived, useFlight } from "../context/app-context.jsx?v=20260520.0128";
 function AiracBadge() {
   const theme = useTheme();
   const [info, setInfo] = useState(null);
@@ -93,12 +94,9 @@ function FreqsSection({ onRefreshFreqs }) {
                     ["approach", "App/Dep"], ["ctaf", "CTAF"], ["unicom", "UNICOM"],
                     ["elev", "Elev (ft)"],
                   ].map(([k, l]) => (
-                    <div key={k}>
-                      <label className={`text-[10px] uppercase ${theme.fgFaint} block`}>{l}</label>
-                      <input className={fieldClass}
-                        value={flight.freqs?.[which]?.[k] || ""}
-                        onChange={(e) => setFreq(which, k, e.target.value)} />
-                    </div>
+                    <TextField key={k} label={l} size="sm" numeric
+                      value={flight.freqs?.[which]?.[k]}
+                      onChange={(v) => setFreq(which, k, v)} />
                   ))}
                 </div>
               </div>
@@ -268,15 +266,12 @@ function ProceduresPanel({ icao, onClose }) {
                 <label className={`text-[10px] uppercase tracking-widest ${theme.fgFaint} block mb-1`}>
                   Inserir após qual ponto da rota
                 </label>
-                <select value={insertAfterIdx}
-                  onChange={(e) => setInsertAfterIdx(Number(e.target.value))}
-                  className={`w-full ${theme.inputBg} border ${theme.inputBorder} ${theme.fg} px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/30`}>
-                  {cps.map((cp, i) => (
-                    <option key={i} value={i}>
-                      {i + 1}. {cp.name || "(sem nome)"}{cp.isOrigin ? " · origem" : i === cps.length - 1 ? " · destino" : ""}
-                    </option>
-                  ))}
-                </select>
+                <SelectField value={insertAfterIdx}
+                  onChange={(v) => setInsertAfterIdx(Number(v))}
+                  options={cps.map((cp, i) => ({
+                    value: i,
+                    label: `${i + 1}. ${cp.name || "(sem nome)"}${cp.isOrigin ? " · origem" : i === cps.length - 1 ? " · destino" : ""}`,
+                  }))} />
                 <div className={`text-[10px] ${theme.fgFaint} mt-1`}>
                   Default: {selected.typeCode === "SID" ? "depois da origem" : "antes do destino"}.
                 </div>
@@ -459,61 +454,40 @@ function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onImportFPL, flee
       {/* IDENTIFICAÇÃO */}
       <Section icon={<MapPin className="w-4 h-4" />} title="Identificação">
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={labelClass}>Callsign</label>
-            <input className={fieldClass} value={flight.callsign}
-              onChange={(e) => set("callsign", e.target.value.toUpperCase())} />
-          </div>
-          <div>
-            <label className={labelClass}>EOBT (UTC)</label>
-            <input className={fieldClass} value={flight.eobt} placeholder="13:00"
-              onChange={(e) => set("eobt", e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>Origem</label>
-            <input className={fieldClass} value={flight.origin}
-              onChange={(e) => set("origin", e.target.value.toUpperCase())}
-              onBlur={async (e) => {
-                const icao = (e.target.value || "").toUpperCase().trim();
-                const ap = await airacAirport(icao);
-                setFlight(f => syncAirportCheckpoint(f, "origin", icao, ap));
-              }}
-              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
-          </div>
-          <div>
-            <label className={labelClass}>Destino</label>
-            <input className={fieldClass} value={flight.destination}
-              onChange={(e) => set("destination", e.target.value.toUpperCase())}
-              onBlur={async (e) => {
-                const icao = (e.target.value || "").toUpperCase().trim();
-                const ap = await airacAirport(icao);
-                setFlight(f => syncAirportCheckpoint(f, "destination", icao, ap));
-              }}
-              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
-          </div>
-          <div>
-            <label className={labelClass}>Alternado</label>
-            <input className={fieldClass} value={flight.alternate}
-              onChange={(e) => set("alternate", e.target.value.toUpperCase())} />
-          </div>
-          <div>
-            <label className={labelClass}>Regras</label>
-            <select className={fieldClass} value={flight.rules}
-              onChange={(e) => set("rules", e.target.value)}>
-              <option>VFR</option><option>IFR</option>
-            </select>
-          </div>
+          <TextField label="Callsign" value={flight.callsign} thick
+            onChange={(v) => set("callsign", v.toUpperCase())} />
+          <TextField label="EOBT (UTC)" value={flight.eobt} placeholder="13:00" thick numeric
+            onChange={(v) => set("eobt", v)} />
+          <TextField label="Origem" value={flight.origin} thick
+            onChange={(v) => set("origin", v.toUpperCase())}
+            onBlur={async (e) => {
+              const icao = (e.target.value || "").toUpperCase().trim();
+              const ap = await airacAirport(icao);
+              setFlight(f => syncAirportCheckpoint(f, "origin", icao, ap));
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+          <TextField label="Destino" value={flight.destination} thick
+            onChange={(v) => set("destination", v.toUpperCase())}
+            onBlur={async (e) => {
+              const icao = (e.target.value || "").toUpperCase().trim();
+              const ap = await airacAirport(icao);
+              setFlight(f => syncAirportCheckpoint(f, "destination", icao, ap));
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+          <TextField label="Alternado" value={flight.alternate} thick
+            onChange={(v) => set("alternate", v.toUpperCase())} />
+          <SelectField label="Regras" value={flight.rules} thick
+            onChange={(v) => set("rules", v)}
+            options={[{ value: "VFR" }, { value: "IFR" }]} />
         </div>
       </Section>
 
       {/* AMBIENTE */}
       <Section icon={<Wind className="w-4 h-4" />} title="Ambiente (vento médio)">
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={labelClass}>Alt cruzeiro (ft)</label>
-            <input className={fieldClass} type="number" value={flight.cruiseAlt ?? ""}
-              onChange={(e) => setN("cruiseAlt", e.target.value)} />
-          </div>
+          <TextField label="Alt cruzeiro (ft)" type="number" thick numeric
+            value={flight.cruiseAlt}
+            onChange={(v) => setN("cruiseAlt", v)} />
           <div>
             <label className={labelClass}>Var. magnética fallback (W = neg)</label>
             {(() => {
@@ -524,30 +498,23 @@ function SetupTab({ onEditCp, onAddCp, onNewBlank, onDeleteCp, onImportFPL, flee
                     <span className={theme.fgMuted}>Auto WMM</span>
                     <span className={`num font-bold ${theme.accent}`}>{wmm >= 0 ? '+' : ''}{wmm.toFixed(1)}°</span>
                   </div>
-                : <input className={fieldClass} type="number" value={flight.variation ?? ""}
-                    onChange={(e) => setN("variation", e.target.value)} placeholder="Ex: -22" />;
+                : <TextField type="number" thick numeric value={flight.variation}
+                    onChange={(v) => setN("variation", v)} placeholder="Ex: -22" />;
             })()}
           </div>
-          <div>
-            <label className={labelClass}>Vento direção (°)</label>
-            <input className={fieldClass} type="number" value={flight.windDir ?? ""}
-              onChange={(e) => setN("windDir", e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>Vento vel. (kt)</label>
-            <input className={fieldClass} type="number" value={flight.windVel ?? ""}
-              onChange={(e) => setN("windVel", e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>ISA Dev (°C, + = mais quente)</label>
-            <input className={fieldClass} type="number" value={flight.isaDevC ?? ""}
-              onChange={(e) => setN("isaDevC", e.target.value)} placeholder="0" />
-          </div>
-          <div className="col-span-2">
-            <label className={labelClass}>Combustível inicial real (gal) — vazio = usar usable</label>
-            <input className={fieldClass} type="number" value={flight.fuelInitial ?? ""}
-              onChange={(e) => setN("fuelInitial", e.target.value)} placeholder={`${ac.fuelUsable}`} />
-          </div>
+          <TextField label="Vento direção (°)" type="number" thick numeric
+            value={flight.windDir}
+            onChange={(v) => setN("windDir", v)} />
+          <TextField label="Vento vel. (kt)" type="number" thick numeric
+            value={flight.windVel}
+            onChange={(v) => setN("windVel", v)} />
+          <TextField label="ISA Dev (°C, + = mais quente)" type="number" thick numeric
+            value={flight.isaDevC}
+            onChange={(v) => setN("isaDevC", v)} placeholder="0" />
+          <TextField label="Combustível inicial real (gal) — vazio = usar usable"
+            type="number" thick numeric className="col-span-2"
+            value={flight.fuelInitial}
+            onChange={(v) => setN("fuelInitial", v)} placeholder={`${ac.fuelUsable}`} />
         </div>
         <div className={`text-[10px] ${theme.fgFaint} mt-1`}>
           Cada waypoint pode ter vento próprio (override) — toque para editar.

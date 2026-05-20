@@ -3,8 +3,9 @@
 // imports below match every JSX element + bare-identifier call.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0108";
-import { Button } from "../ui/button.jsx?v=20260520.0108";
+import { useTheme, usePrefs } from "../context/app-context.jsx?v=20260520.0128";
+import { Button, IconButton } from "../ui/button.jsx?v=20260520.0128";
+import { ToggleRow } from "../ui/text-field.jsx?v=20260520.0128";
 import {
   Eye, Moon, Sun, Type, X, RefreshCw,
 } from "lucide-react";
@@ -51,7 +52,7 @@ function PrefsPanel({ appVersion, onClose }) {
         className={`w-full ${theme.panel} border-t ${theme.panelBorder} rounded-t-2xl p-4 space-y-4 max-h-[90vh] overflow-y-auto`}>
         <div className="flex items-center justify-between">
           <h3 className={`text-sm uppercase tracking-widest ${theme.accent} font-bold`}>Preferências</h3>
-          <button onClick={onClose} aria-label="Fechar"><X className={`w-5 h-5 ${theme.fgFaint}`} /></button>
+          <IconButton onClick={onClose} aria-label="Fechar" icon={<X className="w-5 h-5" />} />
         </div>
 
         {/* Tema */}
@@ -114,17 +115,12 @@ function PrefsPanel({ appVersion, onClose }) {
         </div>
 
         {/* Wake lock */}
-        <div>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input type="checkbox" checked={prefs.wakeLock}
-              onChange={(e) => savePrefs({ ...prefs, wakeLock: e.target.checked })}
-              className="accent-amber-500 w-5 h-5" />
-            <div>
-              <div className={`text-sm font-bold ${theme.fg}`}>Manter tela ligada</div>
-              <div className={`text-[10px] ${theme.fgFaint}`}>Impede que o S24+ apague durante o voo (Wake Lock API)</div>
-            </div>
-          </label>
-        </div>
+        <ToggleRow
+          label="Manter tela ligada"
+          hint="Impede que o S24+ apague durante o voo (Wake Lock API)"
+          checked={prefs.wakeLock}
+          onChange={(v) => savePrefs({ ...prefs, wakeLock: v })}
+        />
 
         <Button variant="secondary" size="md" onClick={onClose}>
           Fechar

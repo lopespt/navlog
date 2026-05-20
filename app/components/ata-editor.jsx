@@ -2,8 +2,8 @@
 // See CLAUDE.md "Extrair um componente" for the audit recipe used.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useTheme } from "../context/app-context.jsx?v=20260520.0108";
-import { Button } from "../ui/button.jsx?v=20260520.0108";
+import { useTheme } from "../context/app-context.jsx?v=20260520.0128";
+import { Button } from "../ui/button.jsx?v=20260520.0128";
 import {
   ChevronLeft, Clock, X,
 } from "lucide-react";
